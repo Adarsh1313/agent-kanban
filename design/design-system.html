@@ -1,0 +1,398 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent Kanban Design System</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="components.css">
+<style>
+  main { max-width: 1080px; margin: 0 auto; padding: var(--space-8) var(--space-4) 96px; }
+  h1 { font-size: 28px; font-weight: var(--weight-semibold); letter-spacing: -0.02em; margin: 0 0 var(--space-1); }
+  h2 { font-size: 18px; font-weight: var(--weight-semibold); letter-spacing: var(--tracking-tight); margin: 56px 0 var(--space-1); }
+  h3 { font-size: var(--text-body); font-weight: var(--weight-semibold); margin: var(--space-6) 0 var(--space-2); color: var(--color-text-muted); }
+  .lede { color: var(--color-text-muted); margin: 0 0 var(--space-4); max-width: 72ch; }
+  code { font-family: var(--font-mono); font-size: 12px; color: var(--color-text-muted); }
+  .head-row { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--space-4); flex-wrap: wrap; }
+  .stage { background: var(--color-bg); border: 1px solid var(--color-border); border-radius: var(--radius-panel); padding: var(--space-4); }
+  .stage.nav { background: var(--color-nav); }
+  .row { display: flex; gap: var(--space-3); flex-wrap: wrap; align-items: center; }
+  .note { color: var(--color-text-muted); font-size: var(--text-caption); margin-top: var(--space-2); }
+  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: var(--space-4); align-items: start; }
+
+  /* Lifecycle demo */
+  .mini-board { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-3); }
+  .mini-board .column { width: auto; }
+  .mini-board .col-body { min-height: 150px; }
+  .life-controls { display: flex; gap: var(--space-2); align-items: center; margin-top: var(--space-3); flex-wrap: wrap; }
+  .life-controls .grow { flex: 1; color: var(--color-text-muted); font-size: var(--text-caption); }
+  @media (max-width: 760px) { .mini-board { grid-template-columns: repeat(4, 220px); overflow-x: auto; } }
+
+  /* Swatches, type, spacing */
+  .swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: var(--space-2); }
+  .sw { border: 1px solid var(--color-border); border-radius: var(--radius-card); padding: var(--space-2); background: var(--color-surface); }
+  .sw i { display: block; height: 36px; border-radius: var(--radius-control); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-text) 10%, transparent); margin-bottom: var(--space-2); }
+  .sw b { display: block; font-size: var(--text-caption); font-weight: var(--weight-semibold); }
+  .sw small { font-size: var(--text-micro); color: var(--color-text-muted); display: block; }
+  .type-row { display: grid; grid-template-columns: 150px 1fr; gap: var(--space-4); align-items: baseline; padding: var(--space-2) 0; border-top: 1px solid var(--color-border); }
+  .type-row code { white-space: nowrap; }
+  .space-row { display: flex; align-items: center; gap: var(--space-3); padding: 4px 0; }
+  .space-row code { width: 90px; }
+  .space-row i { display: block; height: 10px; background: var(--color-ink); border-radius: 2px; }
+
+  /* Motion lab */
+  .motion-table { width: 100%; border-collapse: collapse; font-size: var(--text-caption); }
+  .motion-table th, .motion-table td { text-align: left; padding: var(--space-2); border-top: 1px solid var(--color-border); vertical-align: top; }
+  .motion-table th { color: var(--color-text-muted); font-weight: var(--weight-medium); }
+  .lane { position: relative; height: 28px; background: var(--color-control); border-radius: var(--radius-full); margin: var(--space-2) 0; }
+  .lane .ball { position: absolute; left: 4px; top: 4px; width: 20px; height: 20px; border-radius: var(--radius-full); background: var(--color-ink); }
+  .lane span { position: absolute; right: var(--space-3); top: 5px; font-size: var(--text-caption); color: var(--color-text-muted); }
+  .usage-inline { position: static; width: 100%; max-width: 360px; box-shadow: 0 0 0 1px var(--color-border); max-height: none; }
+  .states .card { cursor: default; }
+  .states .card-actions { opacity: 1; transform: none; position: static; margin-top: var(--space-2); }
+  .theme-btn { margin-left: auto; }
+</style>
+</head>
+<body>
+<main>
+  <div class="head-row">
+    <div>
+      <h1>Quiet Instrument</h1>
+      <p class="lede">Agent Kanban's design system. Almost no colour: neutrals carry the layout, and only agent states and provider logos light up. Calm and precise, closest to Linear. Everything here is live. Hover, click and tab through it. All values come from <code>tokens.css</code>, components from <code>components.css</code>.</p>
+    </div>
+    <button class="btn theme-btn" type="button" id="themeBtn"><span data-icon="moon"></span>Light / dark</button>
+  </div>
+
+  <!-- 1. Signature: card lifecycle -->
+  <h2>Signature: a chat's life on the board</h2>
+  <p class="lede">The one moment that matters most. Agent events move a card on their own: it lifts slightly, travels on a strong ease-in-out curve, and the column counts tick. Press <b>Play</b>, or step it by hand with the buttons that appear on the card.</p>
+  <div class="stage">
+    <div class="mini-board" id="life"></div>
+    <div class="life-controls">
+      <button class="btn primary" type="button" id="lifePlay"><span data-icon="play" data-size="sm"></span>Play</button>
+      <button class="btn" type="button" id="lifeReset">Reset</button>
+      <span class="grow" id="lifeCaption">Running: the activity line crossfades as each step starts.</span>
+    </div>
+  </div>
+
+  <!-- 2. Running card anatomy -->
+  <h2>Running card</h2>
+  <p class="lede">The card shows what the agent is doing right now, with a thin sweep that says "alive" without a pulsing dot. <b>Show more</b> opens the last few steps with a short stagger. Hovering reveals <b>Stop</b>. Stopping moves the card to Needs you with a Stopped badge and a Resume button. Nothing is lost, so it needs no confirmation.</p>
+  <div class="grid2">
+    <div class="stage"><div class="col-body" id="anatomy"></div></div>
+    <div class="stage states">
+      <div class="col-body" id="states"></div>
+    </div>
+  </div>
+
+  <!-- 3. Sidebar -->
+  <h2>Sidebar</h2>
+  <p class="lede">Linear's structure, made ours: workspace switcher, New chat with its shortcut, then Needs you, Board, Usage and Connect. Folders and Providers collapse. The selected item gets a soft capsule that slides, not a coloured left border. The Needs you count is the only tinted number.</p>
+  <div class="grid2">
+    <div class="stage nav" style="padding:0;height:520px;display:flex"><aside class="sidebar" id="sidebarDemo" style="width:100%"></aside></div>
+    <div>
+      <h3>Rules</h3>
+      <ul class="lede" style="padding-left:18px;margin:0">
+        <li>One capsule, sliding over <code>--duration-move</code> with <code>--ease-out</code>.</li>
+        <li>Hover tints the row; it never moves.</li>
+        <li>Provider rows show the logo and a connection dot paired with a tooltip label.</li>
+        <li>Section chevrons rotate; the list opens with a height and opacity reveal.</li>
+        <li>Keyboard: N opens New chat with no animation delay on the trigger.</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- 4. Usage -->
+  <h2>Usage limits</h2>
+  <p class="lede">The top bar shows one chip per provider: its logo, two hairline meters (5-hour on top, weekly below) and the lower of the two numbers. Clicking opens the dropdown, which scales in from the chip. Each provider expands <b>By model</b> where the provider reports per-model limits. Meters turn amber under 25% and red under 5%. The text always says the number too, so colour is never the only signal.</p>
+  <div class="grid2">
+    <div class="stage">
+      <div class="row" id="chipsDemo"></div>
+      <p class="note">Click a chip.</p>
+      <div class="popover usage-pop" id="usagePopDemo" data-state="closed" style="position:fixed"></div>
+    </div>
+    <div class="stage">
+      <div class="popover usage-pop usage-inline" data-state="open" id="usageInline"></div>
+    </div>
+  </div>
+
+  <!-- 5. Components -->
+  <h2>Components</h2>
+  <h3>Buttons</h3>
+  <div class="row">
+    <button class="btn primary" type="button"><span data-icon="plus"></span>New chat <span class="kbd">N</span></button>
+    <button class="btn" type="button">Open folder</button>
+    <button class="btn ghost" type="button">Cancel</button>
+    <button class="btn danger" type="button" id="stopDemo"><span class="label"><span data-icon="stop" data-size="sm"></span>Stop</span></button>
+    <button class="btn" type="button" disabled>Disabled</button>
+    <button class="btn icon-only ghost" type="button" aria-label="Archive chat" data-tip="Archive chat"><span data-icon="archive"></span></button>
+    <button class="btn icon-only ghost" type="button" aria-label="Close" data-tip="Close · Esc"><span data-icon="x"></span></button>
+  </div>
+  <p class="note">One primary button per view. Every button dips to 97% on press. The Stop button swaps its label through a short blur. Icon-only buttons always have a label and a tooltip: the first tooltip waits, the next ones appear instantly.</p>
+
+  <h3>Badges, state icons and logos</h3>
+  <div class="row" id="badgeRow"></div>
+
+  <h3>Feedback</h3>
+  <div class="row">
+    <button class="btn" type="button" id="toastDemo">Archive a chat (toast with Undo)</button>
+    <button class="btn" type="button" id="dialogDemo">Open New chat dialog</button>
+  </div>
+  <p class="note">Toasts rise from the bottom centre, pause while hovered or while the window is hidden, and leave faster than they arrive.</p>
+
+  <!-- 6. Motion -->
+  <h2>Motion</h2>
+  <p class="lede">The board is used all day, so motion stays functional and quick. Things animate when they appear, travel or change state, never just to decorate. Exits are always faster than entrances. Keyboard-triggered actions open instantly in spirit, so nothing waits on an animation before you can type.</p>
+  <div class="stage">
+    <div class="lane"><i class="ball" data-ease="--ease-out" data-dur="--duration-move"></i><span>ease-out · menus, enters, press</span></div>
+    <div class="lane"><i class="ball" data-ease="--ease-in-out" data-dur="--duration-move"></i><span>ease-in-out · card travel</span></div>
+    <div class="lane"><i class="ball" data-ease="--ease-drawer" data-dur="--duration-panel"></i><span>drawer · chat panel</span></div>
+    <button class="btn" type="button" id="lanePlay"><span data-icon="play" data-size="sm"></span>Compare curves</button>
+  </div>
+  <table class="motion-table" style="margin-top:var(--space-4)">
+    <thead><tr><th>Moment</th><th>Token</th><th>Value</th><th>Why</th></tr></thead>
+    <tbody>
+      <tr><td>Button press</td><td><code>--duration-press</code> · scale 0.97</td><td>140ms ease-out</td><td>Confirms the click instantly</td></tr>
+      <tr><td>Hover tint</td><td><code>--duration-hover</code></td><td>120ms ease</td><td>Seen hundreds of times a day, so barely there</td></tr>
+      <tr><td>Card travels between columns</td><td><code>--duration-move</code> · <code>--ease-in-out</code></td><td>260ms, lifted to 1.02</td><td>Shows where the chat went</td></tr>
+      <tr><td>Column count changes</td><td><code>tick</code> keyframe</td><td>180ms ease-out</td><td>Draws the eye to the change without a badge</td></tr>
+      <tr><td>Activity step changes</td><td><code>--duration-swap</code></td><td>200ms blur + 3px rise</td><td>Reads as one line updating, not two overlapping</td></tr>
+      <tr><td>Running sweep</td><td><code>--duration-sweep</code></td><td>1.4s linear loop</td><td>Constant motion is linear; quiet "alive" signal</td></tr>
+      <tr><td>Show more / less</td><td><code>--duration-expand</code> · <code>--stagger</code></td><td>220ms, 40ms per step</td><td>Steps arrive in reading order</td></tr>
+      <tr><td>Dropdowns and tooltips</td><td><code>--duration-pop</code></td><td>180ms from the trigger, scale 0.97</td><td>Origin-aware: grows out of what you clicked</td></tr>
+      <tr><td>Chat panel</td><td><code>--duration-panel</code> · <code>--ease-drawer</code></td><td>280ms in, 150ms out</td><td>Keeps the board in view behind it</td></tr>
+      <tr><td>New chat dialog</td><td><code>--duration-dialog</code></td><td>200ms, scale 0.96 → 1, centred</td><td>Modals stay centred, not trigger-anchored</td></tr>
+      <tr><td>Archive</td><td><code>--duration-expand</code></td><td>Height + opacity collapse, Undo toast</td><td>Neighbours close the gap smoothly</td></tr>
+      <tr><td>Drag</td><td><code>--lift-scale</code></td><td>Follows the pointer, 1.5° tilt; snaps back in 200ms</td><td>Feels picked up; invalid drops return home</td></tr>
+    </tbody>
+  </table>
+  <p class="note">Reduced motion: travel, spin, sweep and scale are removed. Colour and opacity changes stay, because they still explain what happened.</p>
+
+  <!-- 7. Colour, type, spacing -->
+  <h2>Colour</h2>
+  <p class="lede">Swatches read live from the tokens, so they follow light and dark.</p>
+  <div class="swatches" id="swatches"></div>
+
+  <h2>Type</h2>
+  <p class="lede">Geist for everything. Geist Mono only for file names and commands inside agent activity, never for UI labels. Numbers use tabular figures so meters and counts don't jitter.</p>
+  <div id="typeRows"></div>
+
+  <h2>Spacing and radius</h2>
+  <div class="grid2">
+    <div id="spaceRows"></div>
+    <div class="row" style="align-items:flex-start">
+      <div style="text-align:center"><div style="width:56px;height:32px;border:1px solid var(--color-border-strong);border-radius:var(--radius-badge)"></div><code>badge 4</code></div>
+      <div style="text-align:center"><div style="width:56px;height:32px;border:1px solid var(--color-border-strong);border-radius:var(--radius-control)"></div><code>control 6</code></div>
+      <div style="text-align:center"><div style="width:56px;height:32px;border:1px solid var(--color-border-strong);border-radius:var(--radius-card)"></div><code>card 8</code></div>
+      <div style="text-align:center"><div style="width:56px;height:32px;border:1px solid var(--color-border-strong);border-radius:var(--radius-panel)"></div><code>panel 12</code></div>
+    </div>
+  </div>
+</main>
+
+<!-- Dialog demo -->
+<div class="scrim" id="scrim" data-state="closed"></div>
+<div class="dialog" id="dialog" data-state="closed" role="dialog" aria-modal="true" aria-labelledby="dlgTitle">
+  <div class="dialog-head"><h2 id="dlgTitle" style="margin:0">New chat</h2><button class="btn icon-only ghost" type="button" id="dlgClose" aria-label="Close"><span data-icon="x"></span></button></div>
+  <div class="dialog-body"><textarea placeholder="What should the agent do?" aria-label="Prompt"></textarea>
+    <div class="row" id="dlgChips"></div></div>
+  <div class="dialog-foot"><span class="grow"></span><button class="btn ghost" type="button" id="dlgCancel">Cancel</button><button class="btn primary" type="button" id="dlgStart">Start chat <span class="kbd">Ctrl ↵</span></button></div>
+</div>
+
+<script src="components.js"></script>
+<script>
+const { icon, statusIcon, logo, PROVIDERS, flip, swapText, bindDisclosure, bindPopover, toast, bindTooltips, bindNav, level, toggleTheme, ms } = KB;
+const $ = s => document.querySelector(s);
+document.querySelectorAll('[data-icon]').forEach(el => { el.outerHTML = icon(el.dataset.icon, el.dataset.size || ''); });
+$('#themeBtn').addEventListener('click', toggleTheme);
+
+/* ── 1. Lifecycle ── */
+const COLS = [['running', 'Running'], ['needs', 'Needs you'], ['review', 'Review'], ['done', 'Done']];
+const STEPS = [['eye', 'Reading <span class="mono">menu.html</span>'], ['edit', 'Editing <span class="mono">menu.css</span>'], ['terminal', 'Wants to run <span class="mono">npm run build</span>'], ['terminal', 'Running <span class="mono">npm run build</span>'], ['check', 'Writing a summary']];
+const life = $('#life');
+life.innerHTML = COLS.map(([id, name]) => `<section class="column" data-col="${id}"><div class="col-head">${statusIcon(id)}<span>${name}</span><span class="count" data-count>0</span></div><div class="col-body"></div></section>`).join('');
+const lifeCard = document.createElement('article'); lifeCard.className = 'card';
+let lifeStep = 0, lifeState = 'running', timer = null;
+function lifeHtml() {
+  const s = STEPS[lifeStep];
+  return `<div class="card-title">Add the new menu to the bakery site</div>
+    <div class="card-meta">${logo('claude', 'sm')}<span>Sonnet</span><span class="sep">·</span><span>bakery-site</span></div>
+    ${lifeState === 'needs' ? `<div class="card-meta"><span class="badge needs">Wants to run a command</span></div><div class="card-meta"><button class="btn primary" type="button" data-l="allow" style="height:24px">Allow</button><button class="btn" type="button" data-l="allow" style="height:24px">Deny</button></div>` : ''}
+    ${lifeState === 'running' ? `<div class="activity"><div class="activity-line">${icon(s[0], 'sm')}<span class="now">${s[1]}</span></div><div class="sweep"></div></div>` : ''}
+    ${lifeState === 'review' ? `<div class="card-meta"><button class="btn primary" type="button" data-l="done" style="height:24px">${icon('check', 'sm')}Mark done</button></div>` : ''}`;
+}
+function lifeCounts() {
+  life.querySelectorAll('.column').forEach(c => {
+    const n = c.querySelectorAll('.card').length, el = c.querySelector('[data-count]');
+    if (el.textContent !== String(n)) { el.textContent = n; el.classList.remove('tick'); el.offsetWidth; el.classList.add('tick'); }
+  });
+}
+function lifeMove(state, caption) {
+  lifeState = state;
+  flip([lifeCard], () => { life.querySelector(`[data-col="${state}"] .col-body`).append(lifeCard); lifeCard.innerHTML = lifeHtml(); wireLife(); lifeCounts(); }, { lift: lifeCard });
+  $('#lifeCaption').textContent = caption;
+}
+function wireLife() {
+  lifeCard.querySelectorAll('[data-l]').forEach(b => b.onclick = () => b.dataset.l === 'allow' ? allow() : lifeMove('done', 'Done: only you move a card here, by button or by dragging.'));
+}
+function allow() { lifeStep = 3; lifeMove('running', 'Back to Running: you answered, so the agent carries on.'); if (playing) schedule(); }
+let playing = false;
+function advance() {
+  if (lifeState !== 'running') return;
+  if (lifeStep === 1) { lifeStep = 2; lifeMove('needs', 'Needs you: the agent asked permission. The card moves itself.'); if (playing) timer = setTimeout(allow, 1800); return; }
+  if (lifeStep >= STEPS.length - 1) { lifeMove('review', 'Review: the turn finished. Look it over, then mark it done.'); if (playing) timer = setTimeout(() => { lifeMove('done', 'Done: only you move a card here, by button or by dragging.'); playing = false; }, 1800); return; }
+  lifeStep++;
+  swapText(lifeCard.querySelector('.now'), STEPS[lifeStep][1]);
+  lifeCard.querySelector('.activity-line svg').outerHTML = icon(STEPS[lifeStep][0], 'sm');
+  if (playing) schedule();
+}
+function schedule() { clearTimeout(timer); timer = setTimeout(advance, 1400); }
+function lifeReset() {
+  clearTimeout(timer); playing = false; lifeStep = 0; lifeState = 'running';
+  life.querySelector('[data-col="running"] .col-body').append(lifeCard); lifeCard.innerHTML = lifeHtml(); wireLife(); lifeCounts();
+  $('#lifeCaption').textContent = 'Running: the activity line crossfades as each step starts.';
+}
+$('#lifePlay').onclick = () => { lifeReset(); playing = true; schedule(); };
+$('#lifeReset').onclick = lifeReset;
+lifeReset();
+
+/* ── 2. Running card anatomy + states ── */
+const anatomySteps = [['eye', 'Reading <span class="mono">src/pages/index.tsx</span>'], ['search2', 'Looking for the existing form styles'], ['edit', 'Editing <span class="mono">signup.tsx</span>'], ['edit', 'Editing <span class="mono">signup.css</span>'], ['terminal', 'Running <span class="mono">npm test</span>']];
+let aStep = 2, aStopped = false;
+function anatomy() {
+  const host = $('#anatomy');
+  const listHtml = anatomySteps.slice(0, aStep + 1).map((s, i) => `<li class="${i < aStep ? 'done' : 'current'}">${icon(i < aStep ? 'check' : s[0], 'sm')}<span>${s[1]}</span></li>`).join('');
+  host.innerHTML = aStopped
+    ? `<article class="card"><div class="card-title">Add a sign-up page to the bakery site</div><div class="card-meta">${logo('claude', 'sm')}<span>Sonnet</span><span class="sep">·</span><span>bakery-site</span><span class="sep">·</span><span>now</span></div>
+       <div class="card-meta"><span class="badge quiet">${icon('stop', 'sm')}Stopped</span></div>
+       <div class="card-actions"><button class="btn" type="button" id="aResume">${icon('resume', 'sm')}Resume</button></div></article>`
+    : `<article class="card"><div class="card-title">Add a sign-up page to the bakery site</div><div class="card-meta">${logo('claude', 'sm')}<span>Sonnet</span><span class="sep">·</span><span>bakery-site</span><span class="sep">·</span><span>2m</span></div>
+       <div class="activity"><div class="activity-line">${icon(anatomySteps[aStep][0], 'sm')}<span class="now">${anatomySteps[aStep][1]}</span>
+         <button class="more-toggle" type="button" aria-expanded="false"><span class="lbl">Show more</span>${icon('chevron-down', 'sm')}</button></div>
+         <div class="sweep"></div><div class="collapsible closed"><div><ol class="steps">${listHtml}</ol></div></div></div>
+       <div class="card-actions"><button class="btn icon-only" type="button" id="aStop" aria-label="Stop agent" data-tip="Stop agent">${icon('stop', 'sm')}</button></div></article>`;
+  const t = host.querySelector('.more-toggle'); if (t) bindDisclosure(t, host.querySelector('.collapsible'), { labels: ['Show more', 'Show less'] });
+  host.querySelector('#aStop')?.addEventListener('click', e => { e.currentTarget.disabled = true; setTimeout(() => { aStopped = true; anatomy(); }, 600); });
+  host.querySelector('#aResume')?.addEventListener('click', () => { aStopped = false; anatomy(); });
+  bindTooltips(host);
+}
+anatomy();
+setInterval(() => {
+  if (aStopped) return;
+  const host = $('#anatomy'); aStep = (aStep + 1) % anatomySteps.length;
+  host.querySelector('.activity-line svg').outerHTML = icon(anatomySteps[aStep][0], 'sm');
+  swapText(host.querySelector('.now'), anatomySteps[aStep][1]);
+  host.querySelector('.steps').innerHTML = anatomySteps.slice(0, aStep + 1).map((s, i) => `<li class="${i < aStep ? 'done' : 'current'}">${icon(i < aStep ? 'check' : s[0], 'sm')}<span>${s[1]}</span></li>`).join('');
+}, 2400);
+
+$('#states').innerHTML = [
+  ['needs', 'Fix broken links in the newsletter', 'codex', 'GPT-5 Codex', '<span class="badge needs">Wants to run a command</span>'],
+  ['needs', 'Rename the product photos', 'antigravity', 'Gemini 3 Flash', '<span class="badge needs">Asked you a question</span>'],
+  ['needs', 'Draft the holiday opening hours', 'codex', 'GPT-5 Codex', '<span class="badge danger">Limit reached · resets 4:10 pm</span>'],
+  ['review', "Summarize last month's sales sheet", 'antigravity', 'Gemini 3 Pro', '<span class="badge review">Ready for review</span>'],
+].map(([s, t, p, m, b]) => `<article class="card"><div class="card-title">${t}</div><div class="card-meta">${logo(p, 'sm')}<span>${m}</span></div><div class="card-meta">${b}</div></article>`).join('');
+
+/* ── 3. Sidebar ── */
+$('#sidebarDemo').innerHTML = `
+  <button class="workspace" type="button"><span class="mark"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="3" y="4" width="5" height="16" rx="1.5"/><rect x="10" y="4" width="5" height="11" rx="1.5"/><rect x="17" y="4" width="4" height="7" rx="1.5"/></svg></span>Agent Kanban<span class="chev">${icon('updown')}</span></button>
+  <div class="side-actions"><button class="btn new" type="button">${icon('plus')}New chat <span class="kbd">N</span></button><button class="btn icon-only ghost" type="button" aria-label="Search" data-tip="Search chats">${icon('search')}</button></div>
+  <nav class="navlist" id="navDemo"><span class="cap"></span>
+    <button class="navitem" type="button">${icon('inbox')}Needs you <span class="count attn">2</span></button>
+    <button class="navitem" type="button" aria-current="page">${icon('board')}Board <span class="count">6</span></button>
+    <button class="navitem" type="button">${icon('gauge')}Usage</button>
+    <button class="navitem" type="button">${icon('plug')}Connect</button></nav>
+  <div class="side-section"><button class="side-title" type="button" aria-expanded="true" id="fT">${icon('chevron-down', 'sm')}Folders</button>
+    <div class="collapsible" id="fL"><div>
+      <button class="navitem" type="button"><span class="folder-glyph" style="background:#b5654a">B</span>bakery-site<span class="count">4</span></button>
+      <button class="navitem" type="button"><span class="folder-glyph" style="background:#4a7ab5">N</span>newsletter<span class="count">1</span></button>
+      <button class="navitem" type="button"><span class="folder-glyph" style="background:#5a8f6a">R</span>reports<span class="count">1</span></button></div></div></div>
+  <div class="side-section"><button class="side-title" type="button" aria-expanded="true" id="pT">${icon('chevron-down', 'sm')}Providers</button>
+    <div class="collapsible" id="pL"><div>${Object.keys(PROVIDERS).map(id => `<button class="navitem" type="button" data-tip="Connected · ${PROVIDERS[id].plan} plan">${logo(id)}${PROVIDERS[id].name}<span class="dot" style="background:var(--color-success)"></span></button>`).join('')}</div></div></div>
+  <div class="side-foot"><button class="navitem" type="button">${icon('settings')}Settings</button><button class="navitem" type="button">${icon('help')}Help</button></div>`;
+bindNav($('#navDemo'));
+bindDisclosure($('#fT'), $('#fL')); bindDisclosure($('#pT'), $('#pL'));
+
+/* ── 4. Usage ── */
+const USAGE = {
+  claude: { fiveHour: { left: 72, reset: '2:40 pm' }, weekly: { left: 58, reset: 'Thu 9:00 am' }, models: [{ name: 'Opus · weekly', left: 34, reset: 'Thu' }, { name: 'Sonnet · weekly', left: 61, reset: 'Thu' }] },
+  codex: { fiveHour: { left: 31, reset: '4:10 pm' }, weekly: { left: 18, reset: 'Fri 11:00 am' }, models: [{ name: 'GPT-5 Codex · weekly', left: 18, reset: 'Fri' }] },
+  antigravity: { fiveHour: { left: 3, reset: '5:55 pm' }, weekly: { left: 74, reset: 'Mon 8:00 am' }, models: [{ name: 'Gemini 3 Pro · 5-hour', left: 3, reset: '5:55 pm' }, { name: 'Gemini 3 Flash · 5-hour', left: 96, reset: '5:55 pm' }] },
+};
+const score = id => Math.min(USAGE[id].fiveHour.left, USAGE[id].weekly.left);
+const meter = (name, w) => `<div class="meter" data-level="${level(w.left)}"><span class="name">${name}</span><span class="val">${w.left}% left</span><span class="track"><span class="fill" style="--left:${w.left / 100}"></span></span><span class="reset">Resets ${w.reset}</span></div>`;
+function usageBlocks(unavailableDemo) {
+  return `<div class="hd"><div><b>Usage left</b><br><small>Updated just now</small></div><button class="btn ghost" type="button">${icon('refresh')}Refresh</button></div>` +
+    Object.keys(PROVIDERS).map(id => {
+      const u = USAGE[id];
+      if (unavailableDemo && id === 'antigravity') return `<div class="prov-block"><div class="prov-head">${logo(id)}Antigravity <span class="plan">Pro</span><span class="state badge quiet">Limits unavailable</span></div><div class="unavailable">Antigravity didn't report its limits. Chats still work; we can't suggest it until it does.</div></div>`;
+      return `<div class="prov-block"><div class="prov-head">${logo(id)}${PROVIDERS[id].name} <span class="plan">${PROVIDERS[id].plan}</span></div>${meter('5-hour', u.fiveHour)}${meter('Weekly', u.weekly)}
+        <button class="model-toggle" type="button" aria-expanded="false">${icon('chevron-right', 'sm')}By model</button>
+        <div class="collapsible closed"><div><div class="models">${u.models.map(m => meter(m.name, m)).join('')}</div></div></div></div>`;
+    }).join('');
+}
+$('#usagePopDemo').innerHTML = usageBlocks(false);
+$('#usageInline').innerHTML = usageBlocks(true);
+document.querySelectorAll('.model-toggle').forEach(b => bindDisclosure(b, b.nextElementSibling));
+$('#chipsDemo').innerHTML = Object.keys(PROVIDERS).map(id => { const u = USAGE[id]; return `<button class="usage-chip" type="button" data-prov="${id}" aria-expanded="false" aria-label="${PROVIDERS[id].name}: ${score(id)}% left">${logo(id, 'sm')}<span class="minimeter"><i data-level="${level(u.fiveHour.left)}" style="--left:${u.fiveHour.left / 100}"></i><i data-level="${level(u.weekly.left)}" style="--left:${u.weekly.left / 100}"></i></span><span>${score(id)}%</span></button>`; }).join('');
+const pop = $('#usagePopDemo');
+$('#chipsDemo').querySelectorAll('.usage-chip').forEach(ch => bindPopover(ch, pop, { place: (t, p) => {
+  const r = t.getBoundingClientRect(); p.style.top = (r.bottom + 6) + 'px'; p.style.left = Math.max(8, Math.min(r.left, innerWidth - 348)) + 'px';
+  p.style.setProperty('--origin', `${r.left + r.width / 2 - parseFloat(p.style.left)}px top`);
+} }));
+addEventListener('scroll', () => KB.closeAll(), { passive: true });
+
+/* ── 5. Components ── */
+$('#badgeRow').innerHTML = `
+  ${statusIcon('running')}${statusIcon('needs')}${statusIcon('review')}${statusIcon('done')}
+  <span class="badge needs">Wants to run a command</span><span class="badge quiet">${icon('stop', 'sm')}Stopped</span><span class="badge danger">Limit reached</span><span class="badge review">Ready for review</span>
+  <span class="suggested">Suggested</span><span class="kbd">N</span>
+  ${['claude', 'codex', 'antigravity'].map(id => `${logo(id, 'sm')}${logo(id)}${logo(id, 'lg')}`).join('')}`;
+$('#stopDemo').addEventListener('click', e => {
+  const label = e.currentTarget.querySelector('.label'); if (label.dataset.busy) return; label.dataset.busy = 1;
+  label.classList.add('swapping');
+  setTimeout(() => { label.innerHTML = `${icon('stop', 'sm')}Stopping…`; label.classList.remove('swapping'); }, ms('--duration-swap') / 2);
+  setTimeout(() => { label.classList.add('swapping'); setTimeout(() => { label.innerHTML = `${icon('resume', 'sm')}Stopped`; label.classList.remove('swapping'); }, ms('--duration-swap') / 2); }, 900);
+  setTimeout(() => { label.innerHTML = `${icon('stop', 'sm')}Stop`; delete label.dataset.busy; }, 2600);
+});
+$('#toastDemo').onclick = () => toast('Chat archived', { label: 'Undo', run: () => toast('Chat restored') });
+const openDlg = () => { $('#scrim').dataset.state = 'open'; $('#dialog').dataset.state = 'open'; $('#dialog textarea').focus({ preventScroll: true }); };
+const closeDlg = () => { $('#scrim').dataset.state = 'closed'; $('#dialog').dataset.state = 'closed'; };
+$('#dlgChips').innerHTML = `<span class="chip-btn">${logo('claude', 'sm')}Claude <span class="suggested">Suggested</span>${icon('chevron-down', 'sm')}</span><span class="chip-btn">Sonnet${icon('chevron-down', 'sm')}</span><span class="chip-btn"><span class="folder-glyph" style="background:#b5654a">B</span>bakery-site${icon('chevron-down', 'sm')}</span>`;
+$('#dialogDemo').onclick = openDlg; ['#scrim', '#dlgClose', '#dlgCancel', '#dlgStart'].forEach(s => $(s).onclick = closeDlg);
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDlg(); });
+
+/* ── 6. Motion lab ── */
+$('#lanePlay').onclick = () => {
+  document.querySelectorAll('.lane .ball').forEach(b => {
+    const dist = b.parentElement.clientWidth - 28;
+    b.animate([{ transform: 'translateX(0)' }, { transform: `translateX(${dist}px)` }], { duration: ms(b.dataset.dur) * 3, easing: KB.css(b.dataset.ease), fill: 'forwards' });
+  });
+  setTimeout(() => document.querySelectorAll('.lane .ball').forEach(b => b.getAnimations().forEach(a => a.cancel())), 1600);
+};
+
+/* ── 7. Colour / type / spacing ── */
+const SW = [
+  ['--color-bg', 'Board background'], ['--color-nav', 'Sidebar'], ['--color-surface', 'Cards, panel, menus'], ['--color-control', 'Secondary buttons, meter track'],
+  ['--color-border', 'Card outlines'], ['--color-text', 'Primary text'], ['--color-text-muted', 'Meta, descriptions (AA)'], ['--color-ink', 'Primary button, meter fill, selected'],
+  ['--color-running', 'Running state only'], ['--color-needs', 'Needs you state, low meters'], ['--color-review', 'Review state only'], ['--color-done', 'Done state only'],
+  ['--color-danger', 'Stop, limit reached, errors'], ['--color-success', 'Connected dot, finished steps'], ['--color-focus', 'Keyboard focus ring'],
+];
+function paintSwatches() {
+  $('#swatches').innerHTML = SW.map(([v, use]) => `<div class="sw"><i style="background:var(${v})"></i><b>${v.replace('--color-', '')} · ${KB.css(v)}</b><small>${use}</small></div>`).join('');
+}
+paintSwatches();
+new MutationObserver(paintSwatches).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', paintSwatches);
+$('#typeRows').innerHTML = [
+  ['--text-heading', 20, 600, 'Nothing needs you right now'], ['--text-title', 15, 600, 'Add a sign-up page to the bakery site'], ['--text-lead', 14, 400, 'Done. I made the changes and checked them.'],
+  ['--text-body', 13, 500, 'Fix broken links in the newsletter'], ['--text-caption', 12, 400, 'GPT-5 Codex · newsletter · 6m'], ['--text-micro', 11, 500, '72% left · resets 2:40 pm'],
+].map(([v, , w, t]) => `<div class="type-row"><code>${v} · ${w}</code><div style="font-size:var(${v});font-weight:${w}">${t}</div></div>`).join('') +
+  `<div class="type-row"><code>--font-mono</code><div class="activity-line" style="font-size:var(--text-caption)">${icon('edit', 'sm')}<span>Editing <span class="mono">signup.tsx</span></span></div></div>`;
+$('#spaceRows').innerHTML = [1, 2, 3, 4, 5, 6, 8].map(n => `<div class="space-row"><code>--space-${n}</code><i style="width:var(--space-${n})"></i><small class="note" style="margin:0">${KB.css('--space-' + n)}</small></div>`).join('');
+
+bindTooltips();
+</script>
+</body>
+</html>
