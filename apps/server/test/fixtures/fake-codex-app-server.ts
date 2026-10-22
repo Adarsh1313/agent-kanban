@@ -1,5 +1,5 @@
 // Fake `codex app-server` speaking line-delimited JSON-RPC on stdio.
-// FAKE_SCENARIO: approval | fileapproval | crash | limits | hang | hanginit | tools | limit | slowturn | dieonaccount | hangaccount | hangbusy
+// FAKE_SCENARIO: approval | fileapproval | crash | limits | hang | hanginit | tools | limit | slowturn | dieonaccount | hangaccount | hangbusy | chatterhang
 // FAKE_SIGNED_OUT=1 makes account/read report no account; FAKE_RESUME_DELAY_MS delays thread/resume answers.
 import { createInterface } from 'node:readline';
 import { appendFileSync } from 'node:fs';
@@ -76,6 +76,7 @@ createInterface({ input: process.stdin }).on('line', (line) => {
     }
     case 'account/read':
       if (scenario === 'dieonaccount') process.exit(1);
+      if (scenario === 'chatterhang') { setTimeout(() => note('account/updated', {}), 60); return; } // never answers, but is not silent
       if (scenario === 'hangaccount' || scenario === 'hangbusy') return;
       return send({ id: m.id, result: { account: process.env.FAKE_SIGNED_OUT ? null : { type: 'chatgpt', email: 'a@b.c', planType: 'plus' }, requiresOpenaiAuth: true } });
     case 'turn/start': {

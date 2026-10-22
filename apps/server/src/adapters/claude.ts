@@ -76,6 +76,8 @@ export class ClaudeAdapter implements ProviderAdapter {
   private usageTimeoutMs: number;
   private pingFailures = 0; // consecutive failed pings: pace how soon the shared query is recreated
   private pingRetryAt = 0;
+  private usageBusy = new Map<Query, number>(); // in-flight calls per shared query
+  private retiring = new Set<Query>(); // replaced on purpose; closed once their in-flight calls finish
   private lastSignedIn: boolean | null = null;
 
   constructor(opts: { claudePath: string; query?: typeof sdkQuery; usageTimeoutMs?: number }) {
@@ -285,6 +287,7 @@ export class ClaudeAdapter implements ProviderAdapter {
   private async withUsageQuery<T>(fn: (q: Query) => Promise<T>, sharedOnly = false): Promise<T> {
     const { q, shared } = this.usageHandle(sharedOnly);
     let timer: NodeJS.Timeout | undefined;
+    if (shared) this.usageBusy.set(q, (this.usageBusy.get(q) ?? 0) + 1);
     try {
       const timeout = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('timeout')), this.usageTimeoutMs); });
       return await Promise.race([fn(q), timeout]);
@@ -293,12 +296,22 @@ export class ClaudeAdapter implements ProviderAdapter {
       throw e;
     } finally {
       clearTimeout(timer);
+      if (shared) {
+        const n = (this.usageBusy.get(q) ?? 1) - 1;
+        if (n > 0) this.usageBusy.set(q, n);
+        else {
+          this.usageBusy.delete(q);
+          if (this.retiring.delete(q)) { try { q.close(); } catch { /* already gone */ } }
+        }
+      }
     }
   }
 
   async readUsage(): Promise<UsageReading> {
     this.assertOpen();
     const failed: UsageReading = { provider: 'claude', status: 'error', windows: [], readAt: new Date().toISOString(), message: "Couldn't read Claude Code usage." };
+    // Inside the ping backoff window a broken shared query isn't recreated.
+    if (!this.usageQuery && !this.hasLiveQuery() && Date.now() < this.pingRetryAt) return failed;
     try {
       return await this.withUsageQuery(readClaudeUsage);
     } catch {
@@ -316,7 +329,7 @@ export class ClaudeAdapter implements ProviderAdapter {
     const manual = opts.manual === true;
     if (manual) { this.pingFailures = 0; this.pingRetryAt = 0; }
     if (!this.usageQuery && Date.now() < this.pingRetryAt) return { ok: false, signedIn: null, message: 'Claude Code is restarting.' };
-    if (manual || this.lastSignedIn === false) this.closeUsageQuery();
+    if (manual || this.lastSignedIn === false) this.closeUsageQuery(true);
     try {
       const info = await this.withUsageQuery((q) => q.accountInfo(), true);
       const signedIn = info?.tokenSource ? info.tokenSource !== 'none' : !!info?.email;
@@ -333,14 +346,26 @@ export class ClaudeAdapter implements ProviderAdapter {
   /** After Claude Code is updated: drop the shared query so the next one runs the new binary. Chats keep their own processes. */
   async restartIfIdle(): Promise<boolean> {
     if (!this.usageQuery) return false;
-    this.closeUsageQuery();
+    this.closeUsageQuery(true);
     return true;
   }
 
-  private closeUsageQuery(): void {
+  private hasLiveQuery(): boolean {
+    return [...this.live].some((c) => c.query && c.sessionRef !== null);
+  }
+
+  /** True when no chat has a turn running. */
+  isIdle(): boolean {
+    return ![...this.chats.values(), ...this.live].some((c) => c.turnRunning);
+  }
+
+  /** `graceful`: replaced on purpose, so calls already running on it finish first instead of failing. */
+  private closeUsageQuery(graceful = false): void {
     const q = this.usageQuery;
     this.usageQuery = null;
-    try { q?.close(); } catch { /* already gone */ }
+    if (!q) return;
+    if (graceful && (this.usageBusy.get(q) ?? 0) > 0) { this.retiring.add(q); return; }
+    try { q.close(); } catch { /* already gone */ }
   }
 
   async dispose(): Promise<void> {

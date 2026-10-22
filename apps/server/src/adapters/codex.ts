@@ -44,6 +44,7 @@ export class CodexAdapter implements ProviderAdapter {
   private crashed = false; // a process died on its own since the last ping noticed
   private closingByUs = new WeakSet<JsonRpcProcess>(); // deliberate recycles: not crashes
   private recycleMarked = new WeakSet<JsonRpcProcess>(); // to be replaced by the next ping or action
+  private lastSignedIn: boolean | null = null;
   private claims = new Set<string>(); // threads a startChat/sendMessage is still setting up: they survive a deliberate recycle
 
   constructor(opts: { codexPath: string; spawn?: (cmd: string, args: string[]) => JsonRpcProcess; initializeTimeoutMs?: number; pingTimeoutMs?: number; codexHome?: string }) {
@@ -337,10 +338,14 @@ export class CodexAdapter implements ProviderAdapter {
     this.retryAt = Date.now() + Math.min(1000 * 2 ** (this.failures - 1), 60_000);
   }
 
+  /** True when no turn is running on the app-server. */
+  isIdle(): boolean { return this.activeTurns.size === 0; }
+
   /** Recycle the app-server when nothing is running on it (e.g. after Codex was updated). Returns whether it did. */
   async restartIfIdle(): Promise<boolean> {
     const p = this.proc;
-    if (!p || this.starting || this.activeTurns.size > 0) return false;
+    if (!p || this.starting) return true; // nothing old to replace
+    if (this.activeTurns.size > 0) return false;
     await this.recycle(p);
     return true;
   }
@@ -374,18 +379,25 @@ export class CodexAdapter implements ProviderAdapter {
     }
     let p: JsonRpcProcess | null = null;
     let wasSuspect = false;
+    let probeAt = 0;
     try {
       p = await this.ensureProcess();
       wasSuspect = p.suspect;
+      probeAt = Date.now();
       const r = await p.request<{ account: unknown | null }>('account/read', { refreshToken: manual }, this.pingTimeoutMs);
       p.clearSuspect();
       this.failures = 0; this.retryAt = 0; this.gaveUp = false;
-      return { ok: true, signedIn: r?.account != null, ...(this._modelNote ? { message: this._modelNote } : {}) };
+      this.lastSignedIn = r?.account != null;
+      return { ok: true, signedIn: this.lastSignedIn, ...(this._modelNote ? { message: this._modelNote } : {}) };
     } catch (e) {
       this.crashed = false; // this failure is counted here, not again by the next ping
       if (p && /timed out/.test(e instanceof Error ? e.message : '')) {
         // Busy on a running turn and still sending notifications: it is alive, just not answering this probe.
-        if (this.activeTurns.size > 0 && Date.now() - p.lastNotificationAt < QUIET_MS) return { ok: true, signedIn: null };
+        // Heard from it during the probe, or busy on a running turn: alive, just not answering this probe.
+        const heardDuringProbe = p.lastNotificationAt > probeAt;
+        if (heardDuringProbe || (this.activeTurns.size > 0 && Date.now() - p.lastNotificationAt < QUIET_MS)) {
+          return { ok: true, signedIn: this.lastSignedIn };
+        }
         if (wasSuspect) await this.recycle(p);
       }
       this.noteFailure();

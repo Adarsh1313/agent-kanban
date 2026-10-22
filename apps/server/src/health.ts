@@ -56,6 +56,7 @@ export class ConnectionMonitor {
   private inFlight = new Map<ProviderId, { promise: Promise<ConnectionHealth>; manual: boolean }>();
   private versions = new Map<ProviderId, string | null>();
   private latestVersions = new Map<ProviderId, string | null>();
+  private pendingRestart = new Set<ProviderId>(); // binary changed; the helper process still has to be replaced
   private versionsDue = new Set<ProviderId>(); // providers whose installed/latest version must be re-read on the next check
   private timers: NodeJS.Timeout[] = [];
   private retryTimer: NodeJS.Timeout | null = null;
@@ -148,9 +149,11 @@ export class ConnectionMonitor {
       : Promise.resolve();
 
     const adapter = await this.opts.adapters.ensure(id, path);
-    if (adapter && previous && version && previous !== version) {
-      // The binary changed under a running helper process: restart it when nothing is running on it.
-      await adapter.restartIfIdle?.().catch(() => false);
+    if (adapter && previous && version && previous !== version) this.pendingRestart.add(id);
+    if (adapter && this.pendingRestart.has(id)) {
+      // The binary changed under a running helper process: replace it as soon as nothing is running on it (retried every check).
+      const done = adapter.restartIfIdle ? await adapter.restartIfIdle().catch(() => false) : true;
+      if (done) this.pendingRestart.delete(id);
     }
     let ping: { ok: boolean; signedIn: boolean | null; message?: string } | null = null;
     if (adapter) {

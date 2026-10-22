@@ -519,3 +519,37 @@ test('the shared usage query is drained in the background and draining stops onc
   assert.ok(yielded <= 6, `draining stopped after close (yielded ${yielded})`);
   await a.dispose();
 });
+
+test('readUsage does not recreate the shared query inside the ping backoff window', async () => {
+  mock.timers.enable({ apis: ['Date'], now: 0 });
+  const f = fake(async function* () { await never(); }, { accountInfo: () => never(), [USAGE]: async () => usageFixture });
+  const a = new ClaudeAdapter({ claudePath: 'c', query: f.query, usageTimeoutMs: 30 });
+  try {
+    assert.equal((await a.ping()).ok, false);
+    assert.equal(f.calls.length, 1);
+    const r = await a.readUsage();
+    assert.equal(r.status, 'error');
+    assert.equal(f.calls.length, 1, 'no spawn inside the window');
+    mock.timers.tick(1000);
+    assert.equal((await a.readUsage()).status, 'ok');
+    assert.equal(f.calls.length, 2);
+  } finally { mock.timers.reset(); await a.dispose(); }
+});
+
+test('a manual ping while readUsage is in flight does not break that read', async () => {
+  let release: () => void = () => {};
+  const gate = new Promise<void>((r) => { release = r; });
+  const f = fake(async function* () { await never(); }, {
+    accountInfo: async () => ({ tokenSource: 'claude.ai' }),
+    [USAGE]: async () => { await gate; return usageFixture; },
+  });
+  const a = new ClaudeAdapter({ claudePath: 'c', query: f.query });
+  const reading = a.readUsage();
+  await tick();
+  await a.ping({ manual: true }); // replaces the shared query on purpose
+  assert.equal(f.calls[0]!.closed, 0, 'the old query stays open until the read finishes');
+  release();
+  assert.equal((await reading).status, 'ok');
+  assert.equal(f.calls[0]!.closed, 1);
+  await a.dispose();
+});

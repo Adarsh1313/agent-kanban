@@ -428,7 +428,7 @@ test('manual pings ask Codex to refresh its sign-in; automatic ones do not', asy
 test('restartIfIdle replaces the app-server only when no turn is running', async () => {
   const { adapter, procs, events, waitFor } = make('hang');
   try {
-    assert.equal(await adapter.restartIfIdle(), false, 'nothing running yet');
+    assert.equal(await adapter.restartIfIdle(), true, 'nothing old to replace');
     await adapter.ping();
     assert.equal(await adapter.restartIfIdle(), true);
     assert.equal((await adapter.ping()).ok, true);
@@ -471,4 +471,27 @@ test('a crash that a usage read already recovered from is still reported once by
     assert.equal(procs.length, 2, 'no extra spawn');
     assert.equal((await adapter.ping()).ok, true, 'and healthy straight after');
   } finally { mock.timers.reset(); await adapter.dispose(); }
+});
+
+test('a busy-turn ping keeps the last known signedIn', async () => {
+  const { adapter, waitFor } = make('hangbusy', { pingTimeoutMs: 150 });
+  try {
+    (adapter as any).lastSignedIn = true; // as if an earlier ping had answered
+    await adapter.startChat({ cwd, prompt: 'hi' });
+    await waitFor((e) => e.type === 'turn.started');
+    assert.deepEqual(await adapter.ping(), { ok: true, signedIn: true });
+  } finally { await adapter.dispose(); }
+});
+
+test('a notification during the probe cancels a pending recycle', async () => {
+  const { adapter, procs } = make('chatterhang', { pingTimeoutMs: 300 });
+  try {
+    assert.equal((await adapter.ping()).ok, true); // first probe: the process chatters, so it is alive
+    procs[0]!.request('account/read', {}, 10).catch(() => {}); // a request timeout leaves it suspect
+    await new Promise((r) => setTimeout(r, 30));
+    assert.equal(procs[0]!.suspect, true);
+    const r = await adapter.ping(); // suspect + probe times out, but a notification lands during the probe
+    assert.equal(r.ok, true);
+    assert.equal(procs.length, 1, 'not recycled');
+  } finally { await adapter.dispose(); }
 });

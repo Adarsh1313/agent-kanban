@@ -287,3 +287,18 @@ test('when the installed version changes, an idle helper process is restarted', 
   await s.monitor.check();
   assert.equal(s.restarts.length, 1);
 });
+
+test('a pending restart is retried every check until the helper is idle', async () => {
+  let v = '0.163.0';
+  const outcomes = [false, false, true];
+  const s = setup({ versions: () => v, restart: async () => outcomes.shift() ?? true });
+  await s.monitor.check();
+  v = '0.164.0';
+  await s.monitor.check(); // a turn is running: not restarted yet
+  await s.monitor.check(); // still running
+  assert.equal(s.restarts.length, 2);
+  await s.monitor.check(); // turn ended: restarted
+  assert.equal(s.restarts.length, 3);
+  await s.monitor.check();
+  assert.equal(s.restarts.length, 3, 'done: not repeated');
+});

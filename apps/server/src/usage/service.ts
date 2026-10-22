@@ -3,6 +3,15 @@ import type { Store } from '../store.ts';
 
 type Reader = () => Promise<UsageReading>;
 
+const unsaved = new WeakSet<object>();
+
+/** The reading for a provider that isn't installed: shown as is, never stored as the "last numbers we had". */
+export function notInstalledReading(provider: ProviderId): UsageReading {
+  const r: UsageReading = { provider, status: 'unavailable', windows: [], readAt: new Date().toISOString(), message: `${NAMES[provider]} isn't installed.` };
+  unsaved.add(r);
+  return r;
+}
+
 const NAMES: Record<ProviderId, string> = { claude: 'Claude Code', codex: 'Codex', antigravity: 'Antigravity' };
 
 export class UsageService {
@@ -72,7 +81,7 @@ export class UsageService {
         timeout = setTimeout(() => reject(new Error('timeout')), this.timeoutMs);
       });
       reading = await Promise.race([reader(), timed]);
-      if (reading.status !== 'error') this.store.saveUsage(reading);
+      if (reading.status !== 'error' && !unsaved.has(reading)) this.store.saveUsage(reading);
     } catch {
       const prev = this.store.lastUsage(id);
       reading = {

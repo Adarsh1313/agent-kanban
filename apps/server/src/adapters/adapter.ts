@@ -18,5 +18,7 @@ export interface ProviderAdapter {
   ping(opts?: { manual?: boolean }): Promise<PingResult>;
   /** After the provider's binary was updated: replace the long-lived helper process if nothing is running on it. */
   restartIfIdle?(): Promise<boolean>;
+  /** True when no chat is running on this adapter (so it can be replaced without cutting anything off). */
+  isIdle?(): boolean;
   dispose(): Promise<void>;
 }

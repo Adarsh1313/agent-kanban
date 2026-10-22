@@ -6,10 +6,11 @@ import type { AddressInfo } from 'node:net';
 import type { ProviderId, ServerEvent, UsageReading } from '@agent-kanban/shared';
 import { Store } from './store.ts';
 import { ChatService } from './chats.ts';
-import { UsageService } from './usage/service.ts';
+import { UsageService, notInstalledReading } from './usage/service.ts';
 import { readAllHistory } from './history/index.ts';
 import { ClaudeAdapter } from './adapters/claude.ts';
 import { CodexAdapter } from './adapters/codex.ts';
+
 import { AdapterRegistry } from './adapters/registry.ts';
 import { findBinary } from './binaries.ts';
 import { createApi } from './api.ts';
@@ -34,7 +35,7 @@ const readers: Partial<Record<ProviderId, () => Promise<UsageReading>>> = {};
 for (const id of ['claude', 'codex'] as const) {
   readers[id] = async () => {
     const a = await adapters.ensure(id);
-    if (!a) throw new Error('not installed');
+    if (!a) return notInstalledReading(id);
     return a.readUsage();
   };
 }

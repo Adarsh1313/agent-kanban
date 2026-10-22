@@ -12,6 +12,7 @@ export interface AdapterSource {
 /** Adapters created lazily, so a provider installed after the server started works without a restart. */
 export class AdapterRegistry implements AdapterSource {
   private adapters = new Map<ProviderId, ProviderAdapter>();
+  private paths = new Map<ProviderId, string>();
   private creating = new Map<ProviderId, Promise<ProviderAdapter | undefined>>();
   private listeners: Array<(id: ProviderId, adapter: ProviderAdapter) => void> = [];
   private findBinary: (id: ProviderId) => Promise<string | null>;
@@ -42,16 +43,21 @@ export class AdapterRegistry implements AdapterSource {
 
   ensure(id: ProviderId, knownPath?: string): Promise<ProviderAdapter | undefined> {
     const have = this.adapters.get(id);
-    if (have) return Promise.resolve(have);
+    if (have && (!knownPath || this.paths.get(id) === undefined || this.paths.get(id) === knownPath)) return Promise.resolve(have);
     const running = this.creating.get(id);
     if (running) return running;
     const p = (async () => {
       const path = knownPath ?? (await this.findBinary(id).catch(() => null));
-      if (!path || this.disposed) return undefined;
-      const adapter = this.create(id, path);
-      if (!adapter) return undefined;
+      if (!path || this.disposed) return have;
+      // The binary moved (reinstalled elsewhere): swap adapters, but only once the old one has nothing running.
+      if (have && have.isIdle && !have.isIdle()) return have;
+      let adapter: ProviderAdapter | undefined;
+      try { adapter = this.create(id, path); } catch (e) { console.error(`Couldn't set up ${id}:`, e); return have; }
+      if (!adapter) return have;
       this.adapters.set(id, adapter);
+      this.paths.set(id, path);
       for (const fn of this.listeners) fn(id, adapter);
+      if (have) void Promise.resolve().then(() => have.dispose()).catch(() => {});
       return adapter;
     })().finally(() => { this.creating.delete(id); });
     this.creating.set(id, p);

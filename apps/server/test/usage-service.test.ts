@@ -2,7 +2,7 @@ import { test, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import type { UsageReading } from '@agent-kanban/shared';
 import { Store } from '../src/store.ts';
-import { UsageService } from '../src/usage/service.ts';
+import { UsageService, notInstalledReading } from '../src/usage/service.ts';
 
 const good = (provider: 'claude' | 'codex' | 'antigravity', used = 10): UsageReading => ({
   provider,
@@ -98,4 +98,16 @@ test('a hung reader times out and the next refresh calls it again', async (t) =>
   assert.equal(n, 2);
   t.mock.timers.tick(15_000);
   await p2;
+});
+
+test('a reading for an uninstalled provider is shown as unavailable and never stored as the last good numbers', async () => {
+  const store = new Store(':memory:');
+  const updates: UsageReading[] = [];
+  const svc = new UsageService({ readers: { codex: async () => notInstalledReading('codex') }, store, onUpdate: (r) => updates.push(r) });
+  const [r] = await svc.refresh('codex');
+  assert.equal(r!.status, 'unavailable');
+  assert.equal(r!.message, "Codex isn't installed.");
+  assert.deepEqual(r!.windows, []);
+  assert.ok(!store.lastUsage('codex'));
+  assert.equal(updates.length, 1);
 });

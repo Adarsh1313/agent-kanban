@@ -137,6 +137,7 @@ export class JsonRpcProcess {
   }
 
   private async handleServerRequest(id: number | string, method: string, params: any): Promise<void> {
+    this.lastNoteAt = Date.now(); this.timedOut = false; // a request from the server is a sign of life too
     try {
       if (!this.requestFn) throw new Error('unsupported');
       const result = await this.requestFn(method, params, id);

@@ -58,3 +58,15 @@ test('close falls back to child.kill() when taskkill exits non-zero', async () =
   assert.ok(Date.now() - t0 < 3000, 'close should not wait for the 5 s cap');
   assert.equal(exited, true);
 });
+
+test('a request from the server also counts as a sign of life', async () => {
+  const script = 'setTimeout(() => console.log(JSON.stringify({ id: 7, method: "approve", params: {} })), 300); setTimeout(() => {}, 5000)';
+  const p = new JsonRpcProcess(process.execPath, ['-e', script], { requestTimeoutMs: 50 });
+  p.onRequest(async () => ({}));
+  try {
+    await assert.rejects(p.request('anything', {}), /timed out/);
+    assert.equal(p.suspect, true);
+    await new Promise((r) => setTimeout(r, 400));
+    assert.equal(p.suspect, false);
+  } finally { await p.close(); }
+});
