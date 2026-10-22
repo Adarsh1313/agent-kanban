@@ -99,6 +99,7 @@ function updateConn(id, state) {
   card.querySelector('.conn-body').innerHTML = connBody(id);
   card.querySelector('.conn-foot').innerHTML = connFoot(id);
   wireCard_(card, id);
+  renderSidebar();
   const head = document.querySelector('#connPage .page-head .source');
   if (head) head.innerHTML = `<span class="live-dot"></span>${PIDS.filter(x => CONN[x].state === 'connected').length} of ${PIDS.length} connected`;
   document.getElementById('navConn').textContent = PIDS.filter(x => CONN[x].state === 'connected').length;
@@ -143,6 +144,7 @@ function runSignin(id) {
 function wireCard_(card, id) {
   card.querySelectorAll('[data-tg]').forEach(s => s.addEventListener('click', () => {
     const k = s.dataset.tg; CONN[id][k] = !CONN[id][k]; s.setAttribute('aria-checked', CONN[id][k]);
+    if (k === 'showChats') renderSidebar();
   }));
   card.querySelectorAll('[data-do]').forEach(b => b.addEventListener('click', e => {
     e.stopPropagation();

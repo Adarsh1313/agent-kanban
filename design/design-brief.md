@@ -126,3 +126,20 @@ UI. Most tempting for this direction, and banned:
   before launch.
 - Views switch with an 8px slide and fade (`--duration-pop`); going back slides the other way. The
   projects list staggers in only on first visit.
+
+## Revision 4: onboarding, empty board, calmer sidebar
+
+- **Recent chats, decluttered:** project names are plain muted labels (no glyph, no provider logos);
+  each chat row has one icon, its provider's logo. Only the 4 most recently active projects show,
+  sorted by activity, 3 chats each, then "All projects". Full titles on hover. Sidebar is 248px.
+  Chats from agents that aren't connected, or that the user chose to hide, don't appear.
+- **Onboarding** (full screen, 4 counted steps plus a welcome): Welcome (a tiny board where one card
+  travels, showing the idea in 5 seconds) → Connect (detects each agent; Install / Sign in inline;
+  needs at least one) → Bring in your chats (counts per agent, projects found, per-agent "Show in
+  sidebar", a plain statement of what is read) → Notifications (sample notification, desktop and
+  sound switches, "Play it") → Ready (summary, "Start your first chat" or "Go to the board").
+  Steps slide 16px on a shared axis; Back reverses the direction. Progress is a 4-segment bar.
+- **Empty board:** columns stay visible but dimmed with dashed placeholders; a card on top explains
+  what happens ("shows up in Running, then moves across the board on its own"), offers Start a chat
+  and Browse projects, and lists the 3 most recent chats from history to pick up. With no agent
+  connected, it points to Connections instead.

@@ -295,6 +295,11 @@ button { cursor: pointer; border: 0; background: none; padding: 0; }
 
 /* Recent chats grouped by project (Claude-style) */
 .proj { margin-top: 2px; }
+.proj + .proj { margin-top: var(--space-3); }
+.proj .proj-row { height: 24px; font-weight: var(--weight-medium); }
+.proj .chat-row { height: 28px; }
+.proj .chat-row .logo { opacity: .9; }
+.all-projects { display: flex; align-items: center; gap: 2px; margin-top: var(--space-2); padding-left: var(--space-2) !important; }
 .proj-row { display: flex; align-items: center; gap: var(--space-2); height: 28px; padding: 0 var(--space-2); border-radius: var(--radius-control); width: 100%; text-align: left;
   color: var(--color-text-faint); font-size: var(--text-caption); transition: background-color var(--duration-hover) var(--ease-colour), color var(--duration-hover) var(--ease-colour); }
 .proj-row .name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

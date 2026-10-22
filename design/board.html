@@ -66,7 +66,7 @@
 
     <div class="side-foot">
       <button class="navitem" type="button" id="themeBtn"><span data-icon="moon"></span>Light / dark</button>
-      <button class="navitem" type="button"><span data-icon="settings"></span>Settings</button>
+      <button class="navitem" type="button" id="settingsBtn" aria-haspopup="true" aria-expanded="false"><span data-icon="settings"></span>Settings</button>
     </div>
   </aside>
 
@@ -628,7 +628,7 @@ $('#refreshBtn').addEventListener('click', () => {
 const expandedProjects = new Set();
 function chatRow(c) {
   const st = c.column === 'running' ? statusIcon('running') : c.column === 'needs' ? `<span class="state-dot" style="width:6px;height:6px;border-radius:50%;background:var(--color-needs);flex:none" title="Needs you"></span>` : '';
-  return `<div class="chat-row" role="button" tabindex="0" data-chat="${c.id}" ${openId === c.id ? 'aria-current="true"' : ''}>${logo(c.provider, 'sm')}<span class="t">${c.title}</span>${st}
+  return `<div class="chat-row" role="button" tabindex="0" data-chat="${c.id}" title="${c.title}" ${openId === c.id ? 'aria-current="true"' : ''}>${logo(c.provider, 'sm')}<span class="t">${c.title}</span>${st}
     <button class="row-more" type="button" aria-label="More actions for ${c.title}">${icon('more', 'sm')}</button></div>`;
 }
 function renderSidebar() {
@@ -640,15 +640,23 @@ function renderSidebar() {
   const pinned = chats.filter(c => c.pinned && !c.archived);
   $('#pinnedSection').hidden = pinned.length === 0;
   $('#pinItems').innerHTML = pinned.map(chatRow).join('');
-  const visible = chats.filter(c => !c.archived && (!fp || c.provider === fp));
-  $('#recentItems').innerHTML = PROJECTS.filter(p => visible.some(c => c.project === p.id && !c.pinned)).map(p => {
-    const list = visible.filter(c => c.project === p.id && !c.pinned), open = expandedProjects.has(p.id), shown = open ? list : list.slice(0, 3);
-    return `<div class="proj"><div class="proj-row" data-proj="${p.id}" title="${p.path}">${glyph(p, 14)}<span class="name">${p.id}</span>
-        <span class="owners">${p.owners.map(o => logo(o, 'sm')).join('')}</span>
+  // Only chats from connected agents the user chose to show (set on Connections or during onboarding)
+  const shown_ = c => typeof CONN === 'undefined' || (CONN[c.provider].state === 'connected' && CONN[c.provider].showChats);
+  const visible = chats.filter(c => !c.archived && (!fp || c.provider === fp) && shown_(c));
+  // Most recently active projects first; only the top few, the rest live on the Projects page
+  const minsOf = a => a === 'now' ? 0 : /m$/.test(a) ? parseInt(a) : /h$/.test(a) ? parseInt(a) * 60 : a === 'Yesterday' ? 1440 : /d$/.test(a) ? parseInt(a) * 1440 : /w$/.test(a) ? parseInt(a) * 10080 : 99999;
+  const recent = c => minsOf(c.ago);
+  const groups = PROJECTS.map(p => ({ p, list: visible.filter(c => c.project === p.id && !c.pinned).sort((a, b) => recent(a) - recent(b)) }))
+    .filter(g => g.list.length).sort((a, b) => recent(a.list[0]) - recent(b.list[0]));
+  const MAX_PROJECTS = 4, MAX_CHATS = 3;
+  $('#recentItems').innerHTML = groups.slice(0, MAX_PROJECTS).map(({ p, list }) => {
+    const open = expandedProjects.has(p.id), shown = open ? list : list.slice(0, MAX_CHATS);
+    return `<div class="proj"><div class="proj-row" data-proj="${p.id}" title="Open ${p.id}"><span class="name">${p.id}</span>
         <button class="add" type="button" data-newin="${p.id}" aria-label="New chat in ${p.id}" data-tip="New chat in ${p.id}">${icon('plus', 'sm')}</button></div>
       ${shown.map(chatRow).join('')}
-      ${list.length > 3 ? `<button class="show-more-row" type="button" data-expand="${p.id}">${open ? 'Show less' : `Show ${list.length - 3} more`}</button>` : ''}</div>`;
-  }).join('');
+      ${list.length > MAX_CHATS ? `<button class="show-more-row" type="button" data-expand="${p.id}">${open ? 'Show less' : `${list.length - MAX_CHATS} more`}</button>` : ''}</div>`;
+  }).join('') + (groups.length > MAX_PROJECTS ? `<button class="show-more-row all-projects" type="button" id="allProjects">All projects${icon('chevron-right', 'sm')}</button>` : '');
+  $('#allProjects')?.addEventListener('click', () => go('projects'));
   document.querySelectorAll('.sidebar .chat-row').forEach(r => {
     r.addEventListener('click', () => openPanel(+r.dataset.chat));
     r.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target === r) openPanel(+r.dataset.chat); });
@@ -741,6 +749,7 @@ $('#dialog').addEventListener('click', e => { if (!e.target.closest('.chip-btn')
 
 /* ═════════ Keyboard ═════════ */
 document.addEventListener('keydown', e => {
+  if (document.getElementById('onb')?.dataset.state === 'open') return;
   const typing = e.target instanceof Element && e.target.matches('input, textarea');
   if (e.key === 'Escape') { if (openPops.size) closePops(); else if ($('#dialog').dataset.state === 'open') closeDialog(); else if (openId) closePanel(); return; }
   if (typing || e.ctrlKey || e.metaKey || e.altKey) return;
@@ -761,5 +770,6 @@ bindTooltips();
 </script>
 <script src="projects.js"></script>
 <script src="connections.js"></script>
+<script src="onboarding.js"></script>
 </body>
 </html>
