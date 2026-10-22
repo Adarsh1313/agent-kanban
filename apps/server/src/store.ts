@@ -106,6 +106,10 @@ export class Store {
     this.db.prepare('UPDATE messages SET text = text || ? WHERE id = ?').run(delta, messageId);
   }
 
+  setMessageText(id: string, text: string): void {
+    this.db.prepare('UPDATE messages SET text = ? WHERE id = ?').run(text, id);
+  }
+
   listMessages(chatId: string): Message[] {
     return (this.db.prepare('SELECT * FROM messages WHERE chat_id = ? ORDER BY created_at, rowid').all(chatId) as Row[])
       .map((r) => ({ id: r.id, chatId: r.chat_id, role: r.role, text: r.text, createdAt: r.created_at }));

@@ -84,3 +84,11 @@ test('usage round-trips', () => {
   assert.deepEqual(s.lastUsage('codex'), r);
   assert.equal(s.lastUsage('claude'), undefined);
 });
+
+test('setMessageText replaces the text', () => {
+  const s = new Store(':memory:');
+  const c = s.createChat({ provider: 'claude', cwd: '/x', title: 't' });
+  const m = s.addMessage(c.id, 'assistant', 'par');
+  s.setMessageText(m.id, 'final');
+  assert.equal(s.listMessages(c.id)[0].text, 'final');
+});

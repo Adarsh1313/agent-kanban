@@ -54,3 +54,12 @@ export interface UsageWindow { kind: 'five_hour' | 'weekly' | 'model'; label: st
 export interface UsageReading { provider: ProviderId; status: 'ok' | 'unavailable' | 'signed_out' | 'error'; windows: UsageWindow[]; readAt: string; message?: string }
 
 export interface HistoryChat { provider: ProviderId; sessionRef: string; title: string; cwd: string; updatedAt: string }
+
+export type ServerEvent =
+  | { type: 'chat.updated'; chat: Chat }
+  | { type: 'message.delta'; chatId: string; messageId: string; text: string }
+  | { type: 'message.completed'; chatId: string; message: Message }
+  | { type: 'tool.call'; chatId: string; toolCall: ToolCall }
+  | { type: 'request.opened'; chatId: string; requestId: string; kind: 'permission' | 'question'; summary: string }
+  | { type: 'usage.updated'; reading: UsageReading }
+  | { type: 'notification'; chatId: string; kind: 'permission' | 'question' | 'finished' | 'limit' | 'error' };
