@@ -38,25 +38,37 @@ broadcast = api.broadcast;
 chats.recoverAfterRestart();
 usage.start();
 
-const port = Number(process.env.AGENT_KANBAN_PORT ?? 0) || 0;
-await new Promise<void>((resolve, reject) => {
-  api.server.once('error', reject);
-  api.server.listen(port, '127.0.0.1', resolve);
-});
+const rawPort = process.env.AGENT_KANBAN_PORT;
+let port = 0;
+if (rawPort !== undefined && rawPort !== '') {
+  const n = Number(rawPort);
+  if (Number.isInteger(n) && n >= 0 && n <= 65535) port = n;
+  else console.warn(`AGENT_KANBAN_PORT "${rawPort}" isn't a valid port, so a random free port will be used.`);
+}
+try {
+  await new Promise<void>((resolve, reject) => {
+    api.server.once('error', reject);
+    api.server.listen(port, '127.0.0.1', resolve);
+  });
+} catch (err) {
+  const code = (err as NodeJS.ErrnoException).code;
+  console.error(code === 'EADDRINUSE' ? `Port ${port} is already in use. Close the other program or pick another AGENT_KANBAN_PORT.` : `Couldn't start the server: ${(err as Error).message}`);
+  process.exit(1);
+}
+api.server.on('error', (err) => console.error('Server error:', err));
 const addr = api.server.address() as AddressInfo;
 console.log(`Agent Kanban server: http://127.0.0.1:${addr.port}/?token=${token}`);
 
 let stopping = false;
 async function shutdown(): Promise<void> {
-  if (stopping) return;
+  if (stopping) process.exit(1);
   stopping = true;
   usage.stop();
-  const dispose = Promise.allSettled(Object.values(adapters).map((a) => a.dispose()));
-  await Promise.race([dispose, new Promise((r) => setTimeout(r, 5_000))]);
-  api.close();
-  api.server.closeAllConnections();
   api.server.close();
+  api.close();
+  const dispose = Promise.allSettled(Object.values(adapters).map((a) => Promise.resolve().then(() => a.dispose())));
+  await Promise.race([dispose, new Promise((r) => setTimeout(r, 5_000))]);
+  api.server.closeAllConnections();
   process.exit(0);
 }
-process.on('SIGINT', () => void shutdown());
-process.on('SIGTERM', () => void shutdown());
+for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGBREAK'] as const) process.on(sig, () => void shutdown());

@@ -14,6 +14,16 @@ const OWN_WRITE_SLACK_MS = 2_000;
 const BUFFER_MAX = 500;
 const BUFFER_MAX_AGE_MS = 60_000;
 
+/** Provider errors sometimes arrive as a JSON body; show the human message inside it. */
+function readable(msg: string): string {
+  try {
+    const j = JSON.parse(msg) as { error?: { message?: unknown }; message?: unknown };
+    const inner = j?.error?.message ?? j?.message;
+    if (typeof inner === 'string' && inner) return inner;
+  } catch { /* plain text */ }
+  return msg;
+}
+
 export class ActiveElsewhereError extends Error {
   constructor() {
     super("This chat is active in Claude Code right now. Try again when it's idle.");
@@ -225,7 +235,9 @@ export class ChatService {
     const msg = err instanceof Error ? err.message : String(err);
     return /sign|auth|login/i.test(msg)
       ? `${name} isn't signed in. Open Connections to sign in.`
-      : `${name} stopped unexpectedly. Resume to try again.`;
+      : msg.startsWith(`${name} stopped unexpectedly`)
+        ? `${name} stopped unexpectedly. Resume to try again.`
+        : `${name} couldn't continue: ${readable(msg)}`;
   }
 
   /** err === null means no adapter is configured. */

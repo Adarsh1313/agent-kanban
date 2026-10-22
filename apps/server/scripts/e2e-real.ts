@@ -78,6 +78,7 @@ async function waitFor(id: string, want: (s: { column: string | null; reason: st
 }
 
 async function step(name: string, fn: () => Promise<string>) {
+  if (process.env.E2E_ONLY && !process.env.E2E_ONLY.split(',').includes(name[0]!)) return;
   log(`\n=== ${name}`);
   try { const r = await fn(); results.push(`PASS ${name}: ${r}`); }
   catch (e) { results.push(`FAIL ${name}: ${(e as Error).message}`); }
@@ -90,7 +91,7 @@ await step('a) codex create hello.txt', async () => {
   const r = await api('POST', '/api/chats', { provider: 'codex', cwd: codexDir, prompt: 'create hello.txt containing hi' });
   if (r.status !== 201) throw new Error(`POST /api/chats -> ${r.status} ${JSON.stringify(r.json)}`);
   codexChat = r.json.id;
-  const s = await waitFor(codexChat!, (x) => x.column !== 'running');
+  const s = await waitFor(codexChat!, (x) => x.column === 'review' || (x.column === 'needs_you' && x.reason !== 'permission' && x.reason !== 'question'));
   const exists = existsSync(join(codexDir, 'hello.txt'));
   if (s.column !== 'review') throw new Error(`ended in ${s.column}/${s.reason}; last message: ${(lastText.get(codexChat!) ?? '').slice(0, 200)}`);
   if (!exists) throw new Error('reached review but hello.txt is missing');
@@ -116,7 +117,7 @@ await step('c) claude reply ok', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'ak-claude-'));
   const r = await api('POST', '/api/chats', { provider: 'claude', cwd: dir, prompt: 'reply with the single word ok' });
   if (r.status !== 201) throw new Error(`POST /api/chats -> ${r.status} ${JSON.stringify(r.json)}`);
-  const s = await waitFor(r.json.id, (x) => x.column !== 'running');
+  const s = await waitFor(r.json.id, (x) => x.column === 'review' || (x.column === 'needs_you' && x.reason !== 'permission' && x.reason !== 'question'));
   if (s.column !== 'review') throw new Error(`ended in ${s.column}/${s.reason}; last message: ${(lastText.get(r.json.id) ?? '').slice(0, 200)}`);
   return 'review';
 });

@@ -147,11 +147,18 @@ test('missing adapter -> not installed copy, no throw', async () => {
 test('Review 3: error event for a running chat', async () => {
   const { store, adapter, events, svc } = setup();
   const chat = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
-  adapter.emit({ type: 'error', sessionRef: 's1', message: 'process exited' });
+  adapter.emit({ type: 'error', sessionRef: 's1', message: 'Codex stopped unexpectedly.' });
   const got = store.getChat(chat.id)!;
   assert.deepEqual([got.column, got.needsReason], ['needs_you', 'error']);
   assert.ok(events.some((e) => e.type === 'notification' && e.kind === 'error'));
   assert.match(store.listMessages(chat.id).pop()!.text, /Codex stopped unexpectedly\. Resume to try again\./);
+});
+
+test('X2: other provider errors show the provider message', async () => {
+  const { store, adapter, svc } = setup();
+  const chat = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+  adapter.emit({ type: 'error', sessionRef: 's1', message: JSON.stringify({ type: 'error', error: { message: "The 'x' model is not supported." } }) });
+  assert.equal(store.listMessages(chat.id).pop()!.text, "Codex couldn't continue: The 'x' model is not supported.");
 });
 
 test('events emitted before startChat resolves are buffered and replayed', async () => {

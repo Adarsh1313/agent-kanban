@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import type { AdapterEvent, UsageReading } from '@agent-kanban/shared';
 import type { ProviderAdapter } from './adapter.ts';
 import { JsonRpcProcess } from './jsonrpc.ts';
@@ -28,12 +31,19 @@ export class CodexAdapter implements ProviderAdapter {
   private disposed = false;
   private makeProcess: () => JsonRpcProcess;
   private initializeTimeoutMs: number;
+  private codexHome: string;
+  private fallbackModel = new WeakMap<JsonRpcProcess, string | null>();
+  private _modelNote: string | null = null;
 
-  constructor(opts: { codexPath: string; spawn?: (cmd: string, args: string[]) => JsonRpcProcess; initializeTimeoutMs?: number }) {
+  constructor(opts: { codexPath: string; spawn?: (cmd: string, args: string[]) => JsonRpcProcess; initializeTimeoutMs?: number; codexHome?: string }) {
     const args = ['app-server'];
+    this.codexHome = opts.codexHome ?? join(homedir(), '.codex');
     this.initializeTimeoutMs = opts.initializeTimeoutMs ?? 15_000;
     this.makeProcess = () => (opts.spawn ? opts.spawn(opts.codexPath, args) : new JsonRpcProcess(opts.codexPath, args));
   }
+
+  /** Set when the configured Codex model isn't usable with this account and new chats use the default instead. */
+  get modelNote(): string | null { return this._modelNote; }
 
   onEvent(listener: Listener): () => void {
     this.listeners.add(listener);
@@ -59,6 +69,7 @@ export class CodexAdapter implements ProviderAdapter {
       try {
         await p.request('initialize', { clientInfo: { name: 'agent-kanban', title: 'Agent Kanban', version: '0.0.0' } }, this.initializeTimeoutMs);
         p.notify('initialized');
+        await this.pickModel(p);
         if (this.disposed) throw new Error('Codex adapter is shut down.');
         this.proc = p;
         return p;
@@ -71,6 +82,23 @@ export class CodexAdapter implements ProviderAdapter {
       }
     })();
     return this.starting;
+  }
+
+  /** Read-only: compare ~/.codex/config.toml's model with what the account can use. Any failure keeps Codex's own default. */
+  private async pickModel(p: JsonRpcProcess): Promise<void> {
+    this.fallbackModel.set(p, null);
+    try {
+      let configured: string | null = null;
+      try { configured = /^model\s*=\s*"([^"]+)"/m.exec(readFileSync(join(this.codexHome, 'config.toml'), 'utf8'))?.[1] ?? null; } catch { /* no config file */ }
+      if (!configured) { this._modelNote = null; return; }
+      const r = await p.request<{ data: { id: string; model: string; isDefault: boolean }[] }>('model/list', { includeHidden: false }, this.initializeTimeoutMs);
+      const list = r.data;
+      if (list.some((m) => m.id === configured || m.model === configured)) { this._modelNote = null; return; }
+      const def = list.find((m) => m.isDefault);
+      if (!def) return;
+      this.fallbackModel.set(p, def.model);
+      this._modelNote = `Your Codex settings use ${configured}, which your account can't use, so new chats use ${def.model}.`;
+    } catch { /* keep current behavior */ }
   }
 
   private onProcessExit(p: JsonRpcProcess): void {
@@ -164,7 +192,7 @@ export class CodexAdapter implements ProviderAdapter {
 
   async startChat(input: { cwd: string; prompt: string; model?: string }): Promise<{ sessionRef: string }> {
     const p = await this.ensureProcess();
-    const r = await p.request<{ thread: { id: string } }>('thread/start', { cwd: input.cwd, model: input.model ?? null, approvalPolicy: 'on-request' });
+    const r = await p.request<{ thread: { id: string } }>('thread/start', { cwd: input.cwd, model: input.model ?? this.fallbackModel.get(p) ?? null, approvalPolicy: 'on-request' });
     const sessionRef = r.thread.id;
     this.threadCwd.set(sessionRef, input.cwd);
     this.loaded.get(p)?.add(sessionRef);

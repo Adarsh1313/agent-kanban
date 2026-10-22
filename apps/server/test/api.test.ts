@@ -17,7 +17,7 @@ const reading = (provider: 'claude' | 'codex', left: number): UsageReading => ({
 });
 const hist: HistoryChat[] = [{ provider: 'claude', sessionRef: 's1', title: 'h' } as unknown as HistoryChat];
 
-async function setup(overrides: Record<string, unknown> = {}) {
+async function setup(overrides: Record<string, unknown> = {}, pingMs?: number) {
   let emit: (e: ServerEvent) => void = () => {};
   const readings = [reading('claude', 40), reading('codex', 70)];
   const chats: any = {
@@ -31,7 +31,7 @@ async function setup(overrides: Record<string, unknown> = {}) {
     ...overrides,
   };
   const usage: any = { latest: () => readings, refresh: async () => readings };
-  const api = createApi({ chats, usage, history: async () => hist, token: 'tok' });
+  const api = createApi({ chats, usage, history: async () => hist, token: 'tok', ...(pingMs ? { pingMs } : {}) });
   emit = api.broadcast;
   await new Promise<void>((r) => api.server.listen(0, '127.0.0.1', r));
   const addr = api.server.address() as AddressInfo;
@@ -49,6 +49,11 @@ test('401 without token on HTTP and WebSocket', async () => {
     const ws = new WebSocket(`ws://127.0.0.1:${s.addr.port}/ws`);
     const code = await new Promise((res) => { ws.on('unexpected-response', (_q, r) => res(r.statusCode)); ws.on('error', () => {}); });
     assert.equal(code, 401);
+    ws.terminate();
+    const bad = new WebSocket(`ws://127.0.0.1:${s.addr.port}/ws?token=wrong`);
+    const code2 = await new Promise((res) => { bad.on('unexpected-response', (_q, r) => res(r.statusCode)); bad.on('error', () => {}); });
+    assert.equal(code2, 401);
+    bad.terminate();
   } finally { s.close(); }
 });
 
@@ -137,5 +142,42 @@ test('oversized body is 413', async () => {
   try {
     const res = await s.f('/api/chats', { method: 'POST', body: 'x'.repeat(1_100_000) });
     assert.equal(res.status, 413);
+  } finally { s.close(); }
+});
+
+test('upgrade on a non-/ws path is refused even with the token', async () => {
+  const s = await setup();
+  try {
+    const ws = new WebSocket(`ws://127.0.0.1:${s.addr.port}/other?token=tok`);
+    const code = await new Promise((res) => { ws.on('unexpected-response', (_q, r) => res(r.statusCode)); ws.on('error', () => {}); });
+    assert.equal(code, 404);
+    ws.terminate();
+  } finally { s.close(); }
+});
+
+test('a client that never answers pings is terminated', async () => {
+  const s = await setup({}, 40);
+  try {
+    const ws = new WebSocket(`ws://127.0.0.1:${s.addr.port}/ws?token=tok`, { autoPong: false });
+    await new Promise((r) => ws.on('open', r));
+    await new Promise<void>((r) => ws.on('close', () => r()));
+  } finally { s.close(); }
+});
+
+test('GET / with a valid ?token= returns 200; other paths reject ?token=', async () => {
+  const s = await setup();
+  try {
+    assert.equal((await s.f('/?token=tok', {}, null)).status, 200);
+    assert.equal((await s.f('/?token=bad', {}, null)).status, 401);
+    assert.equal((await s.f('/api/chats?token=tok', {}, null)).status, 401);
+  } finally { s.close(); }
+});
+
+test('bad percent-escape is 404; non-string model is 400', async () => {
+  const s = await setup();
+  try {
+    assert.equal((await s.f('/api/chats/%E0%A4%A/messages')).status, 404);
+    const r = await s.f('/api/chats', { method: 'POST', body: JSON.stringify({ provider: 'codex', cwd: '/x', prompt: 'p', model: 5 }) });
+    assert.equal(r.status, 400);
   } finally { s.close(); }
 });

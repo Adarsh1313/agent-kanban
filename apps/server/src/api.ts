@@ -10,6 +10,7 @@ import { suggest } from './usage/parse.ts';
 const PROVIDERS: ProviderId[] = ['claude', 'codex', 'antigravity'];
 const MAX_BODY = 1_000_000;
 const PING_MS = 30_000;
+const MAX_BUFFERED = 4_000_000;
 
 class HttpError extends Error {
   status: number;
@@ -27,19 +28,29 @@ function allowedOrigin(origin: string | undefined): string | null {
   return origin && /^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin) ? origin : null;
 }
 
-async function readJson(req: http.IncomingMessage): Promise<Record<string, unknown>> {
-  const chunks: Buffer[] = [];
-  let size = 0;
-  for await (const c of req) {
-    size += (c as Buffer).length;
-    if (size > MAX_BODY) throw new HttpError(413, 'That request is too large.');
-    chunks.push(c as Buffer);
-  }
-  if (size === 0) return {};
-  let v: unknown;
-  try { v = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { throw new HttpError(400, 'The request body is not valid JSON.'); }
-  if (!v || typeof v !== 'object' || Array.isArray(v)) throw new HttpError(400, 'The request body must be a JSON object.');
-  return v as Record<string, unknown>;
+function readJson(req: http.IncomingMessage): Promise<Record<string, unknown>> {
+  return new Promise((resolve, reject) => {
+    const declared = Number(req.headers['content-length'] ?? 0);
+    if (declared > MAX_BODY) { req.resume(); return reject(new HttpError(413, 'That request is too large.')); }
+    let chunks: Buffer[] = [];
+    let size = 0;
+    let over = false;
+    req.on('data', (c: Buffer) => {
+      if (over) return; // keep draining, buffer nothing
+      size += c.length;
+      if (size > MAX_BODY) { over = true; chunks = []; reject(new HttpError(413, 'That request is too large.')); return; }
+      chunks.push(c);
+    });
+    req.on('error', reject);
+    req.on('end', () => {
+      if (over) return;
+      if (size === 0) return resolve({});
+      let v: unknown;
+      try { v = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { return reject(new HttpError(400, 'The request body is not valid JSON.')); }
+      if (!v || typeof v !== 'object' || Array.isArray(v)) return reject(new HttpError(400, 'The request body must be a JSON object.'));
+      resolve(v as Record<string, unknown>);
+    });
+  });
 }
 
 function str(body: Record<string, unknown>, key: string): string {
@@ -59,8 +70,10 @@ export function createApi(opts: {
   usage: UsageService;
   history: () => Promise<HistoryChat[]>;
   token: string;
+  pingMs?: number;
 }): { server: http.Server; broadcast: (e: ServerEvent) => void; close: () => void } {
   const { chats, usage, history, token } = opts;
+  const pingMs = opts.pingMs ?? PING_MS;
   const wss = new WebSocketServer({ noServer: true });
   const alive = new WeakSet<WebSocket>();
 
@@ -68,6 +81,7 @@ export function createApi(opts: {
     const data = JSON.stringify(e);
     for (const c of wss.clients) {
       if (c.readyState !== WebSocket.OPEN) continue;
+      if (c.bufferedAmount > MAX_BUFFERED) { c.terminate(); continue; }
       try { c.send(data, (err) => { if (err) c.terminate(); }); } catch { c.terminate(); }
     }
   };
@@ -78,7 +92,7 @@ export function createApi(opts: {
       alive.delete(c);
       try { c.ping(); } catch { c.terminate(); }
     }
-  }, PING_MS);
+  }, pingMs);
   ping.unref();
 
   const usageBody = (readings: ReturnType<UsageService['latest']>) => ({ readings, suggested: suggest(readings, PROVIDERS) });
@@ -99,7 +113,10 @@ export function createApi(opts: {
       const input: { provider: ProviderId; cwd: string; prompt: string; model?: string } = {
         provider: provider(b), cwd: str(b, 'cwd'), prompt: str(b, 'prompt'),
       };
-      if (typeof b.model === 'string' && b.model) input.model = b.model;
+      if (b.model !== undefined) {
+        if (typeof b.model !== 'string' || b.model.trim() === '') throw new HttpError(400, 'Model must be a non-empty string.');
+        input.model = b.model;
+      }
       return { status: 201, body: await chats.start(input) };
     }
     if ((m = match('POST', '/api/chats/:id/messages'))) {
@@ -151,14 +168,23 @@ export function createApi(opts: {
       res.end(JSON.stringify(body));
     };
     if (req.method === 'OPTIONS') return send(204);
+    let url: URL;
+    try { url = new URL(req.url ?? '/', 'http://127.0.0.1'); } catch { return send(404, { error: 'Not found.' }); }
     const auth = req.headers.authorization;
-    const given = auth?.startsWith('Bearer ') ? auth.slice(7) : null;
+    let given = auth?.startsWith('Bearer ') ? auth.slice(7) : null;
+    // ?token= is accepted only for the landing page the server prints (and the WebSocket upgrade).
+    const landing = req.method === 'GET' && url.pathname === '/';
+    if (!given && landing) given = url.searchParams.get('token');
     if (!tokenOk(given, token)) return send(401, { error: 'Missing or wrong token.' });
-    const url = new URL(req.url ?? '/', 'http://127.0.0.1');
+    if (landing) { res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' }); res.end('Agent Kanban server is running.'); return; }
     route(req, url).then(
       (r) => send(r.status, r.body),
       (err: unknown) => {
-        if (err instanceof HttpError) return send(err.status, { error: err.message });
+        if (err instanceof URIError) return send(404, { error: 'Not found.' });
+        if (err instanceof HttpError) {
+          if (err.status === 413) { res.setHeader('Connection', 'close'); req.resume(); }
+          return send(err.status, { error: err.message });
+        }
         const msg = err instanceof Error ? err.message : '';
         if (err instanceof ActiveElsewhereError) return send(409, { error: msg });
         if (msg === 'That request is no longer open.') return send(409, { error: msg });

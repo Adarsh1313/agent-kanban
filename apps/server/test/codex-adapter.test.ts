@@ -1,6 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
+import { mkdtempSync, writeFileSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { CodexAdapter } from '../src/adapters/codex.ts';
 import { JsonRpcProcess } from '../src/adapters/jsonrpc.ts';
 import { codexLimitsToReading } from '../src/usage/parse.ts';
@@ -8,14 +11,15 @@ import type { AdapterEvent } from '@agent-kanban/shared';
 
 const fake = fileURLToPath(new URL('./fixtures/fake-codex-app-server.ts', import.meta.url));
 
-function make(scenario: string | ((n: number) => string), adapterOpts: { initializeTimeoutMs?: number } = {}) {
+function make(scenario: string | ((n: number) => string), adapterOpts: { initializeTimeoutMs?: number; codexHome?: string; env?: Record<string, string> } = {}) {
   const procs: JsonRpcProcess[] = [];
   const adapter = new CodexAdapter({
     codexPath: 'unused',
-    ...adapterOpts,
+    initializeTimeoutMs: adapterOpts.initializeTimeoutMs,
+    codexHome: adapterOpts.codexHome ?? join(tmpdir(), 'ak-no-codex-home'),
     spawn: () => {
       const sc = typeof scenario === 'string' ? scenario : scenario(procs.length);
-      const p = new JsonRpcProcess(process.execPath, ['--disable-warning=ExperimentalWarning', fake], { env: { ...process.env, FAKE_SCENARIO: sc } });
+      const p = new JsonRpcProcess(process.execPath, ['--disable-warning=ExperimentalWarning', fake], { env: { ...process.env, FAKE_SCENARIO: sc, ...adapterOpts.env } });
       procs.push(p);
       return p;
     },
@@ -209,4 +213,40 @@ test('readUsage failure returns error reading', async () => {
     assert.deepEqual(r.windows, []);
     assert.equal(r.message, "Couldn't read Codex usage.");
   } finally { await adapter.dispose(); }
+});
+
+function modelCase(configured: string, models: object[]) {
+  const home = mkdtempSync(join(tmpdir(), 'ak-home-'));
+  writeFileSync(join(home, 'config.toml'), `model = "${configured}"
+model_reasoning_effort = "medium"
+`);
+  const log = join(home, 'calls.log');
+  writeFileSync(log, '');
+  const m = make('', { codexHome: home, env: { FAKE_LOG: log, FAKE_MODELS: JSON.stringify(models) } });
+  const started = async () => {
+    await m.adapter.startChat({ cwd, prompt: 'hi' });
+    const lines = readFileSync(log, 'utf8').trim().split(/\r?\n/).map((l) => JSON.parse(l));
+    return lines.find((l) => l.method === 'thread/start').params.model;
+  };
+  return { ...m, started };
+}
+const catalog = [
+  { id: 'gpt-a', model: 'gpt-a', isDefault: true, hidden: false },
+  { id: 'gpt-b', model: 'gpt-b', isDefault: false, hidden: false },
+];
+
+test('X1: configured model that the account lists -> model null, no note', async () => {
+  const c = modelCase('gpt-b', catalog);
+  try {
+    assert.equal(await c.started(), null);
+    assert.equal(c.adapter.modelNote, null);
+  } finally { await c.adapter.dispose(); }
+});
+
+test('X1: configured model not listed -> default model id and a note', async () => {
+  const c = modelCase('gpt-zzz', catalog);
+  try {
+    assert.equal(await c.started(), 'gpt-a');
+    assert.equal(c.adapter.modelNote, "Your Codex settings use gpt-zzz, which your account can't use, so new chats use gpt-a.");
+  } finally { await c.adapter.dispose(); }
 });

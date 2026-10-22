@@ -1,6 +1,7 @@
 // Fake `codex app-server` speaking line-delimited JSON-RPC on stdio.
 // FAKE_SCENARIO: approval | fileapproval | crash | limits | hang | hanginit | tools | limit | slowturn
 import { createInterface } from 'node:readline';
+import { appendFileSync } from 'node:fs';
 
 const scenario = process.env.FAKE_SCENARIO ?? '';
 const send = (m: unknown) => process.stdout.write(JSON.stringify(m) + '\n');
@@ -58,7 +59,10 @@ createInterface({ input: process.stdin }).on('line', (line) => {
     return;
   }
   if (m.id === undefined) return; // notification (initialized)
+  if (process.env.FAKE_LOG) appendFileSync(process.env.FAKE_LOG, JSON.stringify({ method: m.method, params: m.params }) + '\n');
   switch (m.method) {
+    case 'model/list':
+      return send({ id: m.id, result: { data: JSON.parse(process.env.FAKE_MODELS ?? '[]') } });
     case 'initialize':
       if (scenario === 'hanginit') return; // never answers
       return send({ id: m.id, result: { userAgent: 'fake' } });
