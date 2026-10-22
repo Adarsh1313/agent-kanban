@@ -173,31 +173,45 @@ export function Sidebar() {
   const [menuOpen, setMenuOpen] = useState(false);
 
   // The capsule slides to the active item (--duration-move); the first placement does not animate.
+  const place = (instant: boolean) => {
+    const cap = capRef.current;
+    const item = navRef.current?.querySelector<HTMLElement>('.navitem[aria-current]');
+    if (!cap || !item) return;
+    const jump = instant || !placed.current || item.offsetParent === null;
+    if (jump) cap.style.transition = 'none';
+    cap.style.transform = `translateY(${item.offsetTop}px)`;
+    if (jump) {
+      void cap.offsetWidth;
+      cap.style.transition = '';
+    }
+    placed.current = item.offsetParent !== null;
+  };
+  const placeRef = useRef(place);
+  placeRef.current = place;
+
+  // A view change slides the capsule (animated); the first placement does not animate.
+  useLayoutEffect(() => { placeRef.current(false); }, [view]);
+
+  // Once: when the nav's size really changes (window resize, sidebar shown again) measure again without animating.
   useLayoutEffect(() => {
-    const place = () => {
-      const cap = capRef.current;
-      const item = navRef.current?.querySelector<HTMLElement>('.navitem[aria-current]');
-      if (!cap || !item) return;
-      const instant = !placed.current || item.offsetParent === null;
-      if (instant) cap.style.transition = 'none';
-      cap.style.transform = `translateY(${item.offsetTop}px)`;
-      if (instant) {
-        void cap.offsetWidth;
-        cap.style.transition = '';
-      }
-      placed.current = item.offsetParent !== null;
-    };
-    place();
-    // The sidebar can be hidden (narrow window) and shown again, or reflow on resize: measure again then, without animating.
     const nav = navRef.current;
-    const ro = typeof ResizeObserver === 'function' && nav ? new ResizeObserver(() => { placed.current = false; place(); }) : null;
-    if (nav) ro?.observe(nav);
-    window.addEventListener('resize', place);
+    if (!nav) return;
+    let size = `${nav.offsetWidth}x${nav.offsetHeight}`;
+    const remeasure = () => {
+      const now = `${nav.offsetWidth}x${nav.offsetHeight}`;
+      if (now === size) return;
+      size = now;
+      placeRef.current(true);
+    };
+    const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(remeasure) : null;
+    ro?.observe(nav);
+    const onResize = () => placeRef.current(true);
+    window.addEventListener('resize', onResize);
     return () => {
       ro?.disconnect();
-      window.removeEventListener('resize', place);
+      window.removeEventListener('resize', onResize);
     };
-  }, [view]);
+  }, []);
 
   return (
     <aside className="sidebar" aria-label="Sidebar">

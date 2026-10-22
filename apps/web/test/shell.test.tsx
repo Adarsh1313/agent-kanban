@@ -1,12 +1,18 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { HistoryChat } from '@agent-kanban/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { recentChatsByProject } from '../src/state/selectors.ts';
 import { applySnapshot, initialState, type AppState } from '../src/state/reducer.ts';
 import { createStore, StoreProvider, type Store } from '../src/state/store.ts';
 import { Shell } from '../src/ui/shell/Shell.tsx';
 import { Sidebar } from '../src/ui/shell/Sidebar.tsx';
 import { setNewChatHandler } from '../src/ui/actions.ts';
 import { chat } from './helpers.ts';
+
+vi.mock('../src/state/selectors.ts', async (orig) => {
+  const m = await orig<typeof import('../src/state/selectors.ts')>();
+  return { ...m, recentChatsByProject: vi.fn(m.recentChatsByProject) };
+});
 
 const NOW = Date.parse('2026-10-23T12:00:00.000Z');
 
@@ -120,13 +126,37 @@ describe('Sidebar: pinned and recent', () => {
     expect(store.getState().ui.openChatId).toBe('c9');
   });
 
-  it('streaming deltas do not recompute the recent list', () => {
-    const store = seeded([chat({ id: 'c1' })], hist(300));
+  it('streaming deltas do not recompute the recent list; a chat change does', () => {
+    const store = seeded([chat({ id: 'c1', updatedAt: new Date(NOW + 60_000).toISOString() })], hist(300));
     mount(store);
-    const before = [...document.querySelectorAll('.proj .chat-row')];
+    const spy = vi.mocked(recentChatsByProject);
+    spy.mockClear();
     act(() => { store.setState((s) => ({ ...s, streaming: { ...s.streaming, c1: { m1: 'x' } } })); });
-    const after = [...document.querySelectorAll('.proj .chat-row')];
-    expect(after).toEqual(before);
+    expect(spy).not.toHaveBeenCalled();
+    act(() => { store.setState((s) => ({ ...s, chats: { ...s.chats, c1: { ...s.chats.c1!, title: 'Renamed' } } })); });
+    expect(spy).toHaveBeenCalled();
+    expect(screen.getByText('Renamed')).toBeTruthy();
+  });
+
+  it('a view change keeps the capsule slide (never writes transition: none after the first placement)', () => {
+    class RO {
+      constructor(private cb: () => void) {}
+      observe() { this.cb(); }
+      disconnect() {}
+    }
+    vi.stubGlobal('ResizeObserver', RO);
+    // jsdom has no layout: pretend the nav items are rendered so the capsule counts as placed.
+    Object.defineProperty(HTMLElement.prototype, 'offsetParent', { configurable: true, get: () => document.body });
+    const store = seeded();
+    mount(store);
+    const cap = document.querySelector<HTMLElement>('.cap')!;
+    const writes: string[] = [];
+    Object.defineProperty(cap.style, 'transition', { configurable: true, get: () => '', set: (v: string) => { writes.push(v); } });
+    act(() => { store.setState((s) => ({ ...s, ui: { ...s.ui, view: 'projects' } })); });
+    act(() => { store.setState((s) => ({ ...s, ui: { ...s.ui, view: 'connections' } })); });
+    expect(writes).not.toContain('none');
+    vi.unstubAllGlobals();
+    Reflect.deleteProperty(HTMLElement.prototype, 'offsetParent');
   });
 
   it('the + on a project row opens New chat for that project', () => {

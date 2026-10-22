@@ -299,7 +299,52 @@ describe('focus, dialog and motion', () => {
     fireEvent.keyDown(document, { key: 'Tab', shiftKey: true });
     expect(document.activeElement).toBe(input);
     cleanup();
-    expect(root.inert).toBe(false);
+    expect(root.inert).toBeFalsy();
+    root.remove();
+  });
+
+  it('a popover opened from a dialog stays usable and keeps Tab inside itself', () => {
+    render(<Dialog open onClose={() => {}} title="Host"><Pop label="Pick" /></Dialog>);
+    fireEvent.click(screen.getByText('Pick'));
+    const inside = screen.getByText('Pick inside');
+    expect(inside.closest('[inert]')).toBeNull();
+    expect(document.activeElement).toBe(inside);
+    fireEvent.keyDown(document, { key: 'Tab' });
+    expect(document.activeElement).toBe(inside);
+    fireEvent.keyDown(document, { key: 'Tab', shiftKey: true });
+    expect(document.activeElement).toBe(inside);
+  });
+
+  it('a toast shown while a dialog is open is not inert', () => {
+    render(<><Dialog open onClose={() => {}} title="Host"><p>x</p></Dialog><Toasts /></>);
+    act(() => { toast('Saved while open'); });
+    expect(screen.getByText('Saved while open').closest('[inert]')).toBeNull();
+    cleanup();
+  });
+
+  it('nested dialogs unfreeze in order', () => {
+    const root = document.createElement('div');
+    document.body.append(root);
+    function Two({ a, b }: { a: boolean; b: boolean }) {
+      return (
+        <>
+          <Dialog open={a} onClose={() => {}} title="A"><p>a</p></Dialog>
+          <Dialog open={b} onClose={() => {}} title="B"><p>b</p></Dialog>
+        </>
+      );
+    }
+    const { rerender } = render(<Two a b={false} />, { container: root });
+    const dlg = (n: string) => screen.getByRole('dialog', { name: n, hidden: true });
+    expect(root.inert).toBe(true);
+    rerender(<Two a b />);
+    expect(dlg('A').inert).toBe(true);
+    expect(dlg('B').inert).toBeFalsy();
+    rerender(<Two a b={false} />);
+    expect(root.inert).toBe(true);
+    expect(dlg('A').inert).toBeFalsy();
+    rerender(<Two a={false} b={false} />);
+    expect(root.inert).toBeFalsy();
+    cleanup();
     root.remove();
   });
 

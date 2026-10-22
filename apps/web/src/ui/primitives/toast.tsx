@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { createPortal } from 'react-dom';
 import { cssMs } from './motion.ts';
 
 export interface ToastAction { label: string; run: () => void }
@@ -86,9 +87,11 @@ function ToastView({ item }: { item: ToastItem }) {
 
 export function Toasts() {
   const list = useSyncExternalStore(subscribe, snapshot, snapshot);
-  return (
+  // Portalled to <body>, beside the app root, so a dialog freezing the app never freezes toasts.
+  return createPortal(
     <div className="toasts" role="status">
       {list.map((t) => <ToastView key={t.id} item={t} />)}
-    </div>
+    </div>,
+    document.body,
   );
 }
