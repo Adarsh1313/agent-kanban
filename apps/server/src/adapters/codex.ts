@@ -323,12 +323,15 @@ export class CodexAdapter implements ProviderAdapter {
   }
 
   async readUsage(): Promise<UsageReading> {
+    const failed: UsageReading = { provider: 'codex', status: 'error', windows: [], readAt: new Date().toISOString(), message: "Couldn't read Codex usage." };
+    // A crash-looping app-server is not respawned by the usage poll: it waits for the ping backoff (or a manual check).
+    if (!this.proc && !this.starting && (this.gaveUp || Date.now() < this.retryAt)) return failed;
     try {
       const p = await this.ensureProcess();
       const r = await p.request<{ rateLimits: any; rateLimitsByLimitId?: any }>('account/rateLimits/read', undefined);
       return codexLimitsToReading(r, new Date());
     } catch {
-      return { provider: 'codex', status: 'error', windows: [], readAt: new Date().toISOString(), message: "Couldn't read Codex usage." };
+      return failed;
     }
   }
 
@@ -374,7 +377,7 @@ export class CodexAdapter implements ProviderAdapter {
       return fail(down ? 'Codex stopped unexpectedly.' : 'Codex stopped unexpectedly and was restarted.');
     }
     if (!this.proc && !this.starting) {
-      if (this.gaveUp) return fail(GAVE_UP);
+      if (this.gaveUp) return { ...fail(GAVE_UP), gaveUp: true };
       if (Date.now() < this.retryAt) return fail('Codex is restarting.');
     }
     let p: JsonRpcProcess | null = null;

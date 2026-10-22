@@ -40,8 +40,9 @@ export class UsageService {
 
   start(): void {
     if (this.timer) return;
-    void this.refresh();
-    this.timer = setInterval(() => void this.refresh(), this.intervalMs);
+    const run = () => { this.refresh().catch((e) => console.error('[agent-kanban] usage refresh failed', e)); };
+    run();
+    this.timer = setInterval(run, this.intervalMs);
   }
 
   stop(): void {
@@ -81,21 +82,26 @@ export class UsageService {
         timeout = setTimeout(() => reject(new Error('timeout')), this.timeoutMs);
       });
       reading = await Promise.race([reader(), timed]);
-      if (reading.status !== 'error' && !unsaved.has(reading)) this.store.saveUsage(reading);
+      if (reading.status === 'error') {
+        // An adapter that couldn't read returns an error reading rather than throwing: keep the last numbers too.
+        reading = this.keepLast(id, reading.message ?? `Couldn't read ${NAMES[id]} usage. Showing the last numbers we had.`);
+      } else if (!unsaved.has(reading)) {
+        try { this.store.saveUsage(reading); } catch (e) { console.error('[agent-kanban] could not save usage', e); }
+      }
     } catch {
-      const prev = this.store.lastUsage(id);
-      reading = {
-        provider: id,
-        status: 'error',
-        windows: prev?.windows ?? [],
-        readAt: new Date().toISOString(),
-        message: `Couldn't read ${NAMES[id]} usage. Showing the last numbers we had.`,
-      };
+      reading = this.keepLast(id, `Couldn't read ${NAMES[id]} usage. Showing the last numbers we had.`);
     } finally {
       if (timeout) clearTimeout(timeout);
     }
     this.last.set(id, reading);
-    this.onUpdate(reading);
+    try { this.onUpdate(reading); } catch (e) { console.error('[agent-kanban] usage listener failed', e); }
     return reading;
+  }
+
+  /** A failed read: an error reading that still shows the last good windows we stored. */
+  private keepLast(id: ProviderId, message: string): UsageReading {
+    let prev: UsageReading | undefined;
+    try { prev = this.store.lastUsage(id); } catch (e) { console.error('[agent-kanban] could not load last usage', e); }
+    return { provider: id, status: 'error', windows: prev?.windows ?? [], readAt: new Date().toISOString(), message };
   }
 }

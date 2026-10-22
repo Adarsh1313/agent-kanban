@@ -495,3 +495,57 @@ test('a notification during the probe cancels a pending recycle', async () => {
     assert.equal(procs.length, 1, 'not recycled');
   } finally { await adapter.dispose(); }
 });
+
+test('readUsage does not respawn a crash-looping app-server inside the ping backoff or after giving up', async () => {
+  mock.timers.enable({ apis: ['Date'], now: 0 });
+  const { adapter, procs } = make('dieonaccount');
+  try {
+    assert.equal((await adapter.ping()).ok, false);
+    assert.equal(procs.length, 1);
+    await new Promise((r) => setTimeout(r, 50));
+    const inBackoff = await adapter.readUsage();
+    assert.equal(inBackoff.status, 'error');
+    assert.equal(inBackoff.message, "Couldn't read Codex usage.");
+    assert.equal(procs.length, 1, 'no respawn inside the backoff');
+    (adapter as any).gaveUp = true;
+    mock.timers.tick(10 * 60_000);
+    const gave = await adapter.ping();
+    assert.equal(gave.gaveUp, true);
+    assert.equal(gave.message, 'Codex keeps stopping. Use Check now to try again.');
+    assert.equal((await adapter.readUsage()).status, 'error');
+    assert.equal(procs.length, 1, 'no respawn after giving up');
+  } finally { mock.timers.reset(); await adapter.dispose(); }
+});
+
+test('model/list is read across pages: a configured model on page 2 is accepted', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'ak-home-'));
+  writeFileSync(join(home, 'config.toml'), 'model = "gpt-b"\n');
+  const log = join(home, 'calls.log');
+  writeFileSync(log, '');
+  const pages = [[{ id: 'gpt-a', model: 'gpt-a', isDefault: false, hidden: false }], [{ id: 'gpt-b', model: 'gpt-b', isDefault: true, hidden: false }]];
+  const m = make('', { codexHome: home, env: { FAKE_LOG: log, FAKE_MODEL_PAGES: JSON.stringify(pages) } });
+  try {
+    await m.adapter.startChat({ cwd, prompt: 'hi' });
+    const calls = readFileSync(log, 'utf8').trim().split(/\r?\n/).map((l) => JSON.parse(l));
+    const lists = calls.filter((c) => c.method === 'model/list');
+    assert.equal(lists.length, 2);
+    assert.equal(lists[1].params.cursor, 'p1');
+    assert.equal(calls.find((c) => c.method === 'thread/start').params.model, null);
+    assert.equal(m.adapter.modelNote, null);
+  } finally { await m.adapter.dispose(); }
+});
+
+test('model/list across pages: an unlisted model falls back to the default found on page 2', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'ak-home-'));
+  writeFileSync(join(home, 'config.toml'), 'model = "gpt-zzz"\n');
+  const pages = [[{ id: 'gpt-a', model: 'gpt-a', isDefault: false, hidden: false }], [{ id: 'gpt-b', model: 'gpt-b', isDefault: true, hidden: false }]];
+  const log = join(home, 'calls.log');
+  writeFileSync(log, '');
+  const m = make('', { codexHome: home, env: { FAKE_LOG: log, FAKE_MODEL_PAGES: JSON.stringify(pages) } });
+  try {
+    await m.adapter.startChat({ cwd, prompt: 'hi' });
+    const calls = readFileSync(log, 'utf8').trim().split(/\r?\n/).map((l) => JSON.parse(l));
+    assert.equal(calls.find((c) => c.method === 'thread/start').params.model, 'gpt-b');
+    assert.match(m.adapter.modelNote ?? '', /gpt-zzz.*gpt-b/);
+  } finally { await m.adapter.dispose(); }
+});

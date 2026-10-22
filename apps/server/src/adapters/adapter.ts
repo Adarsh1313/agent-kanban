@@ -1,6 +1,12 @@
 import type { AdapterEvent, ProviderId, UsageReading } from '@agent-kanban/shared';
 
-export interface PingResult { ok: boolean; signedIn: boolean | null; message?: string }
+export interface PingResult {
+  ok: boolean;
+  signedIn: boolean | null;
+  message?: string;
+  /** The adapter stopped restarting the provider on its own; only a manual check tries again. */
+  gaveUp?: boolean;
+}
 
 export interface ProviderAdapter {
   id: ProviderId;

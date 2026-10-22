@@ -4,13 +4,14 @@ import { fileURLToPath } from 'node:url';
 import type { ConnectionHealth, ProviderId } from '@agent-kanban/shared';
 import { ConnectionMonitor, getVersion, parseVersion } from '../src/health.ts';
 
-type Ping = { ok: boolean; signedIn: boolean | null; message?: string };
+type Ping = { ok: boolean; signedIn: boolean | null; message?: string; gaveUp?: boolean };
 
 function setup(over: {
   found?: (id: ProviderId) => string | null;
   version?: string | null;
   latest?: () => Promise<string | null>;
   ping?: () => Promise<Ping>;
+  onUpdate?: (h: ConnectionHealth) => void;
   providers?: ProviderId[];
   healthMs?: number;
   versionMs?: number;
@@ -23,6 +24,7 @@ function setup(over: {
   const pings: ProviderId[] = [];
   const latestCalls: ProviderId[] = [];
   const versionCalls: ProviderId[] = [];
+  const findCalls: ProviderId[] = [];
   const updates: ConnectionHealth[] = [];
   const manuals: boolean[] = [];
   const restarts: ProviderId[] = [];
@@ -34,17 +36,17 @@ function setup(over: {
   const providers = over.providers ?? (['codex'] as ProviderId[]);
   const monitor = new ConnectionMonitor({
     providers,
-    findBinary: async (id) => (over.found ? over.found(id) : `C:\\bin\\${id}.exe`),
+    findBinary: async (id) => (findCalls.push(id), over.found ? over.found(id) : `C:\\bin\\${id}.exe`),
     getVersion: async (id) => { versionCalls.push(id); return over.versions ? over.versions() : over.version === undefined ? '0.163.0' : over.version; },
     getLatest: async (id) => { latestCalls.push(id); return over.latest ? over.latest() : '0.163.0'; },
     adapters: { ensure: async (id) => (over.hasAdapter && !over.hasAdapter() ? undefined : (adapter(id) as never)) },
-    onUpdate: (h) => updates.push(h),
+    onUpdate: (h) => { updates.push(h); over.onUpdate?.(h); },
     now: () => new Date('2026-10-22T10:00:00Z'),
     ...(over.healthMs ? { healthMs: over.healthMs } : {}),
     ...(over.versionMs ? { versionMs: over.versionMs } : {}),
     ...(over.retryMs ? { retryMs: over.retryMs } : {}),
   });
-  return { monitor, pings, latestCalls, versionCalls, updates, manuals, restarts };
+  return { monitor, pings, latestCalls, versionCalls, findCalls, updates, manuals, restarts };
 }
 
 test('installed 0.163.0, latest 0.163.0, ping ok and signed in is connected', async () => {
@@ -301,4 +303,83 @@ test('a pending restart is retried every check until the helper is idle', async 
   assert.equal(s.restarts.length, 3);
   await s.monitor.check();
   assert.equal(s.restarts.length, 3, 'done: not repeated');
+});
+
+test('a throwing onUpdate never becomes an unhandled rejection and the next health tick still runs', async (t) => {
+  mock.timers.enable({ apis: ['setInterval', 'setTimeout'] });
+  t.mock.method(console, 'error', () => {});
+  const flush = async () => { for (let i = 0; i < 20; i++) await new Promise((r) => setImmediate(r)); };
+  let unhandled = 0;
+  const onUnhandled = () => { unhandled++; };
+  process.on('unhandledRejection', onUnhandled);
+  let n = 0;
+  // Each ping reports something new, so every check publishes (and the listener throws every time).
+  const s = setup({ ping: async () => ({ ok: true, signedIn: true, message: `note ${n++}` }), onUpdate: () => { throw new Error('listener broke'); } });
+  try {
+    s.monitor.start();
+    await flush();
+    mock.timers.tick(60_000);
+    await flush();
+    assert.equal(s.pings.length, 2);
+    assert.equal(unhandled, 0);
+    assert.equal(s.monitor.latest()[0]!.message, 'Connected. note 1');
+  } finally { s.monitor.stop(); mock.timers.reset(); process.off('unhandledRejection', onUnhandled); }
+});
+
+test('the degraded retry only pings (cached path and version) and backs off 5 s, 10 s, 20 s, 40 s, 60 s', async () => {
+  mock.timers.enable({ apis: ['setInterval', 'setTimeout'] });
+  const flush = async () => { for (let i = 0; i < 20; i++) await new Promise((r) => setImmediate(r)); };
+  let fail = true;
+  const s = setup({ healthMs: 3_600_000, retryMs: 5000, ping: async () => (fail ? { ok: false, signedIn: null } : { ok: true, signedIn: true }) });
+  try {
+    s.monitor.start();
+    await flush();
+    assert.equal(s.pings.length, 1);
+    assert.equal(s.findCalls.length, 1);
+    assert.equal(s.versionCalls.length, 1);
+    mock.timers.tick(4999); await flush();
+    assert.equal(s.pings.length, 1, 'not before 5 s');
+    const expected = [1, 10_000, 20_000, 40_000, 60_000, 60_000];
+    for (let i = 0; i < expected.length; i++) {
+      mock.timers.tick(expected[i]! - 1); await flush();
+      assert.equal(s.pings.length, i + 1, `no early retry before step ${i}`);
+      mock.timers.tick(1); await flush();
+      assert.equal(s.pings.length, i + 2, `retry ${i} ran`);
+    }
+    assert.equal(s.findCalls.length, 1, 'the retry never looks for the binary again');
+    assert.equal(s.versionCalls.length, 1, 'the retry never re-reads the version');
+    assert.equal(s.latestCalls.length, 1);
+    assert.equal(s.monitor.latest()[0]!.path, 'C:\\bin\\codex.exe');
+    assert.equal(s.monitor.latest()[0]!.version, '0.163.0');
+    fail = false;
+    mock.timers.tick(60_000); await flush();
+    assert.equal(s.monitor.latest()[0]!.status, 'connected');
+    const after = s.pings.length;
+    mock.timers.tick(10 * 60_000); await flush();
+    assert.equal(s.pings.length, after, 'no retries once connected');
+  } finally { s.monitor.stop(); mock.timers.reset(); }
+});
+
+test('no degraded retries while the adapter has given up, until a manual check', async () => {
+  mock.timers.enable({ apis: ['setInterval', 'setTimeout'] });
+  const flush = async () => { for (let i = 0; i < 20; i++) await new Promise((r) => setImmediate(r)); };
+  let gaveUp = true;
+  const s = setup({
+    healthMs: 3_600_000, retryMs: 5000,
+    ping: async () => (gaveUp
+      ? { ok: false, signedIn: null, message: 'Codex keeps stopping. Use Check now to try again.', gaveUp: true }
+      : { ok: false, signedIn: null }),
+  });
+  try {
+    s.monitor.start();
+    await flush();
+    assert.equal(s.monitor.latest()[0]!.message, 'Codex keeps stopping. Use Check now to try again.');
+    mock.timers.tick(5 * 60_000); await flush();
+    assert.equal(s.pings.length, 1, 'no automatic retries after giving up');
+    gaveUp = false;
+    await s.monitor.check();
+    assert.equal(s.pings.length, 2);
+    mock.timers.tick(5000); await flush();
+    assert.equal(s.pings.length, 3, 'retries resume after a manual check');
+  } finally { s.monitor.stop(); mock.timers.reset(); }
 });

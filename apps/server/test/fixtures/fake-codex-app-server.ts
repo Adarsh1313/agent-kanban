@@ -63,6 +63,11 @@ createInterface({ input: process.stdin }).on('line', (line) => {
   if (process.env.FAKE_LOG) appendFileSync(process.env.FAKE_LOG, JSON.stringify({ method: m.method, params: m.params }) + '\n');
   switch (m.method) {
     case 'model/list':
+      if (process.env.FAKE_MODEL_PAGES) {
+        const pages = JSON.parse(process.env.FAKE_MODEL_PAGES) as unknown[][];
+        const i = m.params?.cursor ? Number(String(m.params.cursor).slice(1)) : 0;
+        return send({ id: m.id, result: { data: pages[i] ?? [], nextCursor: i + 1 < pages.length ? `p${i + 1}` : null } });
+      }
       return send({ id: m.id, result: { data: JSON.parse(process.env.FAKE_MODELS ?? '[]') } });
     case 'initialize':
       if (scenario === 'hanginit') return; // never answers
