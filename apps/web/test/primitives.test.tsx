@@ -212,6 +212,8 @@ describe('small primitives', () => {
     const { container } = render(<><StatusIcon state="running" /><StatusIcon state="needs_you" /><StatusIcon state="review" /><StatusIcon state="done" /></>);
     expect(container.querySelectorAll('svg.status').length).toBe(4);
     expect(container.querySelector('svg.running circle.arc')).toBeTruthy();
+    const glyphs = [...container.querySelectorAll('path[stroke], circle[fill="var(--color-on-status)"]')].filter((n) => n.getAttribute('stroke') === 'var(--color-on-status)' || n.getAttribute('fill') === 'var(--color-on-status)');
+    expect(glyphs.length).toBe(3);
   });
 
   it('ProviderLogo points at the shipped svg', () => {
