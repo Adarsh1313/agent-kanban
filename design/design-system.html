@@ -9,6 +9,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="tokens.css">
 <link rel="stylesheet" href="components.css">
+<link rel="stylesheet" href="views.css">
 <style>
   main { max-width: 1080px; margin: 0 auto; padding: var(--space-8) var(--space-4) 96px; }
   h1 { font-size: 28px; font-weight: var(--weight-semibold); letter-spacing: -0.02em; margin: 0 0 var(--space-1); }
@@ -127,6 +128,60 @@
     </div>
   </div>
 
+  <h3>Focused on one provider</h3>
+  <div class="stage"><div class="row" id="focusDemo"></div></div>
+  <p class="note">Clicking a provider in the sidebar filters the board to it, and the top bar shows only that provider's two meters, plus a way back to everyone's usage.</p>
+
+  <!-- 4b. Filters -->
+  <h2>Filters</h2>
+  <p class="lede">Linear's pattern. <b>Filter</b> (or F) opens a list of categories; choosing one slides in its options with <b>Select all</b> and <b>None</b>; typing searches values across every category. Active filters sit under the top bar as chips you can remove. Clicking a provider in the sidebar is a shortcut for "Provider is X".</p>
+  <div class="grid2">
+    <div class="stage" style="display:flex;gap:var(--space-3);flex-wrap:wrap;align-items:flex-start">
+      <div class="popover menu" data-state="open" style="position:static;box-shadow:0 0 0 1px var(--color-border)" id="filterRootDemo"></div>
+      <div class="popover menu" data-state="open" style="position:static;box-shadow:0 0 0 1px var(--color-border)" id="filterPaneDemo"></div>
+    </div>
+    <div class="stage">
+      <div class="filterbar" style="border:0;padding:0" id="chipsRowDemo"></div>
+      <p class="note">Chips read as sentences: Provider is any of Claude, Codex. "None" shows an honest empty result with a way out:</p>
+      <div style="text-align:center;padding:var(--space-4);color:var(--color-text-muted)"><span data-icon="filter"></span><div style="font-weight:600;color:var(--color-text);margin:6px 0 2px">No chats match these filters</div><div style="font-size:var(--text-caption);margin-bottom:var(--space-3)">Try fewer filters, or clear them all.</div><button class="btn" type="button">Clear filters</button></div>
+    </div>
+  </div>
+
+  <!-- 4c. Projects -->
+  <h2>Projects</h2>
+  <p class="lede">Every folder an agent has worked in. The list is Linear-style rows; a project page shows which providers know it, its chats, and what each provider can read from the folder. Providers that haven't worked in a project are shown, dashed, so the absence is clear rather than hidden.</p>
+  <div class="stage" style="padding:0;overflow:hidden"><div class="plist" style="border:0;border-radius:0" id="plistDemo"></div></div>
+  <div class="grid2" style="margin-top:var(--space-4)">
+    <div class="stage"><div class="know-grid" style="grid-template-columns:repeat(2,minmax(0,1fr));margin:0" id="knowDemo"></div>
+      <div style="margin-top:var(--space-3)"><span class="seg" id="segDemo"><span class="thumb"></span><button type="button" data-v="all" aria-pressed="true">All</button><button type="button" data-v="codex" aria-pressed="false">Codex</button><button type="button" data-v="antigravity" aria-pressed="false">Antigravity</button></span></div>
+      <p class="note">Segmented control: the thumb slides on <code>--duration-move</code>.</p></div>
+    <div class="stage"><aside class="about" id="aboutDemo"></aside></div>
+  </div>
+
+  <!-- 4d. Connections -->
+  <h2>Connections</h2>
+  <p class="lede">One card per agent app. Every state has a dot and a word, never colour alone. The official installer and sign-in run behind the buttons; the step text crossfades as the install moves on, and a check pops once when it's done. Sign out asks first and says what stops working.</p>
+  <div class="conn-grid" id="connStates" style="grid-template-columns:repeat(auto-fill,minmax(230px,1fr))"></div>
+  <div class="row"><button class="btn" type="button" id="connPlay"><span data-icon="play" data-size="sm"></span>Play the setup</button><span class="note" style="margin:0">Not installed → Installing → Signed out → Waiting for sign-in → Connected</span></div>
+
+  <!-- 4e. Onboarding and empty states -->
+  <h2>Onboarding and empty states</h2>
+  <p class="lede">First run is full screen, centred, four counted steps after a welcome: Connect, Bring in your chats, Notifications, Ready. Steps slide 16px on a shared axis and Back slides the other way. Empty states say what belongs here and give the next action, never just "Nothing here".</p>
+  <div class="grid2">
+    <div class="stage">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--space-3)"><small class="note" style="margin:0" id="obCount">Step 1 of 4</small><div class="onb-bar" id="obBar"><i></i><i></i><i></i><i></i></div></div>
+      <div class="agent-list" id="obAgents"></div>
+      <div class="row" style="margin-top:var(--space-3)"><button class="btn ghost" type="button" id="obBack">Back</button><span style="flex:1"></span><button class="btn primary" type="button" id="obNext">Continue</button></div>
+    </div>
+    <div class="stage" style="position:relative;min-height:320px;display:grid;place-items:center">
+      <div class="board-empty" style="position:static;transform:none;width:100%;box-shadow:none" id="emptyDemo"></div>
+    </div>
+  </div>
+  <div class="row" style="margin-top:var(--space-3)">
+    <div class="stage" style="flex:1;min-width:240px"><div class="notif-empty">You're all caught up.</div></div>
+    <div class="stage" style="flex:1;min-width:240px"><div class="empty-note">Nothing needs you</div><div class="drop-hint" style="margin-top:var(--space-2)">Drag a finished chat here</div></div>
+  </div>
+
   <!-- 5. Components -->
   <h2>Components</h2>
   <h3>Buttons</h3>
@@ -175,6 +230,15 @@
       <tr><td>New chat dialog</td><td><code>--duration-dialog</code></td><td>200ms, scale 0.96 → 1, centred</td><td>Modals stay centred, not trigger-anchored</td></tr>
       <tr><td>Archive</td><td><code>--duration-expand</code></td><td>Height + opacity collapse, Undo toast</td><td>Neighbours close the gap smoothly</td></tr>
       <tr><td>Drag</td><td><code>--lift-scale</code></td><td>Follows the pointer, 1.5° tilt; snaps back in 200ms</td><td>Feels picked up; invalid drops return home</td></tr>
+      <tr><td>Switching pages (Board, Projects, Connections)</td><td><code>--duration-pop</code></td><td>8px slide + fade; back goes the other way</td><td>Tells you which direction you moved</td></tr>
+      <tr><td>Filter pane, Snooze pane</td><td><code>pane-in</code></td><td>8px slide from the side, 180ms</td><td>A sub-menu, not a new menu</td></tr>
+      <tr><td>Segmented control</td><td><code>--duration-move</code></td><td>Thumb slides; content swaps after 60% of it</td><td>One object moving, not two states blinking</td></tr>
+      <tr><td>Bell, new event</td><td><code>ring</code></td><td>520ms damped swing, once</td><td>Rare and important; never loops</td></tr>
+      <tr><td>Install progress</td><td>linear</td><td>Bar fills linearly; step text crossfades</td><td>Progress is constant motion</td></tr>
+      <tr><td>Connected / set up</td><td><code>pop</code></td><td>Check scales 0.6 → 1.08 → 1 once</td><td>The one celebratory moment, kept small</td></tr>
+      <tr><td>Onboarding step</td><td><code>onb-in</code></td><td>16px shared-axis slide, 260ms</td><td>Bigger move for a bigger change of context</td></tr>
+      <tr><td>Chats found count</td><td>rAF, cubic ease-out</td><td>Counts up over 700ms</td><td>Makes "we found your work" tangible</td></tr>
+      <tr><td>Projects list, first visit</td><td><code>--stagger</code></td><td>Rows rise 40ms apart, first visit only</td><td>Never replays on sort or search</td></tr>
     </tbody>
   </table>
   <p class="note">Reduced motion: travel, spin, sweep and scale are removed. Colour and opacity changes stay, because they still explain what happened.</p>
@@ -363,6 +427,92 @@ $('#chipsDemo').querySelectorAll('.usage-chip').forEach(ch => bindPopover(ch, po
   p.style.setProperty('--origin', `${r.left + r.width / 2 - parseFloat(p.style.left)}px top`);
 } }));
 addEventListener('scroll', () => KB.closeAll(), { passive: true });
+
+/* ── 4a. Focused usage ── */
+$('#focusDemo').innerHTML = `<span class="usage-focus">${logo('antigravity', 'sm')}
+  <span class="m" data-level="ok"><span>5-hour</span><i style="--left:.88"></i><b>88%</b></span>
+  <span class="m" data-level="ok"><span>Weekly</span><i style="--left:.74"></i><b>74%</b></span></span>
+  <button class="link-btn" type="button">${icon('gauge', 'sm')}Usage for all providers</button>`;
+
+/* ── 4b. Filters ── */
+const FCATS = [['plug', 'Provider', 2], ['projects', 'Project', 0], ['board', 'Status', 0], ['gauge', 'Model', 0], ['bell', 'Waiting on you for', 0], ['clock', 'Last activity', 0], ['external', 'Started in', 0]];
+$('#filterRootDemo').innerHTML = `<input class="menu-search" name="ds-filter" autocomplete="off" placeholder="Filter by…" aria-label="Search filters">` +
+  FCATS.map(([i, l, n]) => `<button class="menu-item" type="button">${icon(i)}${l}<span class="r">${n || ''}${icon('chevron-right', 'sm')}</span></button>`).join('');
+const fState = { claude: true, codex: true, antigravity: false };
+const box = '<span class="box"><svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span>';
+function paintFilter() {
+  $('#filterPaneDemo').innerHTML = `<div class="menu-label"><button class="btn icon-only ghost" type="button" aria-label="Back" style="width:22px;height:22px">${icon('back', 'sm')}</button>Provider<span class="links"><button type="button" data-all>Select all</button><button type="button" data-none>None</button></span></div>` +
+    Object.keys(PROVIDERS).map(id => `<button class="menu-item" type="button" role="menuitemcheckbox" data-p="${id}" aria-checked="${fState[id]}">${box}${logo(id, 'sm')}${PROVIDERS[id].name}</button>`).join('');
+  $('#filterPaneDemo').querySelectorAll('[data-p]').forEach(b => b.onclick = () => { fState[b.dataset.p] = !fState[b.dataset.p]; b.setAttribute('aria-checked', fState[b.dataset.p]); paintChips(); });
+  $('#filterPaneDemo [data-all]').onclick = () => { Object.keys(fState).forEach(k => fState[k] = true); paintFilter(); paintChips(); };
+  $('#filterPaneDemo [data-none]').onclick = () => { Object.keys(fState).forEach(k => fState[k] = false); paintFilter(); paintChips(); };
+}
+function paintChips() {
+  const on = Object.keys(fState).filter(k => fState[k]);
+  const v = on.length === 0 ? 'none selected' : on.map(id => `${logo(id, 'sm')}${PROVIDERS[id].name}`).join(', ');
+  $('#chipsRowDemo').innerHTML = (on.length === 3 ? '' : `<span class="fchip"><span class="k">${icon('plug', 'sm')}Provider</span><span class="op">${on.length > 1 ? 'is any of' : 'is'}</span><span class="v">${v}</span><button type="button" aria-label="Remove filter">${icon('x', 'sm')}</button></span>`) +
+    `<span class="fchip"><span class="k">${icon('clock', 'sm')}Last activity</span><span class="op">is</span><span class="v">Today</span><button type="button" aria-label="Remove filter">${icon('x', 'sm')}</button></span>`;
+}
+paintFilter(); paintChips();
+
+/* ── 4c. Projects ── */
+const PROWS = [['lila-black', '#3f6fb0', 'C:\\Users\\Adarsh\\lila-black', [['codex', 2], ['antigravity', 1]], [['running', 1], ['needs', 1], ['review', 1]], '1m ago'],
+  ['Portfolio', '#b5654a', 'C:\\Users\\Adarsh\\Portfolio', [['claude', 3]], [['review', 1], ['done', 1]], '1h ago']];
+const SC = { running: 'var(--color-running)', needs: 'var(--color-needs)', review: 'var(--color-review)', done: 'var(--color-done)' };
+$('#plistDemo').innerHTML = `<div class="plist-head"><span>Project</span><span>Worked on with</span><span>Chats</span><span>Last activity</span><span></span></div>` + PROWS.map(([n, col, path, who, st, when]) => {
+  const total = st.reduce((a, [, k]) => a + k, 0) + 1;
+  return `<div class="prow" tabindex="0"><div class="name"><span class="folder-glyph big-glyph" style="background:${col}">${n[0].toUpperCase()}</span><span><b>${n}</b><small>${path}</small></span></div>
+    <div class="who-knows">${who.map(([p, k]) => `<span class="p">${logo(p, 'sm')}${k}</span>`).join('')}</div>
+    <div class="statusbar"><span class="bar">${st.map(([s, k]) => `<i style="width:${k / total * 100}%;background:${SC[s]}"></i>`).join('')}<i style="width:${100 / total}%;background:var(--color-border-strong)"></i></span>
+      <span class="legend">${st.filter(([s]) => s !== 'done').map(([s, k]) => `<span>${statusIcon(s)}${k} ${{ running: 'working', needs: 'need you', review: 'to review' }[s]}</span>`).join('')}</span></div>
+    <div class="when">${when}</div><div class="go">${icon('chevron-right')}</div></div>`;
+}).join('');
+$('#knowDemo').innerHTML = `<div class="know"><div class="h">${logo('codex')}Codex<span class="r">2 chats</span></div><p>Last used just now · GPT-5 Codex</p><button class="btn" type="button">${icon('plus', 'sm')}New Codex chat</button></div>
+  <div class="know off"><div class="h">${logo('claude')}Claude</div><p>Hasn't worked in this project yet.</p></div>`;
+$('#aboutDemo').innerHTML = `<div class="blk"><span class="k">BUILT WITH</span><span class="v"><span class="tagchip">TypeScript</span><span class="tagchip">Vite</span><span class="tagchip">Parquet</span></span></div>
+  <div class="blk"><span class="k">GIT</span><span class="v">${icon('branch', 'sm')}<span class="mono">feat/heatmap</span></span><span class="v" style="color:var(--color-text-muted)">Add replay timeline scrubber · 2h ago</span></div>
+  <div class="blk"><span class="k">INSTRUCTIONS EACH PROVIDER READS</span>
+    ${[['claude', 'CLAUDE.md', false], ['codex', 'AGENTS.md', true], ['antigravity', 'GEMINI.md', true]].map(([p, f, ok]) => `<div class="file-line">${ok ? `<span class="ok">${icon('check', 'sm')}</span>` : `<span class="no">${icon('x', 'sm')}</span>`}<span class="mono">${f}</span><small>${logo(p, 'sm')}${ok ? 'Found' : 'Not in this folder'}</small></div>`).join('')}</div>`;
+(function seg() {
+  const s = $('#segDemo'), t = s.querySelector('.thumb'), bs = [...s.querySelectorAll('button')];
+  const place = b => { t.style.width = b.offsetWidth + 'px'; t.style.transform = `translateX(${b.offsetLeft - 2}px)`; };
+  requestAnimationFrame(() => { t.style.transition = 'none'; place(bs[0]); t.offsetWidth; t.style.transition = ''; });
+  bs.forEach(b => b.onclick = () => { bs.forEach(x => x.setAttribute('aria-pressed', x === b)); place(b); });
+})();
+
+/* ── 4d. Connections ── */
+const CSTATE = {
+  missing: ['Not installed', `<span>Codex isn't on this computer yet. Installing takes about a minute and uses the official OpenAI installer.</span>`, `<span class="grow"></span><button class="btn primary" type="button">Install Codex</button>`],
+  installing: ['Installing', `<span class="step-text">${icon('refresh', 'sm')}Checking the download</span><div class="progress"><i style="--p:.7"></i></div>`, `<span class="grow"></span><button class="btn ghost" type="button">Cancel</button>`],
+  signedout: ['Signed out', `<span class="step-text"><span class="done-mark">${icon('check')}</span>Installed. Sign in to finish setting up.</span>`, `<span class="grow"></span><button class="btn primary" type="button">Sign in</button>`],
+  signin: ['Waiting for sign-in', `<span class="step-text">${statusIcon('running')}Finish signing in in your browser</span><span>This updates on its own when you're done.</span>`, `<button class="link-btn" type="button">${icon('external', 'sm')}Open the browser again</button><span class="grow"></span><button class="btn ghost" type="button">Cancel</button>`],
+  connected: ['Connected', `<dl class="facts"><dt>Version</dt><dd>0.156.1</dd><dt>Chats found</dt><dd>69 in <span class="mono">~/.codex</span></dd></dl>`, `<button class="btn ghost" type="button">${icon('refresh', 'sm')}Check for updates</button><span class="grow"></span><button class="btn ghost" type="button">Sign out</button>`],
+  error: ['Needs attention', `<span class="step-text" style="color:var(--color-danger)">${icon('x', 'sm')}Sign-in didn't finish</span><span>The browser closed before Codex got your sign-in. Try again.</span>`, `<span class="grow"></span><button class="btn primary" type="button">Try again</button>`],
+};
+const connCardDemo = st => `<div class="conn" data-state="${st}"><div class="conn-head">${logo('codex').replace('class="logo "', 'class="logo"')}<div class="t"><b>Codex</b><small>${st === 'connected' ? 'Signed in with ChatGPT · Plus' : 'OpenAI'}</small></div>
+  <span class="conn-state"><i></i><span>${CSTATE[st][0]}</span></span></div><div class="conn-body">${CSTATE[st][1]}</div><div class="conn-foot">${CSTATE[st][2]}</div></div>`;
+$('#connStates').innerHTML = ['missing', 'installing', 'signin', 'connected', 'error'].map(connCardDemo).join('');
+$('#connPlay').onclick = () => {
+  const order = ['missing', 'installing', 'signedout', 'signin', 'connected'];
+  const host = $('#connStates').firstElementChild; let i = 0;
+  const step = () => { const tmp = document.createElement('div'); tmp.innerHTML = connCardDemo(order[i]); const fresh = tmp.firstElementChild; $('#connStates').replaceChild(fresh, $('#connStates').firstElementChild);
+    if (order[i] === 'installing') { const bar = fresh.querySelector('.progress i'); bar.style.setProperty('--p', 0); requestAnimationFrame(() => bar.style.setProperty('--p', 1)); bar.style.transition = 'transform 1100ms linear'; }
+    if (++i < order.length) setTimeout(step, 1200); };
+  step();
+};
+
+/* ── 4e. Onboarding + empty states ── */
+const OB = [['claude', 'Found and signed in', 'ok'], ['codex', 'Installed, not signed in', 'Sign in'], ['antigravity', 'Not on this computer', 'Install']];
+$('#obAgents').innerHTML = OB.map(([p, sub, act]) => `<div class="agent">${logo(p)}<div class="t"><b>${{ claude: 'Claude Code', codex: 'Codex', antigravity: 'Antigravity' }[p]}</b><small>${sub}</small></div>${act === 'ok' ? `<span class="ok"><span class="done-mark">${icon('check')}</span>Connected</span>` : `<button class="btn" type="button">${act}</button>`}</div>`).join('');
+let obStep = 1;
+const paintOb = () => { $('#obCount').textContent = `Step ${obStep} of 4`; $('#obBar').querySelectorAll('i').forEach((i, n) => i.style.setProperty('--f', n < obStep ? 1 : 0)); };
+$('#obNext').onclick = () => { obStep = Math.min(4, obStep + 1); paintOb(); };
+$('#obBack').onclick = () => { obStep = Math.max(1, obStep - 1); paintOb(); };
+paintOb();
+$('#emptyDemo').innerHTML = `<div class="empty-art" aria-hidden="true"><i></i><i></i><i></i><i></i></div><h2>Nothing on the board yet</h2>
+  <p>Start a chat and it shows up in Running, then moves across the board on its own as the agent works.</p>
+  <div class="acts"><button class="btn primary" type="button">${icon('plus', 'sm')}Start a chat <span class="kbd">N</span></button><button class="btn ghost" type="button">${icon('projects', 'sm')}Browse projects</button></div>
+  <div class="recent"><div class="k">OR PICK UP WHERE YOU LEFT OFF</div><button class="rc" type="button">${logo('claude', 'sm')}<span class="t">AI agent Kanban board</span><small>open-project · 2m</small></button></div>`;
 
 /* ── 5. Components ── */
 $('#badgeRow').innerHTML = `

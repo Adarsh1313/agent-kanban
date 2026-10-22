@@ -31,7 +31,7 @@ function renderConnections() {
     <h2 class="section-title">More agents, coming later <span class="r" style="color:var(--color-text-faint);font-size:var(--text-caption)">Including free ones</span></h2>
     <div class="conn-grid">${LATER.map(laterCard).join('')}
       <div class="conn later"><div class="conn-head"><span class="logo-tile">${icon('plus')}</span><div class="t"><b>Something else?</b><small>Tell us which agent you use</small></div></div>
-        <div class="conn-body"><label class="search" style="width:100%"><input id="reqInput" placeholder="For example: Amp, Goose, Aider" aria-label="Agent name" style="width:100%"></label></div>
+        <div class="conn-body"><label class="search" style="width:100%"><input id="reqInput" name="agent-request" autocomplete="off" placeholder="For example: Amp, Goose, Aider…" aria-label="Agent name" style="width:100%"></label></div>
         <div class="conn-foot"><span class="grow"></span><button class="btn" type="button" id="reqBtn">Request</button></div></div>
     </div>
     <div class="demo-bar">Prototype only:

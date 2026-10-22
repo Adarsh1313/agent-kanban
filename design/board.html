@@ -3,6 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#fbfbfa" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#121213" media="(prefers-color-scheme: dark)">
 <title>Agent Kanban Board</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -31,6 +33,7 @@
 </style>
 </head>
 <body>
+<a class="skip" href="#board">Skip to the board</a>
 <div class="app">
   <!-- ───────── Sidebar ───────── -->
   <aside class="sidebar" aria-label="Sidebar">
@@ -73,7 +76,7 @@
   <!-- ───────── Main ───────── -->
   <div class="main">
     <header class="topbar">
-      <div class="title"><span id="viewIcon"><span data-icon="board"></span></span><span id="viewTitle">Board</span><span class="crumb" id="crumb"></span></div>
+      <h1 class="title"><span id="viewIcon"><span data-icon="board"></span></span><span id="viewTitle">Board</span><span class="crumb" id="crumb"></span></h1>
       <button class="chip-btn" type="button" id="filterBtn" aria-haspopup="true" aria-expanded="false"><span data-icon="filter" data-size="sm"></span>Filter</button>
       <span class="spacer"></span>
       <div class="usage-area" id="usageArea"></div>
@@ -82,7 +85,7 @@
     </header>
     <div class="view" id="viewBoard" data-view="board">
       <div class="filterbar" id="filterbar" hidden></div>
-      <main class="board" id="board" aria-label="Board"></main>
+      <main class="board" id="board" aria-label="Board" tabindex="-1"></main>
     </div>
     <div class="view" id="viewProjects" data-view="projects" hidden><div class="page" id="projectsPage"></div></div>
     <div class="view" id="viewConnections" data-view="connections" hidden><div class="page" id="connPage"></div></div>
@@ -111,7 +114,7 @@
 <div class="dialog" id="dialog" data-state="closed" role="dialog" aria-modal="true" aria-labelledby="dlgTitle">
   <div class="dialog-head"><h2 id="dlgTitle">New chat</h2><button class="btn icon-only ghost" type="button" id="dlgClose" aria-label="Close"><span data-icon="x"></span></button></div>
   <div class="dialog-body">
-    <textarea id="prompt" placeholder="What should the agent do next?" aria-label="Prompt"></textarea>
+    <textarea id="prompt" name="prompt" autocomplete="off" placeholder="What should the agent do next? For example: add a dark mode toggle…" aria-label="Prompt"></textarea>
     <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
       <button class="chip-btn" type="button" id="projBtn" aria-haspopup="true" aria-expanded="false"></button>
       <button class="chip-btn" type="button" id="provBtn" aria-haspopup="true" aria-expanded="false"></button>
@@ -244,7 +247,7 @@ function renderFilterBar() {
 /* Filter menu: categories → options pane, with search, Select all / None */
 const filterPop = $('#filterPop');
 function filterRoot(back = false) {
-  filterPop.innerHTML = `<div class="pane ${back ? 'back' : ''}"><input class="menu-search" placeholder="Filter by…" aria-label="Search filters" id="fSearch">
+  filterPop.innerHTML = `<div class="pane ${back ? 'back' : ''}"><input class="menu-search" name="filter-search" type="search" autocomplete="off" spellcheck="false" placeholder="Filter by…" aria-label="Search filters" id="fSearch">
     <div id="fItems">${Object.entries(FILTER_DEFS).map(([k, d]) => `<button class="menu-item" type="button" data-key="${k}">${icon(d.icon)}${d.label}<span class="r">${filters[k] ? (d.single ? 1 : filters[k].size) : ''}${icon('chevron-right', 'sm')}</span></button>`).join('')}</div></div>`;
   filterPop.querySelectorAll('[data-key]').forEach(b => b.addEventListener('click', () => filterPane(b.dataset.key)));
   const s = $('#fSearch'); s.focus({ preventScroll: true });

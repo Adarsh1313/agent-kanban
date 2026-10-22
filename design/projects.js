@@ -28,7 +28,7 @@ function renderProjects(arg, { back } = {}) {
   page.scrollTop = 0;
   projectsState.mode === 'detail' ? wireProjectDetail() : wireProjectList();
   bindTooltips(page);
-  document.getElementById('crumb').textContent = projectsState.mode === 'detail' ? ` › ${projectsState.id}` : '';
+  document.getElementById('crumb').textContent = ''; // the page has its own breadcrumb
 }
 
 /* ───────── List ───────── */
@@ -55,7 +55,7 @@ function projectListHtml() {
   return `<div class="page-inner">
     <div class="page-head"><div class="t"><h1>Projects <span class="count" style="font-size:var(--text-body);color:var(--color-text-faint);font-weight:400">${PROJECTS.length}</span></h1>
       <p>Every folder an agent has worked in, found in your Claude Code, Codex and Antigravity history. Open one to see which providers know it and what they can read.</p></div>
-      <label class="search">${icon('search', 'sm')}<input id="projSearch" placeholder="Search projects" value="${projectsState.q}" aria-label="Search projects"></label>
+      <label class="search">${icon('search', 'sm')}<input id="projSearch" name="project-search" type="search" autocomplete="off" spellcheck="false" placeholder="Search projects…" value="${projectsState.q}" aria-label="Search projects"></label>
       <button class="btn" type="button" id="addFolder">${icon('folder', 'sm')}Add a folder</button>
     </div>
     ${list.length ? `<div class="plist" role="table" aria-label="Projects">
