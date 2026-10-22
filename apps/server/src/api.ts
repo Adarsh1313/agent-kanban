@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { statusPageHtml } from './status-page.ts';
 import { statSync } from 'node:fs';
 import { timingSafeEqual } from 'node:crypto';
 import { WebSocketServer, WebSocket } from 'ws';
@@ -222,7 +223,13 @@ export function createApi(opts: {
     const landing = req.method === 'GET' && url.pathname === '/';
     if (!given && landing) given = url.searchParams.get('token');
     if (!tokenOk(given, token)) return send(401, { error: 'Missing or wrong token.' });
-    if (landing) { res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' }); res.end('Agent Kanban server is running.'); return; }
+    if (landing) {
+      // Browsers get the live console; scripts asking for text still get the plain line.
+      const wantsHtml = (req.headers.accept ?? '').includes('text/html');
+      res.writeHead(200, { 'Content-Type': wantsHtml ? 'text/html; charset=utf-8' : 'text/plain; charset=utf-8', 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' });
+      res.end(wantsHtml ? statusPageHtml() : 'Agent Kanban server is running.');
+      return;
+    }
     route(req, url).then(
       (r) => send(r.status, r.body),
       (err: unknown) => {
