@@ -1,0 +1,266 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { ClaudeAdapter, readClaudeUsage } from '../src/adapters/claude.ts';
+import { claudeUsageToReading } from '../src/usage/parse.ts';
+
+type Opts = any;
+type Script = (opts: Opts, input: AsyncIterator<any>) => AsyncGenerator<any>;
+
+/** A fake `query` whose generator runs `script`; records every call's options. */
+function fake(script: Script, extra: Record<string, unknown> = {}) {
+  const calls: { options: Opts; interrupted: number; closed: number }[] = [];
+  const query = ((params: { prompt: AsyncIterable<any>; options: Opts }) => {
+    const rec = { options: params.options, interrupted: 0, closed: 0 };
+    calls.push(rec);
+    const gen: any = script(params.options, params.prompt[Symbol.asyncIterator]());
+    gen.interrupt = async () => { rec.interrupted++; };
+    gen.close = () => { rec.closed++; gen.return(undefined).catch(() => {}); };
+    Object.assign(gen, extra);
+    return gen;
+  }) as any;
+  return { query, calls };
+}
+const init = (id = 'sess-1') => ({ type: 'system', subtype: 'init', session_id: id });
+const text = (t: string) => ({ type: 'assistant', session_id: 's', message: { id: 'm1', content: [{ type: 'text', text: t }] } });
+const result = (over = {}) => ({ type: 'result', subtype: 'success', is_error: false, result: 'ok', session_id: 's', ...over });
+const never = () => new Promise<never>(() => {});
+function collect(a: ClaudeAdapter) { const ev: any[] = []; a.onEvent((e) => ev.push(e)); return ev; }
+const tick = () => new Promise((r) => setTimeout(r, 10));
+
+test('startChat passes options and resolves with the init session id', async () => {
+  const f = fake(async function* (_o, input) { await input.next(); yield init('abc'); await never(); });
+  const a = new ClaudeAdapter({ claudePath: 'C:\\x\\claude.exe', query: f.query });
+  const ev = collect(a);
+  const r = await a.startChat({ cwd: 'C:\\proj', prompt: 'hi', model: 'sonnet' });
+  assert.equal(r.sessionRef, 'abc');
+  const o = f.calls[0]!.options;
+  assert.equal(o.pathToClaudeCodeExecutable, 'C:\\x\\claude.exe');
+  assert.equal(o.cwd, 'C:\\proj');
+  assert.equal(o.model, 'sonnet');
+  assert.equal(o.permissionMode, 'default');
+  assert.equal(o.resume, undefined);
+  assert.deepEqual(ev, [{ type: 'session.started', sessionRef: 'abc' }]);
+  await a.dispose();
+});
+
+test('claudePath that is a .cmd shim resolves to the real exe', async () => {
+  const shim = fileURLToPath(new URL('./fixtures/shims/claude.cmd', import.meta.url));
+  const f = fake(async function* (_o, input) { await input.next(); yield init(); await never(); });
+  const a = new ClaudeAdapter({ claudePath: shim, query: f.query });
+  await a.startChat({ cwd: '.', prompt: 'x' });
+  assert.equal(f.calls[0]!.options.pathToClaudeCodeExecutable,
+    path.win32.join(path.win32.dirname(shim), 'node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe'));
+  await a.dispose();
+});
+
+test('maps assistant text, tool_use and result to events', async () => {
+  const f = fake(async function* (_o, input) {
+    await input.next();
+    yield init();
+    yield { type: 'assistant', session_id: 's', message: { id: 'm1', content: [
+      { type: 'text', text: 'Working' },
+      { type: 'tool_use', id: 't1', name: 'Edit', input: { file_path: 'signup.tsx' } },
+      { type: 'tool_use', id: 't2', name: 'Bash', input: { command: 'npm test' } },
+      { type: 'tool_use', id: 't3', name: 'Read', input: { file_path: 'a.ts' } },
+      { type: 'tool_use', id: 't4', name: 'Grep', input: {} },
+    ] } };
+    yield result();
+    await never();
+  });
+  const a = new ClaudeAdapter({ claudePath: 'c', query: f.query });
+  const ev = collect(a);
+  await a.startChat({ cwd: '.', prompt: 'go' });
+  await tick();
+  const types = ev.map((e) => e.type);
+  assert.deepEqual(types, ['session.started', 'turn.started', 'message.completed', 'tool.call', 'tool.call', 'tool.call', 'tool.call', 'turn.completed']);
+  assert.equal(ev[2].text, 'Working');
+  assert.deepEqual(ev.slice(3, 7).map((e) => e.summary), ['Editing signup.tsx', 'Running npm test', 'Reading a.ts', 'Grep']);
+  assert.equal(ev[3].toolCallId, 't1');
+  await a.dispose();
+});
+
+test('is_error result becomes an error event', async () => {
+  const f = fake(async function* (_o, input) { await input.next(); yield init(); yield result({ subtype: 'error_during_execution', is_error: true, result: undefined }); await never(); });
+  const a = new ClaudeAdapter({ claudePath: 'c', query: f.query });
+  const ev = collect(a);
+  await a.startChat({ cwd: '.', prompt: 'go' });
+  await tick();
+  assert.equal(ev.at(-1).type, 'error');
+  assert.ok(ev.at(-1).message.length > 0);
+  await a.dispose();
+});
+
+test('deny resolves canUseTool with the declined message', async () => {
+  let outcome: any;
+  const f = fake(async function* (o, input) {
+    await input.next(); yield init();
+    outcome = await o.canUseTool('Bash', { command: 'npm test' }, { signal: new AbortController().signal });
+    yield result(); await never();
+  });
+  const a = new ClaudeAdapter({ claudePath: 'c', query: f.query });
+  const ev = collect(a);
+  const { sessionRef } = await a.startChat({ cwd: '.', prompt: 'go' });
+  await tick();
+  const req = ev.find((e) => e.type === 'request.opened');
+  assert.equal(req.kind, 'permission');
+  assert.equal(req.summary, 'Running npm test');
+  await a.respondToRequest(sessionRef, req.requestId, 'deny');
+  await tick();
+  assert.deepEqual(outcome, { behavior: 'deny', message: 'The user declined.' });
+  await a.dispose();
+});
+
+test('allow returns the input; AskUserQuestion reply fills answers; reply on other tools denies', async () => {
+  const outcomes: any[] = [];
+  const f = fake(async function* (o, input) {
+    await input.next(); yield init();
+    const sig = { signal: new AbortController().signal };
+    outcomes.push(await o.canUseTool('Bash', { command: 'ls' }, sig));
+    outcomes.push(await o.canUseTool('AskUserQuestion', { questions: [{ question: 'Which db?' }] }, sig));
+    outcomes.push(await o.canUseTool('Write', { file_path: 'x' }, sig));
+    await never();
+  });
+  const a = new ClaudeAdapter({ claudePath: 'c', query: f.query });
+  const ev = collect(a);
+  const { sessionRef } = await a.startChat({ cwd: '.', prompt: 'go' });
+  const next = async () => { await tick(); return ev.filter((e) => e.type === 'request.opened').at(-1); };
+  await a.respondToRequest(sessionRef, (await next()).requestId, 'allow');
+  const q = await next();
+  assert.equal(q.kind, 'question');
+  assert.equal(q.summary, 'Which db?');
+  await a.respondToRequest(sessionRef, q.requestId, { reply: 'postgres' });
+  await a.respondToRequest(sessionRef, (await next()).requestId, { reply: 'no thanks' });
+  await tick();
+  assert.deepEqual(outcomes[0], { behavior: 'allow', updatedInput: { command: 'ls' } });
+  assert.deepEqual(outcomes[1], { behavior: 'allow', updatedInput: { questions: [{ question: 'Which db?' }], answers: 'postgres' } });
+  assert.deepEqual(outcomes[2], { behavior: 'deny', message: 'no thanks' });
+  await a.dispose();
+});
+
+test('aborted canUseTool drops the pending request', async () => {
+  const ac = new AbortController();
+  const f = fake(async function* (o, input) {
+    await input.next(); yield init();
+    void o.canUseTool('Bash', { command: 'ls' }, { signal: ac.signal });
+    await never();
+  });
+  const a = new ClaudeAdapter({ claudePath: 'c', query: f.query });
+  const ev = collect(a);
+  const { sessionRef } = await a.startChat({ cwd: '.', prompt: 'go' });
+  await tick();
+  const req = ev.find((e) => e.type === 'request.opened');
+  ac.abort();
+  assert.equal((a as any).chats.get(sessionRef).pending.size, 0);
+  await a.respondToRequest(sessionRef, req.requestId, 'allow'); // no throw
+  await a.dispose();
+});
+
+test('resume passes resume: sessionRef and the cwd', async () => {
+  const f = fake(async function* () { await never(); });
+  const a = new ClaudeAdapter({ claudePath: 'c', query: f.query });
+  await a.resume('old-session', 'C:\\proj');
+  assert.equal(f.calls[0]!.options.resume, 'old-session');
+  assert.equal(f.calls[0]!.options.cwd, 'C:\\proj');
+  await a.dispose();
+});
+
+test('sendMessage pushes to the live query; a dead query restarts with resume', async () => {
+  const seen: string[] = [];
+  let n = 0;
+  const f = fake(async function* (_o, input) {
+    const mine = ++n;
+    for (;;) {
+      const m = await input.next();
+      if (m.done) return;
+      seen.push(`${mine}:${m.value.message.content}`);
+      if (mine === 1 && seen.length === 1) yield init('s1');
+      if (mine === 1 && seen.length === 2) throw new Error('process died');
+      if (mine === 2) { yield result(); }
+    }
+  });
+  const a = new ClaudeAdapter({ claudePath: 'c', query: f.query });
+  const ev = collect(a);
+  const { sessionRef } = await a.startChat({ cwd: 'C:\\p', prompt: 'one' });
+  await a.sendMessage(sessionRef, 'two');
+  await tick();
+  assert.deepEqual(ev.filter((e) => e.type === 'error'), [{ type: 'error', sessionRef: 's1', message: 'Claude Code stopped unexpectedly.' }]);
+  assert.equal(f.calls.length, 1);
+  await a.sendMessage(sessionRef, 'three');
+  await tick();
+  assert.equal(f.calls.length, 2);
+  assert.equal(f.calls[1]!.options.resume, 's1');
+  assert.equal(f.calls[1]!.options.cwd, 'C:\\p');
+  assert.deepEqual(seen, ['1:one', '1:two', '2:three']);
+  assert.equal(ev.at(-1).type, 'turn.completed');
+  await a.dispose();
+});
+
+test('stop interrupts and emits stopped without a trailing error', async () => {
+  const f = fake(async function* (_o, input) {
+    await input.next(); yield init('s1'); yield text('thinking');
+    await tick();
+    yield result({ subtype: 'error_during_execution', is_error: true });
+    await never();
+  });
+  const a = new ClaudeAdapter({ claudePath: 'c', query: f.query });
+  const ev = collect(a);
+  const { sessionRef } = await a.startChat({ cwd: '.', prompt: 'go' });
+  await tick();
+  await a.stop(sessionRef);
+  assert.equal(f.calls[0]!.interrupted, 1);
+  await tick(); await tick();
+  assert.equal(ev.filter((e) => e.type === 'stopped').length, 1);
+  assert.equal(ev.filter((e) => e.type === 'error').length, 0);
+  await a.dispose();
+});
+
+test('dispose closes queries, clears listeners and rejects later actions', async () => {
+  const f = fake(async function* (_o, input) { await input.next(); yield init(); await never(); });
+  const a = new ClaudeAdapter({ claudePath: 'c', query: f.query });
+  const ev = collect(a);
+  const { sessionRef } = await a.startChat({ cwd: '.', prompt: 'go' });
+  await a.dispose();
+  assert.equal(f.calls[0]!.closed, 1);
+  await assert.rejects(a.sendMessage(sessionRef, 'x'), /Claude Code adapter is shut down\./);
+  await assert.rejects(a.startChat({ cwd: '.', prompt: 'x' }), /Claude Code adapter is shut down\./);
+  assert.equal(ev.length, 1);
+});
+
+const usageFixture = {
+  rate_limits_available: true,
+  rate_limits: {
+    five_hour: { utilization: 28, resets_at: '2026-10-22T14:40:00Z' },
+    seven_day: { utilization: 42, resets_at: '2026-10-23T09:00:00Z' },
+    seven_day_opus: { utilization: 66, resets_at: null },
+  },
+};
+
+test('readClaudeUsage maps the usage response and skips behaviors', async () => {
+  let arg: any;
+  const q: any = { usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET: async (o: any) => { arg = o; return usageFixture; } };
+  const r = await readClaudeUsage(q);
+  assert.deepEqual(arg, { skipBehaviors: true });
+  assert.deepEqual(r.windows, claudeUsageToReading(usageFixture as any, new Date()).windows);
+});
+
+test('readUsage with no live chat uses a short-lived query and closes it', async () => {
+  const f = fake(async function* () { await never(); }, { usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET: async () => usageFixture });
+  const a = new ClaudeAdapter({ claudePath: 'c', query: f.query });
+  const r = await a.readUsage();
+  assert.equal(r.provider, 'claude');
+  assert.equal(r.status, 'ok');
+  assert.equal(r.windows.length, 3);
+  assert.equal(f.calls[0]!.closed, 1);
+  await a.dispose();
+});
+
+test('readUsage failure becomes an error reading', async () => {
+  const f = fake(async function* () { await never(); }, { usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET: async () => { throw new Error('boom'); } });
+  const a = new ClaudeAdapter({ claudePath: 'c', query: f.query });
+  const r = await a.readUsage();
+  assert.equal(r.status, 'error');
+  assert.equal(r.message, "Couldn't read Claude Code usage.");
+  await a.dispose();
+});
