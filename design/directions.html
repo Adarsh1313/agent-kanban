@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent Kanban — Directions</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  /* Page chrome (neutral, not part of any direction) */
+  :root { --page-bg:#f3f3f2; --page-text:#1b1b1a; --page-muted:#6b6b68; color-scheme: light; }
+  :root[data-theme="dark"] { --page-bg:#0e0e0f; --page-text:#ececea; --page-muted:#9a9a96; color-scheme: dark; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --page-bg:#0e0e0f; --page-text:#ececea; --page-muted:#9a9a96; color-scheme: dark; } }
+  * { box-sizing: border-box; }
+  [hidden] { display:none !important; }
+  body { margin:0; background:var(--page-bg); color:var(--page-text); font:14px/1.5 system-ui, sans-serif; }
+  .page-head { max-width:1440px; margin:0 auto; padding:24px 16px 8px; display:flex; gap:16px; align-items:end; justify-content:space-between; flex-wrap:wrap; }
+  .page-head h1 { font-size:18px; margin:0; font-weight:600; }
+  .page-head p { margin:4px 0 0; color:var(--page-muted); max-width:70ch; }
+  .theme-btn { font:inherit; padding:6px 12px; border-radius:6px; border:1px solid color-mix(in srgb, var(--page-text) 20%, transparent); background:transparent; color:inherit; cursor:pointer; }
+  .grid { max-width:1120px; margin:0 auto; padding:16px; display:grid; grid-template-columns:1fr; gap:40px; }
+  .dir .board { overflow-x:auto; }
+  @media (max-width: 720px) { .dir .board { grid-template-columns:repeat(4, 220px); } .top { flex-wrap:wrap; } }
+  .caption { margin:0 0 10px; font-size:13px; color:var(--page-muted); }
+  .caption b { color:var(--page-text); }
+
+  /* Shared structure (each direction restyles it through its own variables) */
+  .dir { border-radius:var(--r-frame); background:var(--bg); color:var(--text); font-family:var(--font); padding:16px; overflow:hidden; }
+  .dir button { font:inherit; color:inherit; }
+  .top { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:14px; }
+  .brand { font-weight:600; font-size:15px; letter-spacing:-0.01em; white-space:nowrap; }
+  .meters { display:flex; gap:10px; flex-wrap:wrap; }
+  .meter { display:flex; align-items:center; gap:6px; font-size:12px; color:var(--muted); font-variant-numeric: tabular-nums; }
+  .meter .track { display:inline-block; width:44px; height:var(--meter-h); border-radius:99px; background:var(--track); overflow:hidden; }
+  .meter .fill { display:block; width:100%; height:100%; border-radius:99px; background:var(--meter-fill); transform-origin:left; transition: transform var(--dur-base) var(--ease-out); }
+  .board { display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:var(--col-gap); }
+  .col { min-height:150px; border-radius:var(--r-col); background:var(--col-bg); padding:var(--col-pad); display:flex; flex-direction:column; gap:8px; }
+  .col-head { display:flex; align-items:center; gap:6px; font-size:12px; font-weight:500; padding:2px 2px 4px; }
+  .col-head .count { color:var(--muted); font-variant-numeric: tabular-nums; }
+  .status-dot { width:8px; height:8px; border-radius:99px; flex:none; }
+  .card { background:var(--card); border:1px solid var(--card-border); border-radius:var(--r-card); padding:10px; font-size:12px; box-shadow:var(--card-shadow); }
+  .card .title { font-weight:500; color:var(--text); margin-bottom:6px; line-height:1.35; }
+  .card .meta { display:flex; align-items:center; gap:6px; color:var(--muted); font-size:11px; flex-wrap:wrap; }
+  .prov { display:inline-flex; align-items:center; gap:4px; }
+  .prov i { width:10px; height:10px; border-radius:3px; display:inline-block; }
+  .badge { font-size:11px; padding:1px 6px; border-radius:var(--r-badge); background:var(--needs-bg); color:var(--needs-text); font-weight:500; }
+  .live { display:flex; align-items:center; gap:6px; margin-top:8px; font-size:11px; color:var(--muted); }
+  .live .bar { flex:1; height:2px; border-radius:2px; background:var(--track); overflow:hidden; position:relative; }
+  .live .bar::after { content:""; position:absolute; inset:0; width:40%; background:var(--running); border-radius:2px; animation: sweep 1.4s linear infinite; }
+  @keyframes sweep { from { transform:translateX(-100%); } to { transform:translateX(250%); } }
+  .drop { border:1.5px dashed var(--drop-border); border-radius:var(--r-card); min-height:40px; display:grid; place-items:center; font-size:11px; color:var(--muted); background:var(--drop-bg); }
+
+  .row { display:flex; gap:12px; margin-top:16px; flex-wrap:wrap; align-items:stretch; }
+  .panel { flex:1 1 220px; background:var(--card); border:1px solid var(--card-border); border-radius:var(--r-card); padding:12px; }
+  .panel h4 { margin:0 0 8px; font-size:12px; font-weight:600; }
+  .opt { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:8px; border-radius:var(--r-btn); font-size:12px; border:1px solid transparent; }
+  .opt.sel { border-color:var(--accent); background:var(--accent-soft); }
+  .opt .tag { font-size:10px; font-weight:600; padding:1px 6px; border-radius:var(--r-badge); background:var(--accent); color:var(--accent-contrast); }
+  .opt .nums { color:var(--muted); font-variant-numeric: tabular-nums; }
+  .btns { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
+  .btn { border:0; padding:8px 14px; border-radius:var(--r-btn); font-size:13px; font-weight:500; cursor:pointer; transition: transform 140ms var(--ease-out), background-color var(--dur-fast) ease; }
+  .btn:active { transform:scale(0.97); }
+  .btn.primary { background:var(--accent); color:var(--accent-contrast); }
+  .btn.secondary { background:var(--track); color:var(--text); }
+  @media (hover:hover) and (pointer:fine) {
+    .btn.primary:hover { background:var(--accent-hover); }
+    .btn.secondary:hover { background:var(--card-border); }
+  }
+  .btn:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+  .hint { font-size:11px; color:var(--muted); margin-top:8px; }
+
+  /* Card moving between columns (FLIP) uses each direction's movement curve */
+  .card.moving { position:relative; z-index:2; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .live .bar::after { animation:none; width:100%; opacity:.5; }
+    .card, .meter .fill { transition:none !important; }
+  }
+
+  /* ───────── Direction 1 — Quiet Instrument (Linear-leaning) ───────── */
+  .d1 {
+    --font: 'Geist', system-ui, sans-serif;
+    --bg:#fbfbfa; --col-bg:transparent; --card:#ffffff; --card-border:#e7e7e4; --card-shadow:none;
+    --text:#1a1a19; --muted:#6e6e6a; --track:#ececea;
+    --accent:#2a2a28; --accent-hover:#111110; --accent-contrast:#fff; --accent-soft:#f1f1ef;
+    --running:#3b6fd8; --needs:#c98a12; --review:#16857a; --done:#8a8a85;
+    --needs-bg:#fbf1dc; --needs-text:#7a530a;
+    --meter-fill:#2a2a28; --meter-h:4px;
+    --drop-border:#d9d9d5; --drop-bg:transparent;
+    --r-frame:12px; --r-col:8px; --r-card:8px; --r-btn:6px; --r-badge:4px;
+    --col-gap:12px; --col-pad:0;
+    --ease-out:cubic-bezier(0.23,1,0.32,1); --ease-move:cubic-bezier(0.77,0,0.175,1);
+    --dur-fast:120ms; --dur-base:200ms; --dur-move:260ms;
+  }
+  :root[data-theme="dark"] .d1 { --bg:#151516; --card:#1c1c1e; --card-border:#2a2a2d; --text:#ececea; --muted:#9a9a96; --track:#2a2a2d; --accent:#ececea; --accent-hover:#ffffff; --accent-contrast:#151516; --accent-soft:#232325; --meter-fill:#ececea; --needs-bg:#3a2c0f; --needs-text:#f0c46a; --drop-border:#333336; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .d1 { --bg:#151516; --card:#1c1c1e; --card-border:#2a2a2d; --text:#ececea; --muted:#9a9a96; --track:#2a2a2d; --accent:#ececea; --accent-hover:#ffffff; --accent-contrast:#151516; --accent-soft:#232325; --meter-fill:#ececea; --needs-bg:#3a2c0f; --needs-text:#f0c46a; --drop-border:#333336; } }
+
+  /* ───────── Direction 2 — Soft Lanes (Neura-leaning, calmed down) ───────── */
+  .d2 {
+    --font: 'Plus Jakarta Sans', system-ui, sans-serif;
+    --bg:#ffffff; --card:#ffffff; --card-border:#ebeef0; --card-shadow:0 1px 2px rgba(20,30,40,.04);
+    --text:#14202b; --muted:#647380; --track:#eef1f3;
+    --accent:#1f6f5c; --accent-hover:#185a4a; --accent-contrast:#fff; --accent-soft:#e7f3ef;
+    --running:#2f7fd6; --needs:#e0a100; --review:#7a6ad0; --done:#3a9a62;
+    --needs-bg:#fff4d1; --needs-text:#6d5000;
+    --meter-fill:#1f6f5c; --meter-h:6px;
+    --drop-border:#cfd8de; --drop-bg:#f7f9fa;
+    --r-frame:20px; --r-col:16px; --r-card:12px; --r-btn:999px; --r-badge:999px;
+    --col-gap:10px; --col-pad:8px;
+    --ease-out:cubic-bezier(0.23,1,0.32,1); --ease-move:cubic-bezier(0.32,0.72,0,1);
+    --dur-fast:140ms; --dur-base:220ms; --dur-move:340ms;
+  }
+  .d2 .col[data-col="running"] { --col-bg:#eef5fd; } .d2 .col[data-col="needs"] { --col-bg:#fff8e6; }
+  .d2 .col[data-col="review"] { --col-bg:#f2f0fc; } .d2 .col[data-col="done"] { --col-bg:#eef7f1; }
+  :root[data-theme="dark"] .d2 { --bg:#11161a; --card:#1a2127; --card-border:#263037; --text:#e8eef2; --muted:#94a3ae; --track:#26303a; --accent:#5cc7a8; --accent-hover:#7ad6bb; --accent-contrast:#0c1a15; --accent-soft:#16302a; --meter-fill:#5cc7a8; --needs-bg:#3a2f0a; --needs-text:#f3cf5c; --drop-border:#33404a; --drop-bg:transparent; }
+  :root[data-theme="dark"] .d2 .col { --col-bg:#161d22; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .d2 { --bg:#11161a; --card:#1a2127; --card-border:#263037; --text:#e8eef2; --muted:#94a3ae; --track:#26303a; --accent:#5cc7a8; --accent-hover:#7ad6bb; --accent-contrast:#0c1a15; --accent-soft:#16302a; --meter-fill:#5cc7a8; --needs-bg:#3a2f0a; --needs-text:#f3cf5c; --drop-border:#33404a; --drop-bg:transparent; } :root:not([data-theme="light"]) .d2 .col { --col-bg:#161d22; } }
+
+  /* ───────── Direction 3 — Fuel Gauge (usage-first, ink + signal) ───────── */
+  .d3 {
+    --font: 'Instrument Sans', system-ui, sans-serif;
+    --bg:#f4f6f8; --col-bg:#eaeef2; --card:#ffffff; --card-border:#dfe5ea; --card-shadow:none;
+    --text:#0f1b2d; --muted:#5d6b7c; --track:#dfe5ea;
+    --accent:#1747c9; --accent-hover:#123aa6; --accent-contrast:#fff; --accent-soft:#e8eefc;
+    --running:#1747c9; --needs:#d4580b; --review:#0f8a73; --done:#7b8794;
+    --needs-bg:#fde9db; --needs-text:#8a3a07;
+    --meter-fill:#1747c9; --meter-h:8px;
+    --drop-border:#c3ccd5; --drop-bg:transparent;
+    --r-frame:14px; --r-col:10px; --r-card:6px; --r-btn:8px; --r-badge:4px;
+    --col-gap:8px; --col-pad:8px;
+    --ease-out:cubic-bezier(0.16,1,0.3,1); --ease-move:cubic-bezier(0.65,0,0.35,1);
+    --dur-fast:110ms; --dur-base:180ms; --dur-move:240ms;
+  }
+  .d3 .top { align-items:stretch; }
+  .d3 .meters { gap:14px; }
+  .d3 .meter { flex-direction:column; align-items:flex-start; gap:3px; }
+  .d3 .meter .track { width:72px; }
+  :root[data-theme="dark"] .d3 { --bg:#0d1420; --col-bg:#121b29; --card:#172235; --card-border:#22304a; --text:#e6edf7; --muted:#93a3b8; --track:#22304a; --accent:#6f95ff; --accent-hover:#8eabff; --accent-contrast:#0a1222; --accent-soft:#18284a; --meter-fill:#6f95ff; --needs-bg:#3d2312; --needs-text:#ffab73; --drop-border:#2c3c58; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .d3 { --bg:#0d1420; --col-bg:#121b29; --card:#172235; --card-border:#22304a; --text:#e6edf7; --muted:#93a3b8; --track:#22304a; --accent:#6f95ff; --accent-hover:#8eabff; --accent-contrast:#0a1222; --accent-soft:#18284a; --meter-fill:#6f95ff; --needs-bg:#3d2312; --needs-text:#ffab73; --drop-border:#2c3c58; } }
+
+  .prov-claude { background:#d97757; } .prov-codex { background:#10a37f; } .prov-agy { background:#4285f4; }
+</style>
+</head>
+<body>
+<header class="page-head">
+  <div>
+    <h1>Agent Kanban: three directions</h1>
+    <p>Each column uses the same components with different type, color, density and motion. Press <b>Move a card</b> to see how a card travels between columns in each direction. Point at what feels right, or mix ("D1 but with D2's column tints").</p>
+  </div>
+  <button class="theme-btn" id="themeBtn" type="button">Toggle light / dark</button>
+</header>
+
+<main class="grid" id="grid"></main>
+
+<template id="dirTpl">
+  <section>
+    <p class="caption"></p>
+    <div class="dir">
+      <div class="top">
+        <div class="brand">Agent Kanban</div>
+        <div class="meters">
+          <div class="meter"><span><span class="prov"><i class="prov-claude"></i>Claude</span></span><span class="track"><span class="fill" style="transform:scaleX(.72)"></span></span><span>72%</span></div>
+          <div class="meter"><span><span class="prov"><i class="prov-codex"></i>Codex</span></span><span class="track"><span class="fill" style="transform:scaleX(.31)"></span></span><span>31%</span></div>
+          <div class="meter"><span><span class="prov"><i class="prov-agy"></i>Antigravity</span></span><span class="track"><span class="fill" style="transform:scaleX(.88)"></span></span><span>88%</span></div>
+        </div>
+      </div>
+      <div class="board">
+        <div class="col" data-col="running">
+          <div class="col-head"><span class="status-dot" style="background:var(--running)"></span>Running <span class="count">1</span></div>
+          <div class="card" data-card="mover">
+            <div class="title">Add sign-up page to the bakery site</div>
+            <div class="meta"><span class="prov"><i class="prov-claude"></i>Claude</span>· bakery-site · 2m</div>
+            <div class="live"><span class="bar"></span>Editing signup.tsx</div>
+          </div>
+        </div>
+        <div class="col" data-col="needs">
+          <div class="col-head"><span class="status-dot" style="background:var(--needs)"></span>Needs you <span class="count">1</span></div>
+          <div class="card">
+            <div class="title">Fix broken links in the newsletter</div>
+            <div class="meta"><span class="prov"><i class="prov-codex"></i>Codex</span><span class="badge">Wants to run a command</span></div>
+          </div>
+        </div>
+        <div class="col" data-col="review">
+          <div class="col-head"><span class="status-dot" style="background:var(--review)"></span>Review <span class="count">1</span></div>
+          <div class="card">
+            <div class="title">Summarize last month's sales sheet</div>
+            <div class="meta"><span class="prov"><i class="prov-agy"></i>Antigravity</span>· reports · 1h</div>
+          </div>
+        </div>
+        <div class="col" data-col="done">
+          <div class="col-head"><span class="status-dot" style="background:var(--done)"></span>Done <span class="count">0</span></div>
+          <div class="drop">Drag here when finished</div>
+        </div>
+      </div>
+      <div class="row">
+        <div class="panel">
+          <h4>Start on</h4>
+          <div class="opt sel"><span class="prov"><i class="prov-agy"></i>Antigravity</span><span class="nums">88% · 5h</span><span class="tag">Suggested</span></div>
+          <div class="opt"><span class="prov"><i class="prov-claude"></i>Claude</span><span class="nums">72% · resets 2:40pm</span></div>
+          <div class="opt"><span class="prov"><i class="prov-codex"></i>Codex</span><span class="nums">31% · resets Thu</span></div>
+        </div>
+        <div class="panel">
+          <h4>Buttons</h4>
+          <div class="btns">
+            <button class="btn primary mover-btn" type="button">Move a card</button>
+            <button class="btn secondary" type="button">Open chat</button>
+          </div>
+          <p class="hint">Hover, press and Tab to see the states.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+</template>
+
+<script>
+  const dirs = [
+    { cls: 'd1', caption: '<b>Direction 1: Quiet Instrument.</b> Bets on restraint: almost no color, so the only things that light up are agent states. Closest to Linear.' },
+    { cls: 'd2', caption: '<b>Direction 2: Soft Lanes.</b> Bets on approachability: each column is a soft tinted lane, rounder shapes, a slightly slower drawer-like glide. Calmer cousin of the Neura shot.' },
+    { cls: 'd3', caption: '<b>Direction 3: Fuel Gauge.</b> Bets on usage being the hero: thick meters with numbers up top, ink-blue accent, tight and quick motion.' },
+  ];
+  const grid = document.getElementById('grid');
+  const tpl = document.getElementById('dirTpl');
+  const order = ['running', 'needs', 'review', 'done'];
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)');
+
+  for (const d of dirs) {
+    const node = tpl.content.cloneNode(true);
+    node.querySelector('.caption').innerHTML = d.caption;
+    const root = node.querySelector('.dir');
+    root.classList.add(d.cls);
+    root.querySelector('.mover-btn').addEventListener('click', () => moveCard(root));
+    grid.appendChild(node);
+  }
+
+  function updateCounts(root) {
+    root.querySelectorAll('.col').forEach(col => {
+      col.querySelector('.count').textContent = col.querySelectorAll('.card').length;
+      const drop = col.querySelector('.drop');
+      if (drop) drop.hidden = col.querySelectorAll('.card').length > 0;
+    });
+  }
+
+  // FLIP: measure, move in the DOM, then animate from the old position with the direction's curve.
+  function moveCard(root) {
+    const card = root.querySelector('[data-card="mover"]');
+    const from = card.closest('.col');
+    const next = order[(order.indexOf(from.dataset.col) + 1) % order.length];
+    const to = root.querySelector(`.col[data-col="${next}"]`);
+    const first = card.getBoundingClientRect();
+    to.insertBefore(card, to.querySelector('.col-head').nextSibling);
+    card.querySelector('.live').hidden = next !== 'running';
+    updateCounts(root);
+    if (reduce.matches) return;
+    const last = card.getBoundingClientRect();
+    const cs = getComputedStyle(root);
+    card.classList.add('moving');
+    const anim = card.animate([
+      { transform: `translate(${first.left - last.left}px, ${first.top - last.top}px) scale(1.02)` },
+      { transform: 'translate(0,0) scale(1)' }
+    ], { duration: parseInt(cs.getPropertyValue('--dur-move')), easing: cs.getPropertyValue('--ease-move').trim() });
+    anim.onfinish = () => card.classList.remove('moving');
+  }
+
+  const html = document.documentElement;
+  document.getElementById('themeBtn').addEventListener('click', () => {
+    const dark = html.dataset.theme ? html.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+    html.dataset.theme = dark ? 'light' : 'dark';
+  });
+</script>
+</body>
+</html>
