@@ -101,3 +101,54 @@ test('upsertToolCall returns the stored tool call with a stable createdAt', () =
   assert.equal(b.status, 'done');
   assert.equal(b.createdAt, a.createdAt);
 });
+
+test('title is the first non-blank line, trimmed, at most 60 characters; blank prompts get a fallback', () => {
+  const s = new Store(':memory:');
+  assert.equal(s.createChat({ provider: 'claude', cwd: '/x', title: '\n   \n  Fix the login bug  \nmore' }).title, 'Fix the login bug');
+  assert.equal(s.createChat({ provider: 'claude', cwd: '/x', title: '  ' + 'x'.repeat(80) }).title, 'x'.repeat(60));
+  assert.equal(s.createChat({ provider: 'claude', cwd: '/x', title: ' \r\n \t ' }).title, 'Untitled chat');
+});
+
+test('getMessage reads one message by id', () => {
+  const s = new Store(':memory:');
+  const c = s.createChat({ provider: 'claude', cwd: '/x', title: 't' });
+  const m = s.addMessage(c.id, 'assistant', 'hi');
+  assert.deepEqual(s.getMessage(m.id), m);
+  assert.equal(s.getMessage('nope'), undefined);
+});
+
+test('listToolCalls returns a chat\'s tool calls in order', () => {
+  const s = new Store(':memory:');
+  const c = s.createChat({ provider: 'claude', cwd: '/x', title: 't' });
+  const other = s.createChat({ provider: 'claude', cwd: '/x', title: 'o' });
+  s.upsertToolCall({ id: 'a', chatId: c.id, name: 'Bash', summary: 'ls', status: 'running' });
+  s.upsertToolCall({ id: 'b', chatId: c.id, name: 'Edit', summary: 'Editing x', status: 'running' });
+  s.upsertToolCall({ id: 'a', chatId: c.id, name: 'Bash', summary: 'ls', status: 'done' });
+  s.upsertToolCall({ id: 'z', chatId: other.id, name: 'Bash', summary: 'pwd', status: 'done' });
+  assert.deepEqual(s.listToolCalls(c.id).map((t) => [t.id, t.status]), [['a', 'done'], ['b', 'running']]);
+});
+
+test('requests: open, answered and closed; ids repeat safely across chats', () => {
+  const s = new Store(':memory:');
+  const c = s.createChat({ provider: 'codex', cwd: '/x', title: 't' });
+  const d = s.createChat({ provider: 'codex', cwd: '/x', title: 'u' });
+  s.addRequest(c.id, { requestId: '900', kind: 'permission', summary: 'npm test' });
+  s.addRequest(c.id, { requestId: '901', kind: 'question', summary: 'Which db?' });
+  s.addRequest(d.id, { requestId: '900', kind: 'permission', summary: 'ls' });
+  const open = s.listOpenRequests(c.id);
+  assert.deepEqual(open.map((r) => [r.requestId, r.kind, r.summary]), [['900', 'permission', 'npm test'], ['901', 'question', 'Which db?']]);
+  assert.equal(typeof open[0]!.createdAt, 'string');
+  s.setRequestStatus(c.id, '900', 'answered');
+  assert.deepEqual(s.listOpenRequests(c.id).map((r) => r.requestId), ['901']);
+  s.closeOpenRequests(c.id);
+  assert.deepEqual(s.listOpenRequests(c.id), []);
+  assert.deepEqual(s.listOpenRequests(d.id).map((r) => r.requestId), ['900']);
+  s.closeOpenRequests();
+  assert.deepEqual(s.listOpenRequests(d.id), []);
+});
+
+test('the store creates its lookup indexes', () => {
+  const s = new Store(':memory:');
+  const names = ((s as any).db.prepare("SELECT name FROM sqlite_master WHERE type = 'index'").all() as { name: string }[]).map((r) => r.name);
+  for (const n of ['messages_chat', 'tool_calls_chat', 'requests_chat', 'chats_session']) assert.ok(names.includes(n), n);
+});

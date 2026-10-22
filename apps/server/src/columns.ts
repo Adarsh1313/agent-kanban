@@ -36,7 +36,11 @@ export function nextState(current: ChatState, event: AdapterEvent | UserAction):
     case 'user.markDone':
       return DONE;
     case 'app.restarted':
-      return current.column === 'running' ? { column: 'needs_you', needsReason: 'interrupted' } : current;
+      // A running turn, and a permission or question the old process was waiting on, can't continue after a restart.
+      return current.column === 'running'
+        || (current.column === 'needs_you' && (current.needsReason === 'permission' || current.needsReason === 'question'))
+        ? { column: 'needs_you', needsReason: 'interrupted' }
+        : current;
     default:
       return current;
   }

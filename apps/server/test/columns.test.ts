@@ -25,6 +25,9 @@ test('dragging out of done → review', () => assert.deepEqual(nextState(S('done
 test('restart: running → needs_you/interrupted; others unchanged', () => {
   assert.deepEqual(nextState(S('running'), { type: 'app.restarted' }), S('needs_you', 'interrupted'));
   assert.deepEqual(nextState(S('review'), { type: 'app.restarted' }), S('review'));
+  assert.deepEqual(nextState(S('needs_you', 'permission'), { type: 'app.restarted' }), S('needs_you', 'interrupted'));
+  assert.deepEqual(nextState(S('needs_you', 'question'), { type: 'app.restarted' }), S('needs_you', 'interrupted'));
+  for (const r of ['stopped', 'limit', 'error'] as const) assert.deepEqual(nextState(S('needs_you', r), { type: 'app.restarted' }), S('needs_you', r));
 });
 test('message deltas and tool calls do not change the column', () =>
   assert.deepEqual(nextState(S('running'), { type: 'tool.call', ...ref, toolCallId: 't', name: 'Edit', summary: '', status: 'running' }), S('running')));

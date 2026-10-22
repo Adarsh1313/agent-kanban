@@ -1,6 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
-import type { Chat, Message, ProviderId, ToolCall, UsageReading, UsageWindow } from '@agent-kanban/shared';
+import type { Chat, Message, OpenRequest, ProviderId, ToolCall, UsageReading, UsageWindow } from '@agent-kanban/shared';
 
 type Row = Record<string, any>;
 
@@ -16,6 +16,14 @@ function toChat(r: Row): Chat {
     column: r.column_name, needsReason: r.needs_reason, createdAt: r.created_at, updatedAt: r.updated_at,
     doneAt: r.done_at, archived: r.archived === 1, pinned: r.pinned === 1, snoozedUntil: r.snoozed_until,
   };
+}
+
+function toMessage(r: Row): Message {
+  return { id: r.id, chatId: r.chat_id, role: r.role, text: r.text, createdAt: r.created_at };
+}
+
+function requestKey(chatId: string, requestId: string): string {
+  return `${chatId}:${requestId}`;
 }
 
 export class Store {
@@ -46,6 +54,10 @@ export class Store {
         id INTEGER PRIMARY KEY AUTOINCREMENT, provider TEXT NOT NULL, status TEXT NOT NULL,
         windows TEXT NOT NULL, read_at TEXT NOT NULL, message TEXT
       );
+      CREATE INDEX IF NOT EXISTS messages_chat ON messages (chat_id);
+      CREATE INDEX IF NOT EXISTS tool_calls_chat ON tool_calls (chat_id);
+      CREATE INDEX IF NOT EXISTS requests_chat ON requests (chat_id);
+      CREATE INDEX IF NOT EXISTS chats_session ON chats (provider, session_ref);
     `);
   }
 
@@ -58,7 +70,7 @@ export class Store {
   createChat(input: { provider: ProviderId; cwd: string; title: string; model?: string | null; sessionRef?: string | null }): Chat {
     const id = randomUUID();
     const now = this.now();
-    const title = input.title.split(/\r?\n/)[0].slice(0, 60);
+    const title = (input.title.split(/\r?\n/).map((l) => l.trim()).find((l) => l !== '') ?? 'Untitled chat').slice(0, 60).trim();
     this.db.prepare(
       `INSERT INTO chats (id, provider, session_ref, cwd, title, model, column_name, needs_reason, created_at, updated_at, archived, pinned)
        VALUES (?, ?, ?, ?, ?, ?, 'running', NULL, ?, ?, 0, 0)`,
@@ -111,8 +123,12 @@ export class Store {
   }
 
   listMessages(chatId: string): Message[] {
-    return (this.db.prepare('SELECT * FROM messages WHERE chat_id = ? ORDER BY created_at, rowid').all(chatId) as Row[])
-      .map((r) => ({ id: r.id, chatId: r.chat_id, role: r.role, text: r.text, createdAt: r.created_at }));
+    return (this.db.prepare('SELECT * FROM messages WHERE chat_id = ? ORDER BY created_at, rowid').all(chatId) as Row[]).map(toMessage);
+  }
+
+  getMessage(id: string): Message | undefined {
+    const r = this.db.prepare('SELECT * FROM messages WHERE id = ?').get(id) as Row | undefined;
+    return r ? toMessage(r) : undefined;
   }
 
   upsertToolCall(t: Omit<ToolCall, 'createdAt'>): ToolCall {
@@ -122,6 +138,36 @@ export class Store {
     ).run(t.id, t.chatId, t.name, t.summary, t.status, this.now());
     const r = this.db.prepare('SELECT * FROM tool_calls WHERE id = ?').get(t.id) as Row;
     return { id: r.id, chatId: r.chat_id, name: r.name, summary: r.summary, status: r.status, createdAt: r.created_at };
+  }
+
+  listToolCalls(chatId: string): ToolCall[] {
+    return (this.db.prepare('SELECT * FROM tool_calls WHERE chat_id = ? ORDER BY created_at, rowid').all(chatId) as Row[])
+      .map((r) => ({ id: r.id, chatId: r.chat_id, name: r.name, summary: r.summary, status: r.status, createdAt: r.created_at }));
+  }
+
+  // Requests are keyed by chat and request id together: Codex numbers its requests per process, so ids repeat.
+  addRequest(chatId: string, r: { requestId: string; kind: 'permission' | 'question'; summary: string }): OpenRequest {
+    const createdAt = this.now();
+    this.db.prepare(
+      `INSERT INTO requests (id, chat_id, kind, summary, status, created_at) VALUES (?, ?, ?, ?, 'open', ?)
+       ON CONFLICT(id) DO UPDATE SET kind = excluded.kind, summary = excluded.summary, status = 'open', created_at = excluded.created_at`,
+    ).run(requestKey(chatId, r.requestId), chatId, r.kind, r.summary, createdAt);
+    return { requestId: r.requestId, kind: r.kind, summary: r.summary, createdAt };
+  }
+
+  setRequestStatus(chatId: string, requestId: string, status: 'answered' | 'closed'): void {
+    this.db.prepare(`UPDATE requests SET status = ? WHERE id = ? AND status = 'open'`).run(status, requestKey(chatId, requestId));
+  }
+
+  /** Marks every still-open request closed: for one chat, or (no id) for all chats after a restart. */
+  closeOpenRequests(chatId?: string): void {
+    if (chatId === undefined) this.db.prepare(`UPDATE requests SET status = 'closed' WHERE status = 'open'`).run();
+    else this.db.prepare(`UPDATE requests SET status = 'closed' WHERE chat_id = ? AND status = 'open'`).run(chatId);
+  }
+
+  listOpenRequests(chatId: string): OpenRequest[] {
+    return (this.db.prepare(`SELECT * FROM requests WHERE chat_id = ? AND status = 'open' ORDER BY created_at, rowid`).all(chatId) as Row[])
+      .map((r) => ({ requestId: (r.id as string).slice(chatId.length + 1), kind: r.kind, summary: r.summary, createdAt: r.created_at }));
   }
 
   saveUsage(reading: UsageReading): void {

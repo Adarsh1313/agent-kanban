@@ -48,6 +48,9 @@ export interface Chat {
 
 export interface Message { id: string; chatId: string; role: 'user' | 'assistant'; text: string; createdAt: string }
 
+/** A permission or question the agent is waiting on (read back after a page reload). */
+export interface OpenRequest { requestId: string; kind: 'permission' | 'question'; summary: string; createdAt: string }
+
 export interface ToolCall { id: string; chatId: string; name: string; summary: string; status: 'running' | 'done' | 'failed'; createdAt: string }
 
 export interface UsageWindow { kind: 'five_hour' | 'weekly' | 'model'; label: string; leftPct: number; resetsAt: string | null }

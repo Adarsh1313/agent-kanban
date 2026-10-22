@@ -2,6 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { AddressInfo } from 'node:net';
 import { WebSocket } from 'ws';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { Chat, HistoryChat, UsageReading, ServerEvent } from '@agent-kanban/shared';
 import { createApi } from '../src/api.ts';
 import { ActiveElsewhereError } from '../src/chats.ts';
@@ -15,7 +18,11 @@ const reading = (provider: 'claude' | 'codex', left: number): UsageReading => ({
   provider, status: 'ok', readAt: '2026-01-01T00:00:00Z',
   windows: [{ kind: 'five_hour', label: '5-hour', leftPct: left, resetsAt: null }],
 });
-const hist: HistoryChat[] = [{ provider: 'claude', sessionRef: 's1', title: 'h' } as unknown as HistoryChat];
+const hist: HistoryChat[] = [
+  { provider: 'claude', sessionRef: 's1', title: 'h' } as unknown as HistoryChat,
+  { provider: 'antigravity', sessionRef: 'ag1', title: 'g' } as unknown as HistoryChat,
+];
+const dir = mkdtempSync(join(tmpdir(), 'ak-api-'));
 
 async function setup(overrides: Record<string, unknown> = {}, pingMs?: number, extra: Record<string, unknown> = {}) {
   let emit: (e: ServerEvent) => void = () => {};
@@ -63,7 +70,7 @@ test('POST /api/chats returns 201 and chat.updated arrives on the socket', async
     const ws = new WebSocket(`ws://127.0.0.1:${s.addr.port}/ws?token=tok`);
     await new Promise((r) => ws.on('open', r));
     const got = new Promise<ServerEvent>((r) => ws.on('message', (d) => r(JSON.parse(String(d)))));
-    const res = await s.f('/api/chats', { method: 'POST', body: JSON.stringify({ provider: 'codex', cwd: '/x', prompt: 'hi' }) });
+    const res = await s.f('/api/chats', { method: 'POST', body: JSON.stringify({ provider: 'codex', cwd: dir, prompt: 'hi' }) });
     assert.equal(res.status, 201);
     assert.equal((await res.json() as Chat).id, 'c1');
     assert.equal((await got).type, 'chat.updated');
@@ -224,5 +231,48 @@ test('GET /api/connections is an empty list when no monitor is wired', async () 
   const s = await setup();
   try {
     assert.deepEqual(await (await s.f('/api/connections')).json(), []);
+  } finally { s.close(); }
+});
+
+test('POST /api/chats with a folder that does not exist, or a file, is 400', async () => {
+  let started = 0;
+  const s = await setup({ start: async () => { started++; return chat(); } });
+  try {
+    const file = join(dir, 'a-file.txt');
+    writeFileSync(file, 'x');
+    for (const cwd of [join(dir, 'missing'), file]) {
+      const r = await s.f('/api/chats', { method: 'POST', body: JSON.stringify({ provider: 'codex', cwd, prompt: 'hi' }) });
+      assert.equal(r.status, 400);
+      assert.deepEqual(await r.json(), { error: "That folder doesn't exist." });
+    }
+    assert.equal(started, 0);
+  } finally { s.close(); }
+});
+
+test('Antigravity chats are refused with 400 for new chats and history continue', async () => {
+  const s = await setup();
+  try {
+    const a = await s.f('/api/chats', { method: 'POST', body: JSON.stringify({ provider: 'antigravity', cwd: dir, prompt: 'hi' }) });
+    assert.equal(a.status, 400);
+    assert.deepEqual(await a.json(), { error: "Antigravity chats aren't supported yet." });
+    const b = await s.f('/api/history/continue', { method: 'POST', body: JSON.stringify({ provider: 'antigravity', sessionRef: 'ag1', text: 'go' }) });
+    assert.equal(b.status, 400);
+    assert.deepEqual(await b.json(), { error: "Antigravity chats aren't supported yet." });
+  } finally { s.close(); }
+});
+
+test('GET /api/chats/:id/requests and /tool-calls read back open requests and tool calls', async () => {
+  const open = [{ requestId: 'r1', kind: 'permission', summary: 'npm test', createdAt: '2026-01-01T00:00:00Z' }];
+  const tools = [{ id: 't1', chatId: 'c1', name: 'Bash', summary: 'Running ls', status: 'done', createdAt: '2026-01-01T00:00:00Z' }];
+  const nf = () => { throw new Error('Chat not found.'); };
+  const s = await setup({
+    listOpenRequests: (id: string) => (id === 'c1' ? open : nf()),
+    listToolCalls: (id: string) => (id === 'c1' ? tools : nf()),
+  });
+  try {
+    assert.deepEqual(await (await s.f('/api/chats/c1/requests')).json(), open);
+    assert.deepEqual(await (await s.f('/api/chats/c1/tool-calls')).json(), tools);
+    assert.equal((await s.f('/api/chats/zz/requests')).status, 404);
+    assert.equal((await s.f('/api/chats/zz/tool-calls')).status, 404);
   } finally { s.close(); }
 });

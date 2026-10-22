@@ -1,7 +1,7 @@
 import { readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import type {
-  AdapterEvent, Chat, HistoryChat, Message, ProviderId, ServerEvent, UserAction,
+  AdapterEvent, Chat, HistoryChat, Message, OpenRequest, ProviderId, ServerEvent, ToolCall, UserAction,
 } from '@agent-kanban/shared';
 import { nextState } from './columns.ts';
 import type { Store } from './store.ts';
@@ -35,7 +35,7 @@ export class ActiveElsewhereError extends Error {
 }
 
 type Decision = 'allow' | 'deny' | { reply: string };
-type OpenRequest = { kind: 'permission' | 'question'; summary: string };
+type LiveRequest = { kind: 'permission' | 'question'; summary: string };
 
 export class ChatService {
   private store: Store;
@@ -46,7 +46,8 @@ export class ChatService {
   private now: () => Date;
   private buffers = new Map<ProviderId, { at: number; event: AdapterEvent }[]>();
   private messageIds = new Map<string, Map<string, string>>();
-  private requests = new Map<string, Map<string, OpenRequest>>();
+  /** Open requests the adapter can still answer (this process). The store keeps a copy for read-back. */
+  private requests = new Map<string, Map<string, LiveRequest>>();
   /** Chats whose provider session is attached in this process (started or resumed). */
   private live = new Set<string>();
   /** Resolves when an in-progress startChat for the chat has settled. */
@@ -72,7 +73,13 @@ export class ChatService {
     this.emit = opts.broadcast;
     this.claudeHome = opts.claudeHome;
     this.now = opts.now ?? (() => new Date());
-    this.adapters.onAdapter((id, adapter) => { adapter.onEvent((e) => this.onAdapterEvent(id, e)); });
+    this.adapters.onAdapter((id, adapter) => {
+      adapter.onEvent((e) => this.onAdapterEvent(id, e));
+      // A new adapter (e.g. the binary moved) knows none of the old one's chats: the next message resumes them.
+      for (const chatId of [...this.live]) {
+        if (this.store.getChat(chatId)?.provider === id) this.live.delete(chatId);
+      }
+    });
   }
 
   // ---- public API ----
@@ -116,6 +123,7 @@ export class ChatService {
       return;
     }
     open.delete(requestId);
+    this.store.setRequestStatus(chatId, requestId, 'answered');
     if (open.size === 0) this.transition(chatId, { type: 'user.answered' });
   }
 
@@ -127,7 +135,7 @@ export class ChatService {
     if (adapter && chat.sessionRef) {
       try { await adapter.stop(chat.sessionRef); } catch { /* still park the card as stopped */ }
     }
-    this.requests.delete(chatId);
+    this.closeRequests(chatId);
     this.live.delete(chatId);
     this.touch(chatId);
     this.transition(chatId, { type: 'user.stop' });
@@ -192,11 +200,23 @@ export class ChatService {
     return this.store.listMessages(chatId);
   }
 
+  /** The permissions and questions this chat is waiting on. */
+  listOpenRequests(chatId: string): OpenRequest[] {
+    this.mustGet(chatId);
+    return this.store.listOpenRequests(chatId);
+  }
+
+  listToolCalls(chatId: string): ToolCall[] {
+    this.mustGet(chatId);
+    return this.store.listToolCalls(chatId);
+  }
+
+  /** After a restart nothing from the old processes can continue: interrupt running and waiting chats, close their requests. */
   recoverAfterRestart(): void {
     this.live.clear();
-    for (const chat of this.store.listChats()) {
-      if (chat.column === 'running') this.transition(chat.id, { type: 'app.restarted' });
-    }
+    this.requests.clear();
+    this.store.closeOpenRequests();
+    for (const chat of this.store.listChats()) this.transition(chat.id, { type: 'app.restarted' });
   }
 
   // ---- internals ----
@@ -238,12 +258,14 @@ export class ChatService {
       ? `${name} isn't signed in. Open Connections to sign in.`
       : msg.startsWith(`${name} stopped unexpectedly`)
         ? `${name} stopped unexpectedly. Resume to try again.`
-        : `${name} couldn't continue: ${readable(msg)}`;
+        : msg.startsWith(`${name} stopped responding and was restarted`)
+          ? `${name} stopped responding and was restarted. Resume to continue.`
+          : `${name} couldn't continue: ${readable(msg)}`;
   }
 
   /** err === null means no adapter is configured. */
   private fail(chatId: string, provider: ProviderId, err: unknown | null): Chat {
-    this.requests.delete(chatId);
+    this.closeRequests(chatId);
     this.live.delete(chatId);
     this.touch(chatId);
     this.addMessage(chatId, 'assistant', this.errorCopy(provider, err));
@@ -384,8 +406,8 @@ export class ChatService {
         const id = ids.get(e.messageId);
         if (id) {
           this.store.setMessageText(id, e.text);
-          const message = this.store.listMessages(chatId).find((m) => m.id === id)!;
-          this.broadcast({ type: 'message.completed', chatId, message });
+          const message = this.store.getMessage(id);
+          if (message) this.broadcast({ type: 'message.completed', chatId, message });
         } else {
           ids.set(e.messageId, this.addMessage(chatId, 'assistant', e.text).id);
         }
@@ -400,6 +422,7 @@ export class ChatService {
         let open = this.requests.get(chatId);
         if (!open) { open = new Map(); this.requests.set(chatId, open); }
         open.set(e.requestId, { kind: e.kind, summary: e.summary });
+        this.store.addRequest(chatId, { requestId: e.requestId, kind: e.kind, summary: e.summary });
         this.transition(chatId, e);
         this.broadcast({ type: 'request.opened', chatId, requestId: e.requestId, kind: e.kind, summary: e.summary });
         this.broadcast({ type: 'notification', chatId, kind: e.kind });
@@ -413,7 +436,7 @@ export class ChatService {
         return;
       }
       case 'limit.reached':
-        this.requests.delete(chatId);
+        this.closeRequests(chatId);
         this.transition(chatId, e);
         this.broadcast({ type: 'notification', chatId, kind: 'limit' });
         return;
@@ -440,8 +463,14 @@ export class ChatService {
 
   /** The turn is over: forget its open requests and message-id mapping. */
   private settle(chatId: string): void {
-    this.requests.delete(chatId);
+    this.closeRequests(chatId);
     this.messageIds.delete(chatId);
+  }
+
+  /** Open requests can no longer be answered (turn over, stopped, failed): drop them here and in the store. */
+  private closeRequests(chatId: string): void {
+    this.requests.delete(chatId);
+    this.store.closeOpenRequests(chatId);
   }
 
   private idsFor(chatId: string): Map<string, string> {

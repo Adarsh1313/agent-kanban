@@ -173,18 +173,33 @@ test('events emitted before startChat resolves are buffered and replayed', async
   assert.ok(store.listMessages(chat.id).some((m) => m.text === 'early'));
 });
 
-test('Review 5: recoverAfterRestart interrupts running chats only', () => {
+test('Review 5: recoverAfterRestart interrupts running and waiting chats, keeps the rest, closes requests', () => {
   const { store, svc } = setup();
   const a = store.createChat({ provider: 'codex', cwd: '/w', title: 'a' });
   const b = store.createChat({ provider: 'codex', cwd: '/w', title: 'b' });
   const c = store.createChat({ provider: 'codex', cwd: '/w', title: 'c' });
   store.updateChat(c.id, { column: 'review' });
+  const perm = store.createChat({ provider: 'codex', cwd: '/w', title: 'p' });
+  store.updateChat(perm.id, { column: 'needs_you', needsReason: 'permission' });
+  store.addRequest(perm.id, { requestId: '900', kind: 'permission', summary: 'npm test' });
+  const ques = store.createChat({ provider: 'claude', cwd: '/w', title: 'q' });
+  store.updateChat(ques.id, { column: 'needs_you', needsReason: 'question' });
+  store.addRequest(ques.id, { requestId: 'r1', kind: 'question', summary: 'Which db?' });
+  const kept: Record<string, string> = {};
+  for (const reason of ['stopped', 'limit', 'error'] as const) {
+    const k = store.createChat({ provider: 'codex', cwd: '/w', title: reason });
+    store.updateChat(k.id, { column: 'needs_you', needsReason: reason });
+    kept[k.id] = reason;
+  }
   svc.recoverAfterRestart();
-  for (const id of [a.id, b.id]) {
+  for (const id of [a.id, b.id, perm.id, ques.id]) {
     const g = store.getChat(id)!;
     assert.deepEqual([g.column, g.needsReason], ['needs_you', 'interrupted']);
   }
   assert.equal(store.getChat(c.id)!.column, 'review');
+  for (const [id, reason] of Object.entries(kept)) assert.deepEqual([store.getChat(id)!.column, store.getChat(id)!.needsReason], ['needs_you', reason]);
+  assert.deepEqual(svc.listOpenRequests(perm.id), []);
+  assert.deepEqual(svc.listOpenRequests(ques.id), []);
 });
 
 test('Review 1: continueHistory refuses a chat active in Claude Code', async () => {
@@ -471,4 +486,69 @@ test('a provider installed after the server started works without a restart (reg
   // events from the adapter created later still reach the service
   created[0]!.emit({ type: 'turn.completed', sessionRef: 's1' });
   assert.notEqual(store.getChat(chat.id)!.column, 'running');
+});
+
+test('open requests are stored for read-back: answered ones leave the list, the rest close when the turn ends', async () => {
+  const { store, adapter, svc } = setup();
+  const chat = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+  adapter.emit({ type: 'request.opened', sessionRef: 's1', requestId: 'r1', kind: 'permission', summary: 'run ls' });
+  adapter.emit({ type: 'request.opened', sessionRef: 's1', requestId: 'r2', kind: 'question', summary: 'Which db?' });
+  assert.deepEqual(svc.listOpenRequests(chat.id).map((r) => [r.requestId, r.kind, r.summary]), [['r1', 'permission', 'run ls'], ['r2', 'question', 'Which db?']]);
+  await svc.answer(chat.id, 'r1', 'allow');
+  assert.deepEqual(svc.listOpenRequests(chat.id).map((r) => r.requestId), ['r2']);
+  // The adapter is still routed from memory: answering a request read back from the store works in this process.
+  const [readBack] = svc.listOpenRequests(chat.id);
+  await svc.answer(chat.id, readBack!.requestId, { reply: 'postgres' });
+  assert.ok(adapter.calls.includes('respond:s1:r2:{"reply":"postgres"}'));
+  adapter.emit({ type: 'request.opened', sessionRef: 's1', requestId: 'r3', kind: 'permission', summary: 'rm x' });
+  adapter.emit({ type: 'turn.completed', sessionRef: 's1' });
+  assert.deepEqual(svc.listOpenRequests(chat.id), []);
+  assert.equal(store.listOpenRequests(chat.id).length, 0);
+});
+
+test('open requests close in the store on stop and on error', async () => {
+  const { adapter, svc } = setup();
+  const chat = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+  adapter.emit({ type: 'request.opened', sessionRef: 's1', requestId: 'r1', kind: 'permission', summary: 'run ls' });
+  await svc.stop(chat.id);
+  assert.deepEqual(svc.listOpenRequests(chat.id), []);
+  await svc.send(chat.id, 'again');
+  adapter.emit({ type: 'request.opened', sessionRef: 's1', requestId: 'r2', kind: 'permission', summary: 'run ls' });
+  adapter.emit({ type: 'error', sessionRef: 's1', message: 'boom' });
+  assert.deepEqual(svc.listOpenRequests(chat.id), []);
+});
+
+test('tool calls are read back per chat', async () => {
+  const { adapter, svc } = setup();
+  const chat = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+  adapter.emit({ type: 'tool.call', sessionRef: 's1', toolCallId: 't1', name: 'command', summary: 'Running ls', status: 'running' });
+  adapter.emit({ type: 'tool.call', sessionRef: 's1', toolCallId: 't1', name: 'command', summary: 'Running ls', status: 'done' });
+  assert.deepEqual(svc.listToolCalls(chat.id).map((t) => [t.id, t.status]), [['t1', 'done']]);
+  assert.throws(() => svc.listToolCalls('nope'), /Chat not found\./);
+  assert.throws(() => svc.listOpenRequests('nope'), /Chat not found\./);
+});
+
+test('a deliberate Codex recycle reads as a restart, not a failure', async () => {
+  const { store, adapter, svc } = setup();
+  const chat = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+  adapter.emit({ type: 'error', sessionRef: 's1', message: 'Codex stopped responding and was restarted. Resume to continue.' });
+  assert.equal(store.listMessages(chat.id).at(-1)!.text, 'Codex stopped responding and was restarted. Resume to continue.');
+});
+
+test('when the registry swaps a provider adapter, chats on it resume on the new one at the next message', async () => {
+  const store = new Store(':memory:');
+  let binary = 'C:\\old\\codex.exe';
+  const created: FakeAdapter[] = [];
+  const registry = new AdapterRegistry({
+    findBinary: async () => binary,
+    create: (id) => { const a = new FakeAdapter(id); created.push(a); return a as unknown as ProviderAdapter; },
+  });
+  const svc = new ChatService({ store, adapters: registry, usage: { refresh: async () => [] } as any, broadcast: () => {}, claudeHome: '/nowhere' });
+  const chat = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'hi' });
+  created[0]!.emit({ type: 'turn.completed', sessionRef: 's1' });
+  binary = 'C:\\new\\codex.exe';
+  await registry.ensure('codex', binary);
+  assert.equal(created.length, 2);
+  await svc.send(chat.id, 'more');
+  assert.deepEqual(created[1]!.calls, ['resume:s1:/w', 'send:s1:more']);
 });
