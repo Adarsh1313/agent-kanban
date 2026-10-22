@@ -103,3 +103,8 @@ async function shutdown(): Promise<void> {
   process.exit(0);
 }
 for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGBREAK'] as const) process.on(sig, () => void shutdown());
+// Test harnesses (scripts/e2e-real.ts) stop the server by closing its stdin: a graceful shutdown on every platform.
+if (process.env.AGENT_KANBAN_E2E === '1') {
+  process.stdin.on('end', () => void shutdown());
+  process.stdin.resume();
+}

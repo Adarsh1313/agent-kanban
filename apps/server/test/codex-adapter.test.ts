@@ -549,3 +549,27 @@ test('model/list across pages: an unlisted model falls back to the default found
     assert.match(m.adapter.modelNote ?? '', /gpt-zzz.*gpt-b/);
   } finally { await m.adapter.dispose(); }
 });
+
+test('threads run in Auto mode: workspace-write sandbox with on-request approvals on start, resume and re-attach', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'ak-home-'));
+  const log = join(home, 'calls.log');
+  writeFileSync(log, '');
+  const m = make('', { codexHome: home, env: { FAKE_LOG: log } });
+  try {
+    await m.adapter.startChat({ cwd, prompt: 'hi' });
+    await m.adapter.resume('thr_9', cwd);
+    await m.procs[0]!.close(); // a fresh process must re-attach the thread before the next turn
+    await new Promise((r) => setTimeout(r, 50));
+    await m.adapter.sendMessage('thr_1', 'again');
+    const calls = readFileSync(log, 'utf8').trim().split(/\r?\n/).map((l) => JSON.parse(l));
+    const start = calls.filter((c) => c.method === 'thread/start');
+    const resumes = calls.filter((c) => c.method === 'thread/resume');
+    assert.equal(start.length, 1);
+    assert.equal(resumes.length, 2, 'resume() and the re-attach after a respawn');
+    assert.deepEqual(resumes.map((c) => c.params.threadId), ['thr_9', 'thr_1']);
+    for (const c of [...start, ...resumes]) {
+      assert.equal(c.params.sandbox, 'workspace-write', c.method);
+      assert.equal(c.params.approvalPolicy, 'on-request', c.method);
+    }
+  } finally { await m.adapter.dispose(); }
+});

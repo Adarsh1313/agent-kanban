@@ -2,7 +2,7 @@
 // Usage: node apps/server/scripts/e2e-real.ts
 import { spawn } from 'node:child_process';
 import { existsSync, mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { WebSocket } from 'ws';
 
@@ -10,7 +10,8 @@ type Ev = { type: string; [k: string]: any };
 const log = (s: string) => console.log(s);
 const results: string[] = [];
 
-const server = spawn(process.execPath, ['apps/server/src/main.ts'], { stdio: ['ignore', 'pipe', 'pipe'] });
+// AGENT_KANBAN_E2E=1: closing the child's stdin shuts the server down gracefully (adapters disposed, lock removed).
+const server = spawn(process.execPath, ['apps/server/src/main.ts'], { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, AGENT_KANBAN_E2E: '1' } });
 let stderrTail = '';
 server.stderr.on('data', (d) => { stderrTail = (stderrTail + String(d)).slice(-1500); });
 
@@ -163,5 +164,9 @@ await step('e) claude question round-trip', async () => {
 log('\n=== SUMMARY');
 for (const r of results) log(r);
 ws.close();
-server.kill();
-setTimeout(() => process.exit(0), 3000).unref();
+const exited = new Promise<number | null>((r) => server.once('exit', (code) => r(code)));
+server.stdin.end();
+const code = await Promise.race([exited, new Promise<'timeout'>((r) => setTimeout(() => r('timeout'), 15_000))]);
+if (code === 'timeout') { log('server did not shut down within 15 s; killing it'); server.kill(); }
+else log(`server shut down gracefully (exit ${code}); lock left behind: ${existsSync(join(homedir(), '.agent-kanban', 'server.lock'))}`);
+setTimeout(() => process.exit(0), 1000).unref();

@@ -8,6 +8,8 @@ import { codexLimitsToReading } from '../usage/parse.ts';
 
 type Listener = (e: AdapterEvent) => void;
 const QUIET_MS = 120_000;
+/** Codex's "Auto" mode: edits inside the chat's folder, asks before anything outside it. Never danger-full-access. */
+const AUTO_MODE = { sandbox: 'workspace-write', approvalPolicy: 'on-request' } as const;
 const GAVE_UP = 'Codex keeps stopping. Use Check now to try again.';
 type Approval = { threadId: string; resolve: (decision: 'accept' | 'decline') => void };
 
@@ -246,7 +248,7 @@ export class CodexAdapter implements ProviderAdapter {
 
   async startChat(input: { cwd: string; prompt: string; model?: string }): Promise<{ sessionRef: string }> {
     const p = await this.ensureProcess();
-    const r = await p.request<{ thread: { id: string } }>('thread/start', { cwd: input.cwd, model: input.model ?? this.fallbackModel.get(p) ?? null, approvalPolicy: 'on-request' });
+    const r = await p.request<{ thread: { id: string } }>('thread/start', { cwd: input.cwd, model: input.model ?? this.fallbackModel.get(p) ?? null, ...AUTO_MODE });
     const sessionRef = r.thread.id;
     this.threadCwd.set(sessionRef, input.cwd);
     this.loaded.get(p)?.add(sessionRef);
@@ -278,7 +280,7 @@ export class CodexAdapter implements ProviderAdapter {
     const known = this.loaded.get(p);
     if (known?.has(sessionRef)) return;
     const cwd = this.threadCwd.get(sessionRef);
-    await p.request('thread/resume', { threadId: sessionRef, ...(cwd ? { cwd } : {}), ...this.modelParam(p) });
+    await p.request('thread/resume', { threadId: sessionRef, ...(cwd ? { cwd } : {}), ...this.modelParam(p), ...AUTO_MODE });
     known?.add(sessionRef);
   }
 
@@ -318,7 +320,7 @@ export class CodexAdapter implements ProviderAdapter {
   async resume(sessionRef: string, cwd: string): Promise<void> {
     const p = await this.ensureProcess();
     this.threadCwd.set(sessionRef, cwd);
-    await p.request('thread/resume', { threadId: sessionRef, cwd, ...this.modelParam(p) });
+    await p.request('thread/resume', { threadId: sessionRef, cwd, ...this.modelParam(p), ...AUTO_MODE });
     this.loaded.get(p)?.add(sessionRef);
   }
 
