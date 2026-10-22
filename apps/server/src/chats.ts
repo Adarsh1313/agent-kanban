@@ -41,7 +41,9 @@ export class ChatService {
   private resuming = new Map<string, Promise<void>>();
   /** Last time this process drove or heard from each chat (ms). Distinguishes our own .jsonl writes from another app's. */
   private lastOwn = new Map<string, number>();
-  private reported = new WeakSet<object>();
+  /** Errors already reported, per chat: one failed resume is shared by concurrent callers of the SAME chat only. */
+  private reported = new WeakMap<object, Set<string>>();
+  private historyGates = new Map<string, Promise<void>>();
 
   constructor(opts: {
     store: Store;
@@ -76,7 +78,7 @@ export class ChatService {
 
   async send(chatId: string, text: string): Promise<void> {
     this.mustGet(chatId);
-    await this.pending.get(chatId);
+    while (this.pending.has(chatId)) await this.pending.get(chatId);
     const chat = this.mustGet(chatId);
     if (chat.sessionRef && !this.live.has(chat.id) && chat.provider === 'claude' && this.isActiveElsewhere(chat.sessionRef, chat.id)) {
       throw new ActiveElsewhereError();
@@ -90,7 +92,7 @@ export class ChatService {
 
   async answer(chatId: string, requestId: string, decision: Decision): Promise<void> {
     this.mustGet(chatId);
-    await this.pending.get(chatId);
+    while (this.pending.has(chatId)) await this.pending.get(chatId);
     const chat = this.mustGet(chatId);
     const open = this.requests.get(chatId);
     if (!open?.has(requestId)) throw new Error('That request is no longer open.');
@@ -108,7 +110,7 @@ export class ChatService {
 
   async stop(chatId: string): Promise<void> {
     this.mustGet(chatId);
-    await this.pending.get(chatId);
+    while (this.pending.has(chatId)) await this.pending.get(chatId);
     const chat = this.mustGet(chatId);
     const adapter = this.adapters[chat.provider];
     if (adapter && chat.sessionRef) {
@@ -140,6 +142,22 @@ export class ChatService {
   }
 
   async continueHistory(h: HistoryChat, text: string): Promise<Chat> {
+    // Serialize per (provider, sessionRef) so concurrent calls reuse one chat.
+    const key = `${h.provider}:${h.sessionRef}`;
+    const prev = this.historyGates.get(key);
+    let release!: () => void;
+    const mine = new Promise<void>((r) => { release = r; });
+    this.historyGates.set(key, mine);
+    try {
+      await prev;
+      return await this.continueHistoryNow(h, text);
+    } finally {
+      release();
+      if (this.historyGates.get(key) === mine) this.historyGates.delete(key);
+    }
+  }
+
+  private async continueHistoryNow(h: HistoryChat, text: string): Promise<Chat> {
     const existing = this.store.findBySessionRef(h.provider, h.sessionRef);
     if (existing) {
       await this.send(existing.id, text);
@@ -213,6 +231,8 @@ export class ChatService {
   }
 
   /** Start a provider session for a chat that has none, and claim its sessionRef. Never throws. */
+  // Callers wait with `while (this.pending.has(id)) await ...` inline: no await when idle, so same-tick calls queue correctly.
+
   private async begin(chat: Chat, prompt: string): Promise<void> {
     let release!: () => void;
     this.pending.set(chat.id, new Promise<void>((r) => { release = r; }));
@@ -266,8 +286,10 @@ export class ChatService {
     } catch (err) {
       // Concurrent callers share one failed resume: report it once.
       if (typeof err === 'object' && err !== null) {
-        if (this.reported.has(err)) return;
-        this.reported.add(err);
+        let chats = this.reported.get(err);
+        if (!chats) { chats = new Set(); this.reported.set(err, chats); }
+        if (chats.has(chat.id)) return;
+        chats.add(chat.id);
       }
       this.fail(chat.id, chat.provider, err);
     }

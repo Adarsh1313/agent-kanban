@@ -390,3 +390,39 @@ test('Fix2: concurrent sends sharing one failed resume report the error once', a
   assert.equal(errs.length, 1);
   assert.equal(store.getChat(chat.id)!.needsReason, 'error');
 });
+
+test('R1: two chats failing on one shared Error object each get their own error', async () => {
+  const { store, adapter, events, svc } = setup();
+  const a = store.createChat({ provider: 'codex', cwd: '/w', title: 'a', sessionRef: 'ra' });
+  const b = store.createChat({ provider: 'codex', cwd: '/w', title: 'b', sessionRef: 'rb' });
+  adapter.resumeError = new Error('app-server failed to initialize');
+  await Promise.all([svc.send(a.id, 'x'), svc.send(b.id, 'y')]);
+  for (const c of [a, b]) {
+    const got = store.getChat(c.id)!;
+    assert.deepEqual([got.column, got.needsReason], ['needs_you', 'error']);
+    assert.equal(store.listMessages(c.id).filter((m) => m.role === 'assistant').length, 1);
+    assert.ok(events.some((e) => e.type === 'notification' && e.kind === 'error' && e.chatId === c.id));
+  }
+});
+
+test('R2: two same-tick sends on a failed-start chat start the session once, in order', async () => {
+  const { store, adapter, svc } = setup();
+  adapter.startError = new Error('not signed in');
+  const chat = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+  adapter.startError = null;
+  await Promise.all([svc.send(chat.id, 'first'), svc.send(chat.id, 'second')]);
+  assert.equal(adapter.calls.filter((c) => c === 'startChat').length, 2); // failed start + one retry
+  assert.deepEqual(adapter.calls.filter((c) => c.startsWith('send')), ['send:s1:second']);
+  const users = store.listMessages(chat.id).filter((m) => m.role === 'user').map((m) => m.text);
+  assert.deepEqual(users, ['p', 'first', 'second']);
+});
+
+test('R3: concurrent continueHistory calls for one sessionRef create one chat', async () => {
+  const { store, adapter, svc } = setup();
+  const h: HistoryChat = { provider: 'codex', sessionRef: 'hist1', title: 'Old', cwd: '/w', updatedAt: '2026-10-22T00:00:00Z' };
+  const [x, y] = await Promise.all([svc.continueHistory(h, 'one'), svc.continueHistory(h, 'two')]);
+  assert.equal(x.id, y.id);
+  assert.equal(store.listChats().length, 1);
+  assert.equal(adapter.calls.filter((c) => c.startsWith('resume')).length, 1);
+  assert.deepEqual(adapter.calls.filter((c) => c.startsWith('send')), ['send:hist1:one', 'send:hist1:two']);
+});
