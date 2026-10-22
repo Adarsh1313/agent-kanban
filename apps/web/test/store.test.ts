@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { OpenRequest } from '@agent-kanban/shared';
 import { applyEvent, initialState, isChatLoaded, type AppState } from '../src/state/reducer.ts';
-import { createStore, loadAll, loadChat, syncMissing } from '../src/state/store.ts';
+import { createStore, loadAll, loadChat, refetchGaps, syncMissing } from '../src/state/store.ts';
 import type { api as realApi } from '../src/api/client.ts';
 import { chat, message } from './helpers.ts';
 
@@ -69,7 +69,7 @@ describe('store', () => {
   it('an in-progress message from listMessages keeps growing with deltas, without a split or duplicate (I1)', async () => {
     const store = storeWith({ chats: { c1: chat() } });
     await loadChat(store, fakeApi({ listMessages: async () => [message({ id: 'm1', text: 'Hel' })] }), 'c1');
-    store.setState((s) => applyEvent(s, { type: 'message.delta', chatId: 'c1', messageId: 'm1', text: 'lo' }));
+    store.setState((s) => applyEvent(s, { type: 'message.delta', chatId: 'c1', messageId: 'm1', text: 'lo', offset: 3 }));
     let s = store.getState();
     expect(s.messages.c1!.map((m) => m.text)).toEqual(['Hello']);
     expect(s.streaming.c1?.m1).toBeUndefined();
@@ -83,7 +83,7 @@ describe('store', () => {
     const store = storeWith({ chats: { c1: chat() } });
     const gate = deferred<ReturnType<typeof message>[]>();
     const pending = loadChat(store, fakeApi({ listMessages: () => gate.promise }), 'c1');
-    store.setState((s) => applyEvent(s, { type: 'message.delta', chatId: 'c1', messageId: 'm1', text: 'lo' }));
+    store.setState((s) => applyEvent(s, { type: 'message.delta', chatId: 'c1', messageId: 'm1', text: 'lo', offset: 3 }));
     gate.resolve([message({ id: 'm1', text: 'Hel' })]);
     await pending;
     expect(store.getState().messages.c1!.map((m) => m.text)).toEqual(['Hello']);
@@ -93,7 +93,7 @@ describe('store', () => {
     const store2 = storeWith({ chats: { c1: chat() } });
     const gate2 = deferred<ReturnType<typeof message>[]>();
     const pending2 = loadChat(store2, fakeApi({ listMessages: () => gate2.promise }), 'c1');
-    store2.setState((s) => applyEvent(s, { type: 'message.delta', chatId: 'c1', messageId: 'm1', text: 'lo' }));
+    store2.setState((s) => applyEvent(s, { type: 'message.delta', chatId: 'c1', messageId: 'm1', text: 'lo', offset: 3 }));
     gate2.resolve([message({ id: 'm1', text: 'Hello' })]);
     await pending2;
     expect(store2.getState().messages.c1!.map((m) => m.text)).toEqual(['Hello']);
@@ -170,5 +170,17 @@ describe('store', () => {
     await tick();
     expect(listChats).toHaveBeenCalledTimes(2);
     expect(Object.keys(store.getState().chats).sort()).toEqual(['ghost', 'other']);
+  });
+});
+
+describe('refetchGaps (fix round 2)', () => {
+  it('fetches the thread of a chat where a delta left a gap, once at a time', async () => {
+    const store = storeWith({ chats: { c1: chat() } });
+    store.setState((s) => applyEvent(s, { type: 'message.delta', chatId: 'c1', messageId: 'm1', text: ' world', offset: 5 }));
+    const listMessages = vi.fn(async () => [message({ id: 'm1', text: 'Hello' })]);
+    await Promise.all([refetchGaps(store, fakeApi({ listMessages })), refetchGaps(store, fakeApi({ listMessages }))]);
+    expect(listMessages).toHaveBeenCalledTimes(1);
+    expect(store.getState().messages.c1![0]!.text).toBe('Hello world');
+    expect(store.getState().refetch.c1).toBeUndefined();
   });
 });

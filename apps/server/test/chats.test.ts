@@ -572,3 +572,36 @@ test('request.closed is broadcast for open requests when the app restarts', asyn
   svc.recoverAfterRestart();
   assert.ok(events.some((e) => e.type === 'request.closed' && e.requestId === 'r1'));
 });
+
+test('message.delta carries the stored length before the delta as offset', async () => {
+  const { adapter, events, svc } = setup();
+  await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+  for (const text of ['Hel', 'lo', ' wo']) adapter.emit({ type: 'message.delta', sessionRef: 's1', messageId: 'm1', text });
+  const deltas = events.filter((e) => e.type === 'message.delta') as Extract<ServerEvent, { type: 'message.delta' }>[];
+  assert.deepEqual(deltas.map((d) => [d.text, d.offset]), [['Hel', 0], ['lo', 3], [' wo', 5]]);
+});
+
+test('a stop, an error or a limit settles a partial assistant message with message.completed', async () => {
+  for (const end of [
+    { type: 'stopped', sessionRef: 's1' },
+    { type: 'error', sessionRef: 's1', message: 'boom' },
+    { type: 'limit.reached', sessionRef: 's1' },
+  ] as const) {
+    const { adapter, events, store, svc } = setup();
+    const chat = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+    adapter.emit({ type: 'message.delta', sessionRef: 's1', messageId: 'm1', text: 'partial' });
+    adapter.emit({ ...end });
+    const done = events.filter((e) => e.type === 'message.completed' && e.message.text === 'partial');
+    assert.equal(done.length, 1, end.type);
+    assert.ok(store.listMessages(chat.id).some((m) => m.text === 'partial'));
+  }
+});
+
+test('a completed message is not announced again when the turn settles', async () => {
+  const { adapter, events, svc } = setup();
+  await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+  adapter.emit({ type: 'message.delta', sessionRef: 's1', messageId: 'm1', text: 'Hi' });
+  adapter.emit({ type: 'message.completed', sessionRef: 's1', messageId: 'm1', role: 'assistant', text: 'Hi' });
+  adapter.emit({ type: 'turn.completed', sessionRef: 's1' });
+  assert.equal(events.filter((e) => e.type === 'message.completed' && e.message.text === 'Hi').length, 1);
+});

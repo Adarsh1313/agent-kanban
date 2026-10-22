@@ -74,7 +74,8 @@ export interface ConnectionHealth {
 
 export type ServerEvent =
   | { type: 'chat.updated'; chat: Chat }
-  | { type: 'message.delta'; chatId: string; messageId: string; text: string }
+  /** `offset` is the stored message length before this delta was appended. */
+  | { type: 'message.delta'; chatId: string; messageId: string; text: string; offset: number }
   | { type: 'message.completed'; chatId: string; message: Message }
   | { type: 'tool.call'; chatId: string; toolCall: ToolCall }
   | { type: 'request.opened'; chatId: string; requestId: string; kind: 'permission' | 'question'; summary: string }

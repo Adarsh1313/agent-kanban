@@ -47,8 +47,6 @@ export interface SyncState {
   inflight: number;
   /** item key -> seq of the last event that wrote it while a fetch was in flight */
   touched: Record<string, number>;
-  /** message key -> delta text received while a fetch was in flight */
-  deltas: Record<string, string>;
 }
 
 export interface AppState {
@@ -67,11 +65,17 @@ export interface AppState {
   notifications: AppNotification[];
   /** Chats whose thread was fetched with loadChat (see isChatLoaded). */
   loadedChats: Record<string, true>;
+  /** Deltas that arrived ahead of the text they extend (a gap), per chat, until a refetch fills it. */
+  pendingDeltas: Record<string, PendingDelta[]>;
+  /** Chats whose thread must be fetched again because a delta left a gap. */
+  refetch: Record<string, true>;
   /** Bookkeeping that lets a fetch tell which items an event wrote while it was in flight. */
   sync: SyncState;
   socket: 'live' | 'reconnecting' | 'unauthorized';
   ui: UiState;
 }
+
+export interface PendingDelta { messageId: string; offset: number; text: string }
 
 export interface Snapshot {
   chats: Chat[];
@@ -98,7 +102,9 @@ export function initialState(): AppState {
     projects: [],
     notifications: [],
     loadedChats: {},
-    sync: { seq: 0, inflight: 0, touched: {}, deltas: {} },
+    pendingDeltas: {},
+    refetch: {},
+    sync: { seq: 0, inflight: 0, touched: {} },
     socket: 'reconnecting',
     ui: {
       view: 'board',
@@ -124,18 +130,49 @@ function omitKey<T>(rec: Record<string, T>, key: string): Record<string, T> {
   return rest;
 }
 
+/**
+ * Applies a delta by position (idempotent): `offset` is the message length before the delta, so a
+ * delta already covered is ignored, an overlapping one adds only its new tail, and one beyond the
+ * current end is a gap. Mutates `messages` (a copy) and `streaming` (a copy).
+ */
+function applyDeltaTo(messages: Message[], streaming: Record<string, string>, d: PendingDelta): 'applied' | 'ignored' | 'gap' {
+  const i = messages.findIndex((m) => m.id === d.messageId);
+  const known = i !== -1 ? messages[i]!.text : streaming[d.messageId];
+  const cur = known ?? '';
+  if (d.offset > cur.length) return 'gap';
+  const start = cur.length - d.offset;
+  if (start >= d.text.length) return 'ignored';
+  const text = cur + d.text.slice(start);
+  if (i !== -1) messages[i] = { ...messages[i]!, text };
+  else streaming[d.messageId] = text;
+  return 'applied';
+}
+
+/** Applies held deltas that now fit; returns those still waiting. */
+function drainPending(messages: Message[], streaming: Record<string, string>, pending: PendingDelta[]): PendingDelta[] {
+  let rest = pending;
+  for (let progress = true; progress && rest.length > 0; ) {
+    progress = false;
+    rest = rest.filter((d) => {
+      const r = applyDeltaTo(messages, streaming, d);
+      if (r !== 'gap') progress = true;
+      return r === 'gap';
+    });
+  }
+  return rest;
+}
+
 export const chatKey = (chatId: string) => `c:${chatId}`;
 export const messageKey = (chatId: string, id: string) => `m:${chatId}:${id}`;
 export const toolCallKey = (chatId: string, id: string) => `t:${chatId}:${id}`;
 export const requestKey = (chatId: string, id: string) => `r:${chatId}:${id}`;
 
-function bump(s: AppState, keys: string[], delta?: { key: string; text: string }): SyncState {
+function bump(s: AppState, keys: string[]): SyncState {
   const seq = s.sync.seq + 1;
   if (s.sync.inflight === 0) return { ...s.sync, seq };
   const touched = { ...s.sync.touched };
   for (const k of keys) touched[k] = seq;
-  const deltas = delta ? { ...s.sync.deltas, [delta.key]: (s.sync.deltas[delta.key] ?? '') + delta.text } : s.sync.deltas;
-  return { ...s.sync, seq, touched, deltas };
+  return { ...s.sync, seq, touched };
 }
 
 /** A fetch is starting: events from now on are remembered so the result can be merged with them. */
@@ -145,14 +182,14 @@ export function beginSync(s: AppState): { state: AppState; since: number } {
 
 export function endSync(s: AppState): AppState {
   const inflight = Math.max(0, s.sync.inflight - 1);
-  return { ...s, sync: { ...s.sync, inflight, touched: inflight === 0 ? {} : s.sync.touched, deltas: inflight === 0 ? {} : s.sync.deltas } };
+  return { ...s, sync: { ...s.sync, inflight, touched: inflight === 0 ? {} : s.sync.touched } };
 }
 
 /** True when an event wrote this item after the fetch that started at `since`. */
 export const touchedSince = (s: AppState, key: string, since: number): boolean => (s.sync.touched[key] ?? 0) > since;
 
 export function applyEvent(s: AppState, e: ServerEvent, now: Date = new Date()): AppState {
-  const mk = (keys: string[], patch: Partial<AppState>, delta?: { key: string; text: string }): AppState => ({ ...s, ...patch, sync: bump(s, keys, delta) });
+  const mk = (keys: string[], patch: Partial<AppState>): AppState => ({ ...s, ...patch, sync: bump(s, keys) });
   switch (e.type) {
     case 'chat.updated': {
       const patch: Partial<AppState> = { chats: { ...s.chats, [e.chat.id]: e.chat } };
@@ -164,22 +201,32 @@ export function applyEvent(s: AppState, e: ServerEvent, now: Date = new Date()):
     }
     case 'message.delta': {
       const keys = [messageKey(e.chatId, e.messageId), chatKey(e.chatId)];
-      const list = s.messages[e.chatId];
-      const i = list ? list.findIndex((m) => m.id === e.messageId) : -1;
-      if (list && i !== -1) {
-        // The server stores a message on its first delta, so a fetched message may still be growing.
-        const next = list.slice();
-        next[i] = { ...list[i]!, text: list[i]!.text + e.text };
-        return mk(keys, { messages: { ...s.messages, [e.chatId]: next } }, { key: keys[0]!, text: e.text });
+      const messages = (s.messages[e.chatId] ?? []).slice();
+      const streaming = { ...(s.streaming[e.chatId] ?? {}) };
+      const delta: PendingDelta = { messageId: e.messageId, offset: e.offset, text: e.text };
+      const result = applyDeltaTo(messages, streaming, delta);
+      if (result === 'ignored') return mk([], {});
+      const patch: Partial<AppState> = {};
+      if (result === 'gap') {
+        // Part of the message is missing here: hold the delta and ask for a refetch of the thread.
+        patch.pendingDeltas = { ...s.pendingDeltas, [e.chatId]: [...(s.pendingDeltas[e.chatId] ?? []), delta] };
+        patch.refetch = { ...s.refetch, [e.chatId]: true };
+      } else {
+        const rest = drainPending(messages, streaming, s.pendingDeltas[e.chatId] ?? []);
+        patch.messages = { ...s.messages, [e.chatId]: messages };
+        patch.streaming = { ...s.streaming, [e.chatId]: streaming };
+        patch.pendingDeltas = { ...s.pendingDeltas, [e.chatId]: rest };
       }
-      const forChat = s.streaming[e.chatId] ?? {};
-      return mk(keys, { streaming: { ...s.streaming, [e.chatId]: { ...forChat, [e.messageId]: (forChat[e.messageId] ?? '') + e.text } } }, { key: keys[0]!, text: e.text });
+      return mk(keys, patch);
     }
     case 'message.completed': {
       const forChat = s.streaming[e.chatId];
       const streaming = forChat && e.message.id in forChat ? { ...s.streaming, [e.chatId]: omitKey(forChat, e.message.id) } : s.streaming;
+      const pending = (s.pendingDeltas[e.chatId] ?? []).filter((d) => d.messageId !== e.message.id);
       return mk([messageKey(e.chatId, e.message.id), chatKey(e.chatId)], {
         streaming,
+        pendingDeltas: { ...s.pendingDeltas, [e.chatId]: pending },
+        refetch: pending.length === 0 && s.refetch[e.chatId] ? omitKey(s.refetch, e.chatId) : s.refetch,
         messages: { ...s.messages, [e.chatId]: upsertBy(s.messages[e.chatId], e.message, (m) => m.id === e.message.id) },
       });
     }
@@ -261,6 +308,8 @@ export function applySnapshot(s: AppState, snap: Snapshot, since: number = s.syn
     streaming,
     requests,
     messages: keepKnown(s.messages),
+    pendingDeltas: keepKnown(s.pendingDeltas),
+    refetch: keepKnown(s.refetch),
     toolCalls: keepKnown(s.toolCalls),
     // Cached threads may have missed events while the socket was down: they must be fetched again.
     loadedChats: {},
@@ -309,20 +358,27 @@ export function mergeFetched(s: AppState, chatId: string, part: FetchedThread, s
   const next: AppState = { ...s };
 
   if (part.messages) {
-    const merged = mergeById(s.messages[chatId] ?? [], part.messages, (id) => touchedSince(s, messageKey(chatId, id), since));
-    const byId = new Map(merged.map((m) => [m.id, m]));
+    const byId = new Map(part.messages.map((m) => [m.id, m]));
+    for (const c of s.messages[chatId] ?? []) {
+      const f = byId.get(c.id);
+      if (!f) byId.set(c.id, c);
+      else if (touchedSince(s, messageKey(chatId, c.id), since)) {
+        // Both are the same message at different moments; the longer text extends the shorter one.
+        byId.set(c.id, c.text.startsWith(f.text) || !f.text.startsWith(c.text) ? c : f);
+      }
+    }
     const streaming = { ...(s.streaming[chatId] ?? {}) };
-    for (const mid of Object.keys(streaming)) {
+    for (const [mid, text] of Object.entries(streaming)) {
       const msg = byId.get(mid);
       if (!msg) continue;
-      // Deltas that arrived during the fetch may or may not be in the fetched copy: add them unless it already ends with them.
-      const late = s.sync.deltas[messageKey(chatId, mid)];
-      if (late && touchedSince(s, messageKey(chatId, mid), since) && !(s.messages[chatId] ?? []).some((m) => m.id === mid) && !msg.text.endsWith(late)) {
-        byId.set(mid, { ...msg, text: msg.text + late });
-      }
+      if (text.length > msg.text.length && text.startsWith(msg.text)) byId.set(mid, { ...msg, text });
       delete streaming[mid];
     }
-    next.messages = { ...s.messages, [chatId]: [...byId.values()].sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0)) };
+    const list = [...byId.values()].sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0));
+    const rest = drainPending(list, streaming, s.pendingDeltas[chatId] ?? []);
+    next.pendingDeltas = { ...s.pendingDeltas, [chatId]: rest };
+    next.refetch = rest.length === 0 ? omitKey(s.refetch, chatId) : s.refetch;
+    next.messages = { ...s.messages, [chatId]: list };
     next.streaming = { ...s.streaming, [chatId]: streaming };
     next.loadedChats = { ...s.loadedChats, [chatId]: true };
   }

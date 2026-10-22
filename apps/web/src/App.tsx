@@ -3,7 +3,7 @@ import { api, readToken } from './api/client.ts';
 import { connectSocket } from './api/socket.ts';
 import { applyEvent, type AppState } from './state/reducer.ts';
 import { boardColumns } from './state/selectors.ts';
-import { loadAll, syncMissing, useStore, useStoreInstance } from './state/store.ts';
+import { loadAll, refetchGaps, syncMissing, useStore, useStoreInstance } from './state/store.ts';
 
 const UNAUTHORIZED_TEXT = 'The server restarted. Open Agent Kanban again from the link it printed.';
 const COLUMN_LABELS = [
@@ -41,6 +41,7 @@ export function App() {
         store.setState((s) => applyEvent(s, e));
         // Only events that name a chat can refer to one the store lacks.
         if ('chatId' in e) void syncMissing(store, api).catch(() => {});
+        if (e.type === 'message.delta') void refetchGaps(store, api).catch(() => {});
       },
       // Every open (the first too) loads everything, so events between the fetch and the subscribe cannot be lost.
       onStatus: (socket) => {

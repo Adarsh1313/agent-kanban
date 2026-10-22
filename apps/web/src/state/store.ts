@@ -136,3 +136,20 @@ export async function syncMissing(store: Store, api: Api): Promise<void> {
     throw err;
   }
 }
+
+const refetching = new WeakMap<Store, Set<string>>();
+
+/** Fetches the thread of every chat where a delta left a gap (each chat at most once at a time). */
+export async function refetchGaps(store: Store, api: Api): Promise<void> {
+  const busy = refetching.get(store) ?? new Set<string>();
+  refetching.set(store, busy);
+  const ids = Object.keys(store.getState().refetch).filter((id) => !busy.has(id) && id in store.getState().chats);
+  await Promise.all(ids.map(async (id) => {
+    busy.add(id);
+    try {
+      await loadChat(store, api, id);
+    } finally {
+      busy.delete(id);
+    }
+  }));
+}

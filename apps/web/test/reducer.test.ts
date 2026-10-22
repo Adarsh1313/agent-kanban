@@ -16,8 +16,8 @@ describe('applyEvent', () => {
 
   it('message.delta appends to streaming and message.completed replaces it without duplicates', () => {
     let s = withChat();
-    s = applyEvent(s, { type: 'message.delta', chatId: 'c1', messageId: 'm1', text: 'Hel' });
-    s = applyEvent(s, { type: 'message.delta', chatId: 'c1', messageId: 'm1', text: 'lo' });
+    s = applyEvent(s, { type: 'message.delta', chatId: 'c1', messageId: 'm1', text: 'Hel', offset: 0 });
+    s = applyEvent(s, { type: 'message.delta', chatId: 'c1', messageId: 'm1', text: 'lo', offset: 3 });
     expect(s.streaming.c1!.m1).toBe('Hello');
     s = applyEvent(s, { type: 'message.completed', chatId: 'c1', message: message({ text: 'Hello there' }) });
     expect(s.streaming.c1?.m1).toBeUndefined();
@@ -28,7 +28,7 @@ describe('applyEvent', () => {
   });
 
   it('keeps a delta for an unknown chat and reports the chat as missing (Review Focus 2)', () => {
-    let s = applyEvent(initialState(), { type: 'message.delta', chatId: 'ghost', messageId: 'm1', text: 'hi' });
+    let s = applyEvent(initialState(), { type: 'message.delta', chatId: 'ghost', messageId: 'm1', text: 'hi', offset: 0 });
     expect(s.streaming.ghost!.m1).toBe('hi');
     expect(missingChats(s)).toEqual(['ghost']);
     s = applyEvent(s, { type: 'chat.updated', chat: chat({ id: 'ghost' }) });
@@ -82,8 +82,8 @@ describe('applySnapshot', () => {
     let s = withChat({ id: 'a' });
     s = applyEvent(s, { type: 'chat.updated', chat: chat({ id: 'b', column: 'needs_you', needsReason: 'permission' }) });
     s = applyEvent(s, { type: 'chat.updated', chat: chat({ id: 'c', column: 'needs_you', needsReason: 'question' }) });
-    s = applyEvent(s, { type: 'message.delta', chatId: 'a', messageId: 'm', text: 'partial' });
-    s = applyEvent(s, { type: 'message.delta', chatId: 'b', messageId: 'm', text: 'old' });
+    s = applyEvent(s, { type: 'message.delta', chatId: 'a', messageId: 'm', text: 'partial', offset: 0 });
+    s = applyEvent(s, { type: 'message.delta', chatId: 'b', messageId: 'm', text: 'old', offset: 0 });
     s = applyEvent(s, { type: 'request.opened', chatId: 'b', requestId: 'r1', kind: 'permission', summary: 's' });
     s = applyEvent(s, { type: 'request.opened', chatId: 'c', requestId: 'r2', kind: 'question', summary: 's' });
     const next = applySnapshot(s, snap([
@@ -117,7 +117,7 @@ describe('applySnapshot', () => {
   });
 
   it('keeps streaming buffered for chats the snapshot does not know yet', () => {
-    const s = applyEvent(initialState(), { type: 'message.delta', chatId: 'ghost', messageId: 'm', text: 'x' });
+    const s = applyEvent(initialState(), { type: 'message.delta', chatId: 'ghost', messageId: 'm', text: 'x', offset: 0 });
     expect(applySnapshot(s, snap()).streaming.ghost!.m).toBe('x');
   });
 
@@ -134,7 +134,7 @@ describe('applySnapshot', () => {
   it('a delta for a message already in messages extends it instead of splitting it (I1)', () => {
     let s = withChat();
     s = applyEvent(s, { type: 'message.completed', chatId: 'c1', message: message({ text: 'Hel' }) });
-    s = applyEvent(s, { type: 'message.delta', chatId: 'c1', messageId: 'm1', text: 'lo' });
+    s = applyEvent(s, { type: 'message.delta', chatId: 'c1', messageId: 'm1', text: 'lo', offset: 3 });
     expect(s.messages.c1![0]!.text).toBe('Hello');
     expect(s.streaming.c1?.m1).toBeUndefined();
   });
@@ -170,5 +170,51 @@ describe('request.closed, notifications, loaded chats', () => {
     const b = beginSync(withChat());
     const s = endSync(applyEvent(b.state, { type: 'chat.updated', chat: chat() }));
     expect(s.sync.touched).toEqual({});
+  });
+});
+
+describe('message.delta by position (fix round 2)', () => {
+  const delta = (text: string, offset: number, messageId = 'm1') => ({ type: 'message.delta', chatId: 'c1', messageId, text, offset }) as const;
+
+  it('a mid-read: stored "Hel", then late deltas "lo" (offset 3) and " wo" (offset 5) give "Hello wo"', () => {
+    let s = applyEvent(withChat(), { type: 'message.completed', chatId: 'c1', message: message({ text: 'Hello' }) });
+    s = applyEvent(s, delta('lo', 3));
+    s = applyEvent(s, delta(' wo', 5));
+    expect(s.messages.c1![0]!.text).toBe('Hello wo');
+  });
+
+  it('keeps repeated punctuation and blank lines', () => {
+    let s = withChat();
+    s = applyEvent(s, delta('Wait.', 0));
+    s = applyEvent(s, delta('.', 5));
+    s = applyEvent(s, delta('.', 6));
+    s = applyEvent(s, delta('\n\n', 7));
+    s = applyEvent(s, delta('\n\n', 9));
+    expect(s.streaming.c1!.m1).toBe('Wait...\n\n\n\n');
+  });
+
+  it('ignores a duplicate delivery of the same delta', () => {
+    let s = applyEvent(withChat(), delta('Hel', 0));
+    s = applyEvent(s, delta('lo', 3));
+    s = applyEvent(s, delta('lo', 3));
+    s = applyEvent(s, delta('Hel', 0));
+    expect(s.streaming.c1!.m1).toBe('Hello');
+  });
+
+  it('a gap holds the delta, asks for a refetch, and the fetched text plus the held delta settle it', () => {
+    let s = applyEvent(withChat(), delta(' world', 5));
+    expect(s.streaming.c1?.m1).toBeUndefined();
+    expect(s.refetch.c1).toBe(true);
+    s = mergeFetched(s, 'c1', { messages: [message({ text: 'Hello' })] }, 0);
+    expect(s.messages.c1![0]!.text).toBe('Hello world');
+    expect(s.refetch.c1).toBeUndefined();
+    expect(s.pendingDeltas.c1).toEqual([]);
+  });
+
+  it('message.completed drops held deltas for that message', () => {
+    let s = applyEvent(withChat(), delta(' world', 5));
+    s = applyEvent(s, { type: 'message.completed', chatId: 'c1', message: message({ text: 'Hello world' }) });
+    expect(s.pendingDeltas.c1).toEqual([]);
+    expect(s.refetch.c1).toBeUndefined();
   });
 });
