@@ -58,6 +58,7 @@ type Chat = {
   stopping: boolean;
   pending: Map<string, Pending>;
   onStarted?: { resolve: () => void; reject: (e: Error) => void };
+  deferred: Array<() => void>; // request.opened emissions waiting for the session id
 };
 
 const SHUT_DOWN = 'Claude Code adapter is shut down.';
@@ -70,8 +71,12 @@ export class ClaudeAdapter implements ProviderAdapter {
   private claudePath: string;
   private query: typeof sdkQuery;
   private disposed = false;
+  private live = new Set<Chat>(); // every chat with a launched query, including ones still starting
+  private usageQuery: Query | null = null;
+  private usageTimeoutMs: number;
 
-  constructor(opts: { claudePath: string; query?: typeof sdkQuery }) {
+  constructor(opts: { claudePath: string; query?: typeof sdkQuery; usageTimeoutMs?: number }) {
+    this.usageTimeoutMs = opts.usageTimeoutMs ?? 15_000;
     // The SDK needs the real executable (an .exe, or a .js script it runs with node), never a .cmd shim.
     const target = resolveSpawnTarget(opts.claudePath);
     this.claudePath = target.args.length === 0 ? target.command : target.args[0]!;
@@ -84,7 +89,9 @@ export class ClaudeAdapter implements ProviderAdapter {
   }
 
   private emit(e: AdapterEvent): void {
-    for (const l of [...this.listeners]) l(e);
+    for (const l of [...this.listeners]) {
+      try { l(e); } catch { /* a faulty listener must not look like a process death */ }
+    }
   }
 
   private assertOpen(): void {
@@ -92,7 +99,7 @@ export class ClaudeAdapter implements ProviderAdapter {
   }
 
   private newChat(cwd: string, model: string | undefined, sessionRef: string | null): Chat {
-    return { sessionRef, cwd, model, queue: new InputQueue(), query: null, turnRunning: false, turnAnnounced: false, stopping: false, pending: new Map() };
+    return { sessionRef, cwd, model, queue: new InputQueue(), query: null, turnRunning: false, turnAnnounced: false, stopping: false, pending: new Map(), deferred: [] };
   }
 
   private launch(chat: Chat, resume?: string): void {
@@ -100,17 +107,20 @@ export class ClaudeAdapter implements ProviderAdapter {
       const requestId = randomUUID();
       chat.pending.set(requestId, { toolName, input, resolve });
       signal.addEventListener('abort', () => { chat.pending.delete(requestId); }, { once: true });
-      this.emit({
-        type: 'request.opened', sessionRef: chat.sessionRef ?? '', requestId,
+      const announce = () => this.emit({
+        type: 'request.opened', sessionRef: chat.sessionRef!, requestId,
         kind: toolName === 'AskUserQuestion' ? 'question' : 'permission',
         summary: requestSummary(toolName, input),
       });
+      if (chat.sessionRef === null) chat.deferred.push(() => { if (chat.pending.has(requestId)) announce(); });
+      else announce();
     });
     const options: Record<string, unknown> = { cwd: chat.cwd, pathToClaudeCodeExecutable: this.claudePath, permissionMode: 'default', canUseTool };
     if (chat.model) options.model = chat.model;
     if (resume) options.resume = resume;
     const q = this.query({ prompt: chat.queue, options: options as never });
     chat.query = q;
+    this.live.add(chat);
     void this.consume(chat, q);
   }
 
@@ -123,9 +133,12 @@ export class ClaudeAdapter implements ProviderAdapter {
     }
     if (chat.query !== q) return; // replaced, closed or disposed on purpose
     chat.query = null;
+    this.live.delete(chat);
+    try { q.close(); } catch { /* already gone */ }
     chat.queue.close();
     for (const p of chat.pending.values()) p.resolve({ behavior: 'deny', message: 'Claude Code stopped.' });
     chat.pending.clear();
+    chat.deferred = [];
     if (this.disposed) return;
     if (chat.sessionRef === null) {
       chat.onStarted?.reject(new Error(failure instanceof Error && failure.message ? failure.message : DIED));
@@ -138,10 +151,13 @@ export class ClaudeAdapter implements ProviderAdapter {
   }
 
   private handle(chat: Chat, m: any): void {
+    if (this.disposed) return;
     if (typeof m?.session_id === 'string' && m.session_id && chat.sessionRef === null) {
       chat.sessionRef = m.session_id;
       this.chats.set(m.session_id, chat);
       this.emit({ type: 'session.started', sessionRef: m.session_id });
+      const deferred = chat.deferred; chat.deferred = [];
+      for (const d of deferred) d();
       chat.onStarted?.resolve();
     }
     if (m.type === 'result' && chat.sessionRef === null) {
@@ -156,7 +172,7 @@ export class ClaudeAdapter implements ProviderAdapter {
       const content: any[] = Array.isArray(m.message?.content) ? m.message.content : [];
       content.forEach((block, i) => {
         if (block?.type === 'text' && typeof block.text === 'string') {
-          this.emit({ type: 'message.completed', sessionRef, messageId: `${m.message?.id ?? m.uuid ?? randomUUID()}:${i}`, role: 'assistant', text: block.text });
+          this.emit({ type: 'message.completed', sessionRef, messageId: `${m.uuid ?? m.message?.id ?? randomUUID()}:${i}`, role: 'assistant', text: block.text });
         } else if (block?.type === 'tool_use') {
           this.emit({ type: 'tool.call', sessionRef, toolCallId: String(block.id), name: String(block.name), summary: toolSummary(block.name, block.input ?? {}), status: 'running' });
         }
@@ -180,8 +196,11 @@ export class ClaudeAdapter implements ProviderAdapter {
     try {
       await started;
     } catch (e) {
-      chat.query?.close();
+      const q = chat.query;
       chat.query = null;
+      this.live.delete(chat);
+      chat.queue.close();
+      try { q?.close(); } catch { /* already gone */ }
       throw e;
     }
     return { sessionRef: chat.sessionRef! };
@@ -235,34 +254,61 @@ export class ClaudeAdapter implements ProviderAdapter {
   }
 
   async readUsage(): Promise<UsageReading> {
-    let temp: Query | null = null;
-    try {
-      let q = [...this.chats.values()].find((c) => c.query)?.query ?? null;
-      if (!q) {
-        temp = this.query({ prompt: new InputQueue(), options: { pathToClaudeCodeExecutable: this.claudePath, permissionMode: 'default' } as never });
-        q = temp;
+    this.assertOpen();
+    const failed: UsageReading = { provider: 'claude', status: 'error', windows: [], readAt: new Date().toISOString(), message: "Couldn't read Claude Code usage." };
+    let q = [...this.live].find((c) => c.query && c.sessionRef !== null)?.query ?? null;
+    const shared = q === null;
+    if (!q) {
+      if (!this.usageQuery) {
+        // One long-lived query with an empty prompt stream; strictMcpConfig + no mcpServers keeps user MCP servers from loading.
+        this.usageQuery = this.query({
+          prompt: new InputQueue(),
+          options: { pathToClaudeCodeExecutable: this.claudePath, permissionMode: 'default', mcpServers: {}, strictMcpConfig: true } as never,
+        });
       }
-      return await readClaudeUsage(q);
-    } catch {
-      return { provider: 'claude', status: 'error', windows: [], readAt: new Date().toISOString(), message: "Couldn't read Claude Code usage." };
-    } finally {
-      temp?.close();
+      q = this.usageQuery;
     }
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      const timeout = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('timeout')), this.usageTimeoutMs); });
+      return await Promise.race([readClaudeUsage(q), timeout]);
+    } catch {
+      if (shared && this.usageQuery === q) this.closeUsageQuery();
+      return failed;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  private closeUsageQuery(): void {
+    const q = this.usageQuery;
+    this.usageQuery = null;
+    try { q?.close(); } catch { /* already gone */ }
   }
 
   async dispose(): Promise<void> {
     this.disposed = true;
     this.listeners.clear();
-    const all = new Set(this.chats.values());
+    this.closeUsageQuery();
+    const all = new Set<Chat>([...this.chats.values(), ...this.live]);
     this.chats.clear();
-    for (const chat of all) {
+    this.live.clear();
+    await Promise.all([...all].map(async (chat) => {
+      chat.onStarted?.reject(new Error(SHUT_DOWN));
       for (const p of chat.pending.values()) p.resolve({ behavior: 'deny', message: 'Claude Code stopped.' });
       chat.pending.clear();
+      chat.deferred = [];
       chat.queue.close();
       const q = chat.query;
       chat.query = null;
-      if (q) { try { await q.interrupt(); } catch { /* already gone */ } q.close(); }
-    }
+      if (!q) return;
+      let timer: NodeJS.Timeout | undefined;
+      try {
+        await Promise.race([q.interrupt(), new Promise((r) => { timer = setTimeout(r, 3_000); })]);
+      } catch { /* already gone */ }
+      clearTimeout(timer);
+      try { q.close(); } catch { /* already gone */ }
+    }));
   }
 }
 

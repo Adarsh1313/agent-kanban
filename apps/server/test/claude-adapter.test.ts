@@ -245,14 +245,14 @@ test('readClaudeUsage maps the usage response and skips behaviors', async () => 
   assert.deepEqual(r.windows, claudeUsageToReading(usageFixture as any, new Date()).windows);
 });
 
-test('readUsage with no live chat uses a short-lived query and closes it', async () => {
+test('readUsage with no live chat uses the shared usage query', async () => {
   const f = fake(async function* () { await never(); }, { usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET: async () => usageFixture });
   const a = new ClaudeAdapter({ claudePath: 'c', query: f.query });
   const r = await a.readUsage();
   assert.equal(r.provider, 'claude');
   assert.equal(r.status, 'ok');
   assert.equal(r.windows.length, 3);
-  assert.equal(f.calls[0]!.closed, 1);
+  assert.equal(f.calls[0]!.closed, 0);
   await a.dispose();
 });
 
@@ -262,5 +262,170 @@ test('readUsage failure becomes an error reading', async () => {
   const r = await a.readUsage();
   assert.equal(r.status, 'error');
   assert.equal(r.message, "Couldn't read Claude Code usage.");
+  await a.dispose();
+});
+
+// ---- fix round 1 ----
+const USAGE = 'usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET';
+
+test('dispose during an in-flight startChat rejects it, closes the query, emits nothing after', async () => {
+  const f = fake(async function* (_o, input) { await input.next(); await never(); });
+  const a = new ClaudeAdapter({ claudePath: 'c', query: f.query });
+  const ev = collect(a);
+  const p = a.startChat({ cwd: '.', prompt: 'go' });
+  const rejected = assert.rejects(p, /Claude Code adapter is shut down\./);
+  await tick();
+  await a.dispose();
+  await rejected;
+  assert.equal(f.calls[0]!.closed, 1);
+  await tick();
+  assert.equal((a as any).chats.size, 0);
+  assert.deepEqual(ev, []);
+});
+
+test('PowerShell summary reads like a command', async () => {
+  const f = fake(async function* (_o, input) {
+    await input.next(); yield init();
+    yield { type: 'assistant', session_id: 's', uuid: 'u1', message: { id: 'm', content: [{ type: 'tool_use', id: 't', name: 'PowerShell', input: { command: 'ls' } }] } };
+    await never();
+  });
+  const a = new ClaudeAdapter({ claudePath: 'c', query: f.query });
+  const ev = collect(a);
+  await a.startChat({ cwd: '.', prompt: 'go' });
+  await tick();
+  assert.equal(ev.find((e) => e.type === 'tool.call').summary, 'Running ls');
+  await a.dispose();
+});
+
+test('messageId uses the SDK uuid plus block index', async () => {
+  const f = fake(async function* (_o, input) {
+    await input.next(); yield init();
+    yield { type: 'assistant', session_id: 's', uuid: 'u-9', message: { id: 'same', content: [{ type: 'text', text: 'a' }, { type: 'text', text: 'b' }] } };
+    await never();
+  });
+  const a = new ClaudeAdapter({ claudePath: 'c', query: f.query });
+  const ev = collect(a);
+  await a.startChat({ cwd: '.', prompt: 'go' });
+  await tick();
+  assert.deepEqual(ev.filter((e) => e.type === 'message.completed').map((e) => e.messageId), ['u-9:0', 'u-9:1']);
+  await a.dispose();
+});
+
+test('a request that arrives before init is announced with the session id once known', async () => {
+  let outcome: any;
+  const f = fake(async function* (o, input) {
+    await input.next();
+    const p = o.canUseTool('Bash', { command: 'ls' }, { signal: new AbortController().signal });
+    p.then((r: any) => { outcome = r; });
+    yield init('late');
+    await never();
+  });
+  const a = new ClaudeAdapter({ claudePath: 'c', query: f.query });
+  const ev = collect(a);
+  const { sessionRef } = await a.startChat({ cwd: '.', prompt: 'go' });
+  await tick();
+  const req = ev.find((e) => e.type === 'request.opened');
+  assert.equal(req.sessionRef, 'late');
+  await a.respondToRequest(sessionRef, req.requestId, 'allow');
+  await tick();
+  assert.equal(outcome.behavior, 'allow');
+  await a.dispose();
+});
+
+test('a listener that throws does not look like a process death', async () => {
+  const f = fake(async function* (_o, input) { await input.next(); yield init(); yield text('x'); yield result(); await never(); });
+  const a = new ClaudeAdapter({ claudePath: 'c', query: f.query });
+  a.onEvent(() => { throw new Error('bad listener'); });
+  const ev = collect(a);
+  await a.startChat({ cwd: '.', prompt: 'go' });
+  await tick();
+  assert.equal(ev.at(-1).type, 'turn.completed');
+  assert.equal(ev.filter((e) => e.type === 'error').length, 0);
+  await a.dispose();
+});
+
+test('startup failure: result before init settles startChat and closes the query and queue', async () => {
+  const f = fake(async function* (_o, input) { await input.next(); yield result({ is_error: true, result: 'Not signed in', session_id: undefined }); await never(); });
+  const a = new ClaudeAdapter({ claudePath: 'c', query: f.query });
+  await assert.rejects(a.startChat({ cwd: '.', prompt: 'go' }), /Not signed in/);
+  assert.equal(f.calls[0]!.closed, 1);
+  assert.equal((a as any).live.size, 0);
+  await a.dispose();
+});
+
+test('startup failure: iteration throwing before init settles startChat', async () => {
+  const f = fake(async function* (_o, input) { await input.next(); throw new Error('spawn failed'); });
+  const a = new ClaudeAdapter({ claudePath: 'c', query: f.query });
+  await assert.rejects(a.startChat({ cwd: '.', prompt: 'go' }), /spawn failed/);
+  assert.equal(f.calls[0]!.closed, 1);
+  assert.equal((a as any).live.size, 0);
+  await a.dispose();
+});
+
+test('pending requests settle on crash and on dispose', async () => {
+  const outcomes: any[] = [];
+  let crash!: () => void;
+  const f = fake(async function* (o, input) {
+    await input.next(); yield init('s1');
+    void o.canUseTool('Bash', { command: 'ls' }, { signal: new AbortController().signal }).then((r: any) => outcomes.push(r));
+    await new Promise<void>((r) => { crash = r; });
+    throw new Error('died');
+  });
+  const a = new ClaudeAdapter({ claudePath: 'c', query: f.query });
+  await a.startChat({ cwd: '.', prompt: 'go' });
+  await tick();
+  crash();
+  await tick();
+  assert.equal(outcomes.length, 1);
+  assert.equal(outcomes[0].behavior, 'deny');
+  assert.equal(f.calls[0]!.closed, 1);
+  const f2 = fake(async function* (o, input) {
+    await input.next(); yield init('s2');
+    void o.canUseTool('Bash', { command: 'ls' }, { signal: new AbortController().signal }).then((r: any) => outcomes.push(r));
+    await never();
+  });
+  const b = new ClaudeAdapter({ claudePath: 'c', query: f2.query });
+  await b.startChat({ cwd: '.', prompt: 'go' });
+  await tick();
+  await b.dispose();
+  assert.equal(outcomes.length, 2);
+  await a.dispose();
+});
+
+test('readUsage reuses a live chat query', async () => {
+  const f = fake(async function* (_o, input) { await input.next(); yield init(); await never(); }, { [USAGE]: async () => usageFixture });
+  const a = new ClaudeAdapter({ claudePath: 'c', query: f.query });
+  await a.startChat({ cwd: '.', prompt: 'go' });
+  const r = await a.readUsage();
+  assert.equal(r.status, 'ok');
+  assert.equal(f.calls.length, 1);
+  await a.dispose();
+});
+
+test('usage query is long-lived, strict about MCP, and closed by dispose', async () => {
+  const f = fake(async function* () { await never(); }, { [USAGE]: async () => usageFixture });
+  const a = new ClaudeAdapter({ claudePath: 'c', query: f.query });
+  await a.readUsage();
+  await a.readUsage();
+  assert.equal(f.calls.length, 1);
+  assert.equal(f.calls[0]!.closed, 0);
+  assert.deepEqual(f.calls[0]!.options.mcpServers, {});
+  assert.equal(f.calls[0]!.options.strictMcpConfig, true);
+  await a.dispose();
+  assert.equal(f.calls[0]!.closed, 1);
+  await assert.rejects(a.readUsage(), /Claude Code adapter is shut down\./);
+});
+
+test('usage timeout returns an error reading, closes the query, next read creates a new one', async () => {
+  let hang = true;
+  const f = fake(async function* () { await never(); }, { [USAGE]: () => (hang ? never() : Promise.resolve(usageFixture)) });
+  const a = new ClaudeAdapter({ claudePath: 'c', query: f.query, usageTimeoutMs: 30 });
+  const r = await a.readUsage();
+  assert.equal(r.status, 'error');
+  assert.equal(r.message, "Couldn't read Claude Code usage.");
+  assert.equal(f.calls[0]!.closed, 1);
+  hang = false;
+  assert.equal((await a.readUsage()).status, 'ok');
+  assert.equal(f.calls.length, 2);
   await a.dispose();
 });
