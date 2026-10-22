@@ -14,17 +14,19 @@ class FakeAdapter implements ProviderAdapter {
   listeners = new Set<(e: AdapterEvent) => void>();
   startError: Error | null = null;
   beforeResolve: (() => void) | null = null;
+  ref = 's1';
+  respondError: Error | null = null;
   constructor(id: ProviderId) { this.id = id; }
   async startChat() {
     this.calls.push('startChat');
     if (this.startError) throw this.startError;
     this.beforeResolve?.();
-    return { sessionRef: 's1' };
+    return { sessionRef: this.ref };
   }
   async sendMessage(ref: string, text: string) { this.calls.push(`send:${ref}:${text}`); }
-  async respondToRequest(ref: string, rid: string, d: unknown) { this.calls.push(`respond:${ref}:${rid}:${JSON.stringify(d)}`); }
+  async respondToRequest(ref: string, rid: string, d: unknown) { if (this.respondError) throw this.respondError; this.calls.push(`respond:${ref}:${rid}:${JSON.stringify(d)}`); }
   async stop(ref: string) { this.calls.push(`stop:${ref}`); }
-  async resume(ref: string, cwd: string) { this.calls.push(`resume:${ref}:${cwd}`); }
+  async resume(ref: string, cwd: string) { this.calls.push(`resume:${ref}:${cwd}`); await Promise.resolve(); }
   onEvent(l: (e: AdapterEvent) => void) { this.listeners.add(l); return () => { this.listeners.delete(l); }; }
   async readUsage(): Promise<never> { throw new Error('unused'); }
   async dispose() {}
@@ -77,12 +79,20 @@ test('turn.completed -> review, finished notification, usage refreshed once', as
   assert.deepEqual(refreshed, ['codex']);
 });
 
-test('usage refresh rejection is swallowed', async () => {
+test('usage refresh rejection is swallowed (no unhandled rejection)', async () => {
   const { adapter, svc } = setup();
-  (svc as any).usage = { refresh: () => Promise.reject(new Error('boom')) };
-  await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
-  adapter.emit({ type: 'turn.completed', sessionRef: 's1' });
-  await new Promise((r) => setTimeout(r, 10));
+  let unhandled = 0;
+  const onUnhandled = () => { unhandled++; };
+  process.on('unhandledRejection', onUnhandled);
+  try {
+    (svc as any).usage = { refresh: () => Promise.reject(new Error('boom')) };
+    await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+    adapter.emit({ type: 'turn.completed', sessionRef: 's1' });
+    await new Promise((r) => setTimeout(r, 20));
+    assert.equal(unhandled, 0);
+  } finally {
+    process.off('unhandledRejection', onUnhandled);
+  }
 });
 
 test('deltas then completed produce one assistant message', async () => {
@@ -195,13 +205,15 @@ test('Review 1: continueHistory refuses a chat active in Claude Code', async () 
 });
 
 test('markDone / dragOutOfDone / done chats stay done on agent events', async () => {
-  const { store, adapter, svc } = setup();
+  const { store, adapter, events, svc } = setup();
   const chat = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
   adapter.emit({ type: 'turn.completed', sessionRef: 's1' });
   assert.equal(svc.markDone(chat.id).column, 'done');
   adapter.emit({ type: 'message.completed', sessionRef: 's1', messageId: 'm', role: 'assistant', text: 'x' });
   adapter.emit({ type: 'error', sessionRef: 's1', message: 'x' });
   assert.equal(store.getChat(chat.id)!.column, 'done');
+  assert.ok(store.listMessages(chat.id).some((m) => m.text === 'x' && m.role === 'assistant'));
+  assert.ok(!events.some((e) => e.type === 'notification' && e.kind === 'error'));
   assert.equal(svc.dragOutOfDone(chat.id).column, 'review');
   assert.equal(svc.archive(chat.id).archived, true);
   assert.throws(() => svc.markDone('nope'), /Chat not found\./);
@@ -217,4 +229,118 @@ test('a throwing broadcast does not break state handling', async () => {
   const chat = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
   adapter.emit({ type: 'turn.completed', sessionRef: 's1' });
   assert.equal(store.getChat(chat.id)!.column, 'review');
+});
+
+test('I1: a chat whose start failed recovers on send', async () => {
+  const { store, adapter, svc } = setup();
+  adapter.startError = new Error('not signed in');
+  const chat = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+  assert.equal(store.getChat(chat.id)!.needsReason, 'error');
+  assert.equal(store.getChat(chat.id)!.sessionRef, null);
+  adapter.startError = null;
+  await svc.send(chat.id, 'try again');
+  const got = store.getChat(chat.id)!;
+  assert.equal(got.column, 'running');
+  assert.equal(got.sessionRef, 's1');
+  assert.equal(adapter.calls.filter((c) => c === 'startChat').length, 2);
+  adapter.emit({ type: 'turn.completed', sessionRef: 's1' });
+  assert.equal(store.getChat(chat.id)!.column, 'review');
+});
+
+test('I2: send on a Claude chat active elsewhere is refused and leaves the chat unchanged', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'ak-home-'));
+  mkdirSync(join(home, 'projects', 'proj'), { recursive: true });
+  const file = join(home, 'projects', 'proj', 'old.jsonl');
+  writeFileSync(file, '{}\n');
+  const base = new Date('2026-10-22T12:00:00Z');
+  utimesSync(file, new Date(base.getTime() - 3000), new Date(base.getTime() - 3000));
+  const t = setup('claude', () => base, home);
+  const chat = t.store.createChat({ provider: 'claude', cwd: '/w', title: 'old', sessionRef: 'old' });
+  t.store.updateChat(chat.id, { column: 'review' });
+  await assert.rejects(t.svc.send(chat.id, 'hi'), ActiveElsewhereError);
+  assert.equal(t.store.getChat(chat.id)!.column, 'review');
+  assert.equal(t.store.listMessages(chat.id).length, 0);
+  assert.deepEqual(t.adapter.calls, []);
+});
+
+test('I3: send during a pending start is delivered after it resolves', async () => {
+  const { store, adapter, svc } = setup();
+  let pendingSend: Promise<void> | undefined;
+  adapter.beforeResolve = () => { pendingSend = svc.send(store.listChats()[0].id, 'follow-up'); };
+  const chat = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+  await pendingSend;
+  assert.deepEqual(adapter.calls, ['startChat', 'send:s1:follow-up']);
+  adapter.emit({ type: 'turn.completed', sessionRef: 's1' });
+  assert.equal(store.getChat(chat.id)!.column, 'review');
+});
+
+test('M2/M8: send on a not-attached chat resumes once then sends', async () => {
+  const { store, adapter, svc } = setup();
+  const chat = store.createChat({ provider: 'codex', cwd: '/w', title: 'old', sessionRef: 'old' });
+  store.updateChat(chat.id, { column: 'review' });
+  await Promise.all([svc.send(chat.id, 'a'), svc.send(chat.id, 'b')]);
+  assert.equal(adapter.calls.filter((c) => c.startsWith('resume')).length, 1);
+  assert.equal(adapter.calls.filter((c) => c.startsWith('send')).length, 2);
+  assert.ok(adapter.calls.indexOf('resume:old:/w') < adapter.calls.indexOf('send:old:a'));
+  assert.equal(store.getChat(chat.id)!.column, 'running');
+});
+
+test('M8: card returns to running only after all open requests are answered', async () => {
+  const { store, adapter, svc } = setup();
+  const chat = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+  adapter.emit({ type: 'request.opened', sessionRef: 's1', requestId: 'r1', kind: 'permission', summary: 'a' });
+  adapter.emit({ type: 'request.opened', sessionRef: 's1', requestId: 'r2', kind: 'question', summary: 'b' });
+  await svc.answer(chat.id, 'r1', 'allow');
+  assert.equal(store.getChat(chat.id)!.column, 'needs_you');
+  await svc.answer(chat.id, 'r2', { reply: 'yes' });
+  assert.equal(store.getChat(chat.id)!.column, 'running');
+});
+
+test('M1: open requests are cleared when the chat stops', async () => {
+  const { adapter, svc } = setup();
+  const chat = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+  adapter.emit({ type: 'request.opened', sessionRef: 's1', requestId: 'r1', kind: 'permission', summary: 'a' });
+  adapter.emit({ type: 'stopped', sessionRef: 's1' });
+  await assert.rejects(svc.answer(chat.id, 'r1', 'allow'), /no longer open/);
+});
+
+test('M8: answer rejection moves the chat to needs_you/error', async () => {
+  const { store, adapter, svc } = setup();
+  const chat = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+  adapter.emit({ type: 'request.opened', sessionRef: 's1', requestId: 'r1', kind: 'permission', summary: 'a' });
+  adapter.respondError = new Error('pipe closed');
+  await svc.answer(chat.id, 'r1', 'allow');
+  const got = store.getChat(chat.id)!;
+  assert.deepEqual([got.column, got.needsReason], ['needs_you', 'error']);
+});
+
+test('M6: buffered events older than 60 s are dropped (injected clock)', async () => {
+  let t = new Date('2026-10-22T12:00:00Z').getTime();
+  const { store, adapter, svc } = setup('codex', () => new Date(t));
+  adapter.emit({ type: 'message.completed', sessionRef: 's1', messageId: 'old', role: 'assistant', text: 'stale' });
+  t += 61_000;
+  adapter.emit({ type: 'message.completed', sessionRef: 's1', messageId: 'new', role: 'assistant', text: 'fresh' });
+  const chat = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+  const texts = store.listMessages(chat.id).map((m) => m.text);
+  assert.ok(texts.includes('fresh'));
+  assert.ok(!texts.includes('stale'));
+});
+
+test('M3: a handler failure is logged and the chat goes to needs_you/error', async () => {
+  const { store, adapter, svc } = setup();
+  const chat = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+  const orig = store.upsertToolCall.bind(store);
+  store.upsertToolCall = () => { throw new Error('db locked'); };
+  const logged: unknown[][] = [];
+  const origErr = console.error;
+  console.error = (...a: unknown[]) => { logged.push(a); };
+  try {
+    adapter.emit({ type: 'tool.call', sessionRef: 's1', toolCallId: 't', name: 'n', summary: 's', status: 'running' });
+  } finally {
+    console.error = origErr;
+    store.upsertToolCall = orig;
+  }
+  assert.equal(logged.length, 1);
+  assert.match(String(logged[0][0]), new RegExp(chat.id));
+  assert.equal(store.getChat(chat.id)!.needsReason, 'error');
 });

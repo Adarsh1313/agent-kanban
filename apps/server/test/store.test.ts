@@ -92,3 +92,12 @@ test('setMessageText replaces the text', () => {
   s.setMessageText(m.id, 'final');
   assert.equal(s.listMessages(c.id)[0].text, 'final');
 });
+
+test('upsertToolCall returns the stored tool call with a stable createdAt', () => {
+  const s = new Store(':memory:');
+  const c = s.createChat({ provider: 'claude', cwd: '/x', title: 't' });
+  const a = s.upsertToolCall({ id: 'tc1', chatId: c.id, name: 'Bash', summary: 'ls', status: 'running' });
+  const b = s.upsertToolCall({ id: 'tc1', chatId: c.id, name: 'Bash', summary: 'ls', status: 'done' });
+  assert.equal(b.status, 'done');
+  assert.equal(b.createdAt, a.createdAt);
+});

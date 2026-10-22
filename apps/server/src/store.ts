@@ -115,11 +115,13 @@ export class Store {
       .map((r) => ({ id: r.id, chatId: r.chat_id, role: r.role, text: r.text, createdAt: r.created_at }));
   }
 
-  upsertToolCall(t: Omit<ToolCall, 'createdAt'>): void {
+  upsertToolCall(t: Omit<ToolCall, 'createdAt'>): ToolCall {
     this.db.prepare(
       `INSERT INTO tool_calls (id, chat_id, name, summary, status, created_at) VALUES (?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET name = excluded.name, summary = excluded.summary, status = excluded.status`,
     ).run(t.id, t.chatId, t.name, t.summary, t.status, this.now());
+    const r = this.db.prepare('SELECT * FROM tool_calls WHERE id = ?').get(t.id) as Row;
+    return { id: r.id, chatId: r.chat_id, name: r.name, summary: r.summary, status: r.status, createdAt: r.created_at };
   }
 
   saveUsage(reading: UsageReading): void {
