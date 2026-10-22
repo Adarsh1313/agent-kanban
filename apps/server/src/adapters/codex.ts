@@ -7,6 +7,8 @@ import { JsonRpcProcess } from './jsonrpc.ts';
 import { codexLimitsToReading } from '../usage/parse.ts';
 
 type Listener = (e: AdapterEvent) => void;
+const QUIET_MS = 120_000;
+const GAVE_UP = 'Codex keeps stopping. Use Check now to try again.';
 type Approval = { threadId: string; resolve: (decision: 'accept' | 'decline') => void };
 
 /**
@@ -40,7 +42,9 @@ export class CodexAdapter implements ProviderAdapter {
   private retryAt = 0; // earliest time an automatic ping may respawn
   private gaveUp = false; // too many failures in a row: wait for a manual check
   private crashed = false; // a process died on its own since the last ping noticed
-  private closingByUs = new WeakSet<JsonRpcProcess>();
+  private closingByUs = new WeakSet<JsonRpcProcess>(); // deliberate recycles: not crashes
+  private recycleMarked = new WeakSet<JsonRpcProcess>(); // to be replaced by the next ping or action
+  private claims = new Set<string>(); // threads a startChat/sendMessage is still setting up: they survive a deliberate recycle
 
   constructor(opts: { codexPath: string; spawn?: (cmd: string, args: string[]) => JsonRpcProcess; initializeTimeoutMs?: number; pingTimeoutMs?: number; codexHome?: string }) {
     this.pingTimeoutMs = opts.pingTimeoutMs ?? 15_000;
@@ -65,12 +69,15 @@ export class CodexAdapter implements ProviderAdapter {
   /** Returns the live app-server, spawning (and initializing) one if none is running. Task 10's ping() can reuse this. */
   private ensureProcess(): Promise<JsonRpcProcess> {
     if (this.disposed) return Promise.reject(new Error('Codex adapter is shut down.'));
-    if (this.proc && !this.proc.unhealthy) return Promise.resolve(this.proc);
+    if (this.proc && !this.recycleMarked.has(this.proc)) return Promise.resolve(this.proc);
     if (this.starting) return this.starting;
     const s: Promise<JsonRpcProcess> = this.spawnProcess().finally(() => { if (this.starting === s) this.starting = null; });
     this.starting = s;
     return s;
   }
+
+  /** Replace the app-server at the next ping or action (used when it is stale and nothing is running on it). */
+  markForRecycle(): void { if (this.proc) this.recycleMarked.add(this.proc); }
 
   /** Kill a process we decided to replace; its exit is not a crash. */
   private async recycle(p: JsonRpcProcess): Promise<void> {
@@ -146,13 +153,17 @@ export class CodexAdapter implements ProviderAdapter {
     if (this.proc === p) this.proc = null;
     if (this.disposed) return;
     if (!this.closingByUs.has(p)) this.crashed = true;
-    const threads = [...this.activeTurns.keys()];
-    this.activeTurns.clear();
-    this.pendingStops.clear();
-    for (const a of this.approvals.values()) a.resolve('decline');
-    this.approvals.clear();
+    const deliberate = this.closingByUs.has(p);
+    // On a deliberate recycle, a thread whose turn is still being set up by the caller keeps its claim and queued stop.
+    const threads = [...this.activeTurns.keys()].filter((t) => !(deliberate && this.claims.has(t)));
+    for (const t of threads) { this.activeTurns.delete(t); this.pendingStops.delete(t); }
+    for (const [id, a] of this.approvals) {
+      if (threads.includes(a.threadId)) { a.resolve('decline'); this.approvals.delete(id); }
+    }
     const last = p.stderrTail[p.stderrTail.length - 1];
-    const message = last ? `Codex stopped unexpectedly. (${last})` : 'Codex stopped unexpectedly.';
+    const message = deliberate
+      ? 'Codex stopped responding and was restarted. Resume to continue.'
+      : last ? `Codex stopped unexpectedly. (${last})` : 'Codex stopped unexpectedly.';
     for (const sessionRef of threads) this.emit({ type: 'error', sessionRef, message });
   }
 
@@ -239,7 +250,8 @@ export class CodexAdapter implements ProviderAdapter {
     this.threadCwd.set(sessionRef, input.cwd);
     this.loaded.get(p)?.add(sessionRef);
     this.emit({ type: 'session.started', sessionRef });
-    await this.startTurn(p, sessionRef, input.prompt);
+    this.claims.add(sessionRef);
+    try { await this.startTurn(p, sessionRef, input.prompt); } finally { this.claims.delete(sessionRef); }
     return { sessionRef };
   }
 
@@ -247,6 +259,7 @@ export class CodexAdapter implements ProviderAdapter {
     // Claim the turn before respawning/re-attaching, so a stop() that arrives meanwhile is queued, not dropped.
     const owned = !this.activeTurns.has(sessionRef);
     if (owned) this.activeTurns.set(sessionRef, null);
+    this.claims.add(sessionRef);
     try {
       const p = await this.ensureProcess();
       await this.attach(p, sessionRef);
@@ -254,6 +267,8 @@ export class CodexAdapter implements ProviderAdapter {
     } catch (e) {
       if (owned) { this.activeTurns.delete(sessionRef); this.pendingStops.delete(sessionRef); }
       throw e;
+    } finally {
+      this.claims.delete(sessionRef);
     }
   }
 
@@ -322,19 +337,30 @@ export class CodexAdapter implements ProviderAdapter {
     this.retryAt = Date.now() + Math.min(1000 * 2 ** (this.failures - 1), 60_000);
   }
 
+  /** Recycle the app-server when nothing is running on it (e.g. after Codex was updated). Returns whether it did. */
+  async restartIfIdle(): Promise<boolean> {
+    const p = this.proc;
+    if (!p || this.starting || this.activeTurns.size > 0) return false;
+    await this.recycle(p);
+    return true;
+  }
+
   /**
    * Health check: `account/read` on the running app-server. Automatic pings that find it dead respawn it
    * with a 1 s, 2 s, 4 s ... (max 60 s) backoff and stop trying after a few failures in a row; a manual
-   * ping always tries once. User actions (startChat etc.) never wait for the backoff.
+   * ping always tries once (and asks Codex to refresh its sign-in). User actions (startChat etc.) never
+   * wait for the backoff.
+   *
+   * A request that times out only makes the process suspect. It is replaced when the next probe also
+   * times out and either nothing is running on it or it has been silent for 2 minutes.
    */
   async ping(opts: { manual?: boolean } = {}): Promise<PingResult> {
     const manual = opts.manual === true;
-    const fail = (message: string): PingResult => ({ ok: false, signedIn: null, message });
+    const fail = (message?: string): PingResult => ({ ok: false, signedIn: null, ...(message ? { message } : {}) });
     if (this.disposed) return fail('Codex adapter is shut down.');
     if (manual) { this.failures = 0; this.retryAt = 0; this.gaveUp = false; this.crashed = false; }
-    // A process that timed out earlier is alive but stuck: kill it so it can be replaced.
-    const stuck = this.proc;
-    if (stuck?.unhealthy) await this.recycle(stuck);
+    const marked = this.proc;
+    if (marked && this.recycleMarked.has(marked)) await this.recycle(marked);
     if (this.crashed) {
       // Report a crash once, even if a user action or usage read already restarted it, so the status shows it.
       this.crashed = false;
@@ -343,18 +369,27 @@ export class CodexAdapter implements ProviderAdapter {
       return fail(down ? 'Codex stopped unexpectedly.' : 'Codex stopped unexpectedly and was restarted.');
     }
     if (!this.proc && !this.starting) {
-      if (this.gaveUp) return fail('Codex keeps stopping. Use Check now to try again.');
+      if (this.gaveUp) return fail(GAVE_UP);
       if (Date.now() < this.retryAt) return fail('Codex is restarting.');
     }
+    let p: JsonRpcProcess | null = null;
+    let wasSuspect = false;
     try {
-      const p = await this.ensureProcess();
-      const r = await p.request<{ account: unknown | null }>('account/read', { refreshToken: false }, this.pingTimeoutMs);
+      p = await this.ensureProcess();
+      wasSuspect = p.suspect;
+      const r = await p.request<{ account: unknown | null }>('account/read', { refreshToken: manual }, this.pingTimeoutMs);
+      p.clearSuspect();
       this.failures = 0; this.retryAt = 0; this.gaveUp = false;
       return { ok: true, signedIn: r?.account != null, ...(this._modelNote ? { message: this._modelNote } : {}) };
     } catch (e) {
       this.crashed = false; // this failure is counted here, not again by the next ping
+      if (p && /timed out/.test(e instanceof Error ? e.message : '')) {
+        // Busy on a running turn and still sending notifications: it is alive, just not answering this probe.
+        if (this.activeTurns.size > 0 && Date.now() - p.lastNotificationAt < QUIET_MS) return { ok: true, signedIn: null };
+        if (wasSuspect) await this.recycle(p);
+      }
       this.noteFailure();
-      return fail(e instanceof Error ? e.message : 'Codex did not respond.');
+      return fail();
     }
   }
 

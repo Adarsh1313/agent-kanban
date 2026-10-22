@@ -10,7 +10,7 @@ import { UsageService } from './usage/service.ts';
 import { readAllHistory } from './history/index.ts';
 import { ClaudeAdapter } from './adapters/claude.ts';
 import { CodexAdapter } from './adapters/codex.ts';
-import type { ProviderAdapter } from './adapters/adapter.ts';
+import { AdapterRegistry } from './adapters/registry.ts';
 import { findBinary } from './binaries.ts';
 import { createApi } from './api.ts';
 import { ConnectionMonitor, getLatest, getVersion } from './health.ts';
@@ -21,21 +21,30 @@ mkdirSync(dataDir, { recursive: true });
 const store = new Store(join(dataDir, 'agent-kanban.db'));
 const token = randomBytes(24).toString('hex');
 
-const [claudePath, codexPath] = await Promise.all([findBinary('claude'), findBinary('codex')]);
-const adapters: Partial<Record<ProviderId, ProviderAdapter>> = {};
-if (claudePath) adapters.claude = new ClaudeAdapter({ claudePath });
-if (codexPath) adapters.codex = new CodexAdapter({ codexPath });
+const findProvider = (id: ProviderId) => (id === 'claude' || id === 'codex' ? findBinary(id) : Promise.resolve(null));
+// Adapters are created when a provider's binary is first found, so installing one later needs no restart.
+const adapters = new AdapterRegistry({
+  findBinary: findProvider,
+  create: (id, path) => (id === 'claude' ? new ClaudeAdapter({ claudePath: path }) : id === 'codex' ? new CodexAdapter({ codexPath: path }) : undefined),
+});
+await Promise.all([adapters.ensure('claude'), adapters.ensure('codex')]);
 
 let broadcast: (e: ServerEvent) => void = () => {};
 const readers: Partial<Record<ProviderId, () => Promise<UsageReading>>> = {};
-for (const [id, a] of Object.entries(adapters) as [ProviderId, ProviderAdapter][]) readers[id] = () => a.readUsage();
+for (const id of ['claude', 'codex'] as const) {
+  readers[id] = async () => {
+    const a = await adapters.ensure(id);
+    if (!a) throw new Error('not installed');
+    return a.readUsage();
+  };
+}
 const usage = new UsageService({
   readers, store, onUpdate: (reading) => broadcast({ type: 'usage.updated', reading }),
 });
 const chats = new ChatService({ store, adapters, usage, broadcast: (e) => broadcast(e), claudeHome: join(home, '.claude') });
 const connections = new ConnectionMonitor({
   providers: ['claude', 'codex'],
-  findBinary: (id) => (id === 'claude' || id === 'codex' ? findBinary(id) : Promise.resolve(null)),
+  findBinary: findProvider,
   getVersion, getLatest, adapters,
   onUpdate: (health) => broadcast({ type: 'connection.updated', health }),
 });
@@ -75,7 +84,7 @@ async function shutdown(): Promise<void> {
   connections.stop();
   api.server.close();
   api.close();
-  const dispose = Promise.allSettled(Object.values(adapters).map((a) => Promise.resolve().then(() => a.dispose())));
+  const dispose = adapters.dispose();
   await Promise.race([dispose, new Promise((r) => setTimeout(r, 5_000))]);
   api.server.closeAllConnections();
   process.exit(0);

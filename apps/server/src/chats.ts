@@ -6,6 +6,8 @@ import type {
 import { nextState } from './columns.ts';
 import type { Store } from './store.ts';
 import type { ProviderAdapter } from './adapters/adapter.ts';
+import { AdapterRegistry } from './adapters/registry.ts';
+import type { AdapterSource } from './adapters/registry.ts';
 import type { UsageService } from './usage/service.ts';
 
 const NAMES: Record<ProviderId, string> = { claude: 'Claude Code', codex: 'Codex', antigravity: 'Antigravity' };
@@ -37,7 +39,7 @@ type OpenRequest = { kind: 'permission' | 'question'; summary: string };
 
 export class ChatService {
   private store: Store;
-  private adapters: Partial<Record<ProviderId, ProviderAdapter>>;
+  private adapters: AdapterSource;
   private usage: UsageService;
   private emit: (e: ServerEvent) => void;
   private claudeHome: string;
@@ -58,21 +60,19 @@ export class ChatService {
 
   constructor(opts: {
     store: Store;
-    adapters: Partial<Record<ProviderId, ProviderAdapter>>;
+    adapters: Partial<Record<ProviderId, ProviderAdapter>> | AdapterSource;
     usage: UsageService;
     broadcast: (e: ServerEvent) => void;
     claudeHome: string;
     now?: () => Date;
   }) {
     this.store = opts.store;
-    this.adapters = opts.adapters;
+    this.adapters = typeof (opts.adapters as AdapterSource).onAdapter === 'function' ? (opts.adapters as AdapterSource) : AdapterRegistry.of(opts.adapters as Partial<Record<ProviderId, ProviderAdapter>>);
     this.usage = opts.usage;
     this.emit = opts.broadcast;
     this.claudeHome = opts.claudeHome;
     this.now = opts.now ?? (() => new Date());
-    for (const [id, adapter] of Object.entries(this.adapters) as [ProviderId, ProviderAdapter | undefined][]) {
-      adapter?.onEvent((e) => this.onAdapterEvent(id, e));
-    }
+    this.adapters.onAdapter((id, adapter) => { adapter.onEvent((e) => this.onAdapterEvent(id, e)); });
   }
 
   // ---- public API ----
@@ -107,7 +107,7 @@ export class ChatService {
     const chat = this.mustGet(chatId);
     const open = this.requests.get(chatId);
     if (!open?.has(requestId)) throw new Error('That request is no longer open.');
-    const adapter = this.adapters[chat.provider];
+    const adapter = this.adapters.get(chat.provider);
     if (!adapter || !chat.sessionRef) throw new Error('That request is no longer open.');
     try {
       await adapter.respondToRequest(chat.sessionRef, requestId, decision);
@@ -123,7 +123,7 @@ export class ChatService {
     this.mustGet(chatId);
     while (this.pending.has(chatId)) await this.pending.get(chatId);
     const chat = this.mustGet(chatId);
-    const adapter = this.adapters[chat.provider];
+    const adapter = this.adapters.get(chat.provider);
     if (adapter && chat.sessionRef) {
       try { await adapter.stop(chat.sessionRef); } catch { /* still park the card as stopped */ }
     }
@@ -259,7 +259,7 @@ export class ChatService {
     let release!: () => void;
     this.pending.set(chat.id, new Promise<void>((r) => { release = r; }));
     try {
-      const adapter = this.adapters[chat.provider];
+      const adapter = await this.adapters.ensure(chat.provider);
       if (!adapter) { this.fail(chat.id, chat.provider, null); return; }
       try {
         const { sessionRef } = await adapter.startChat({ cwd: chat.cwd, prompt, ...(chat.model ? { model: chat.model } : {}) });
@@ -290,7 +290,7 @@ export class ChatService {
   }
 
   private async deliver(chat: Chat, text: string): Promise<void> {
-    const adapter = this.adapters[chat.provider];
+    const adapter = await this.adapters.ensure(chat.provider);
     if (!adapter) { this.fail(chat.id, chat.provider, null); return; }
     try {
       if (!chat.sessionRef) throw new Error('no session');

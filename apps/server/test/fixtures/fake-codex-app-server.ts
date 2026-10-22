@@ -1,5 +1,5 @@
 // Fake `codex app-server` speaking line-delimited JSON-RPC on stdio.
-// FAKE_SCENARIO: approval | fileapproval | crash | limits | hang | hanginit | tools | limit | slowturn | dieonaccount | hangaccount
+// FAKE_SCENARIO: approval | fileapproval | crash | limits | hang | hanginit | tools | limit | slowturn | dieonaccount | hangaccount | hangbusy
 // FAKE_SIGNED_OUT=1 makes account/read report no account; FAKE_RESUME_DELAY_MS delays thread/resume answers.
 import { createInterface } from 'node:readline';
 import { appendFileSync } from 'node:fs';
@@ -27,7 +27,7 @@ function finishTurn() {
 function runTurn() {
   note('turn/started', { threadId: T, turn: { id: 'turn_1' } });
   if (scenario === 'crash') process.exit(1);
-  if (scenario === 'hang' || scenario === 'slowturn') return;
+  if (scenario === 'hang' || scenario === 'slowturn' || scenario === 'hangbusy') return;
   if (scenario === 'limit') {
     note('account/rateLimits/updated', { rateLimits: { ...limits.rateLimits, rateLimitReachedType: 'rate_limit_reached' } });
     return;
@@ -76,7 +76,7 @@ createInterface({ input: process.stdin }).on('line', (line) => {
     }
     case 'account/read':
       if (scenario === 'dieonaccount') process.exit(1);
-      if (scenario === 'hangaccount') return;
+      if (scenario === 'hangaccount' || scenario === 'hangbusy') return;
       return send({ id: m.id, result: { account: process.env.FAKE_SIGNED_OUT ? null : { type: 'chatgpt', email: 'a@b.c', planType: 'plus' }, requiresOpenaiAuth: true } });
     case 'turn/start': {
       if (!known.has(m.params.threadId)) return send({ id: m.id, error: { code: -32600, message: 'thread not found' } });

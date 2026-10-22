@@ -15,26 +15,36 @@ function setup(over: {
   healthMs?: number;
   versionMs?: number;
   retryMs?: number;
+  versions?: () => string | null;
+  latest2?: () => string | null;
+  restart?: () => Promise<boolean>;
+  hasAdapter?: () => boolean;
 } = {}) {
   const pings: ProviderId[] = [];
   const latestCalls: ProviderId[] = [];
   const versionCalls: ProviderId[] = [];
   const updates: ConnectionHealth[] = [];
-  const adapter = (id: ProviderId) => ({ id, ping: async () => { pings.push(id); return (over.ping ?? (async () => ({ ok: true, signedIn: true })))(); } });
+  const manuals: boolean[] = [];
+  const restarts: ProviderId[] = [];
+  const adapter = (id: ProviderId) => ({
+    id,
+    ping: async (o?: { manual?: boolean }) => { pings.push(id); manuals.push(o?.manual === true); return (over.ping ?? (async () => ({ ok: true, signedIn: true })))(); },
+    restartIfIdle: async () => { restarts.push(id); return over.restart ? over.restart() : true; },
+  });
   const providers = over.providers ?? (['codex'] as ProviderId[]);
   const monitor = new ConnectionMonitor({
     providers,
     findBinary: async (id) => (over.found ? over.found(id) : `C:\\bin\\${id}.exe`),
-    getVersion: async (id) => { versionCalls.push(id); return over.version === undefined ? '0.163.0' : over.version; },
+    getVersion: async (id) => { versionCalls.push(id); return over.versions ? over.versions() : over.version === undefined ? '0.163.0' : over.version; },
     getLatest: async (id) => { latestCalls.push(id); return over.latest ? over.latest() : '0.163.0'; },
-    adapters: Object.fromEntries(providers.map((id) => [id, adapter(id)])) as never,
+    adapters: { ensure: async (id) => (over.hasAdapter && !over.hasAdapter() ? undefined : (adapter(id) as never)) },
     onUpdate: (h) => updates.push(h),
     now: () => new Date('2026-10-22T10:00:00Z'),
     ...(over.healthMs ? { healthMs: over.healthMs } : {}),
     ...(over.versionMs ? { versionMs: over.versionMs } : {}),
     ...(over.retryMs ? { retryMs: over.retryMs } : {}),
   });
-  return { monitor, pings, latestCalls, versionCalls, updates };
+  return { monitor, pings, latestCalls, versionCalls, updates, manuals, restarts };
 }
 
 test('installed 0.163.0, latest 0.163.0, ping ok and signed in is connected', async () => {
@@ -110,7 +120,7 @@ test('a ping that returns ok false is also degraded; a changed checkedAt alone d
   const updates: ConnectionHealth[] = [];
   const monitor = new ConnectionMonitor({
     providers: ['claude'], findBinary: async () => 'c', getVersion: async () => '2.1.308', getLatest: async () => '2.1.308',
-    adapters: { claude: { id: 'claude', ping: async () => ({ ok: false, signedIn: null }) } } as never,
+    adapters: { ensure: async () => ({ id: 'claude', ping: async () => ({ ok: false, signedIn: null }) }) as never },
     onUpdate: (h) => updates.push(h), now: () => clock,
   });
   const [h] = await monitor.check();
@@ -167,7 +177,7 @@ test('health checks every 60 s; the registry at start and then every 6 h only', 
     mock.timers.tick(6 * 3_600_000 - 3 * 60_000);
     await flush();
     assert.equal(s.latestCalls.length, 2);
-    assert.equal(s.versionCalls.length, 2);
+    assert.ok(s.versionCalls.length >= 2, 'the installed version is re-read every tick');
     s.monitor.stop();
     mock.timers.tick(10 * 60_000);
     await flush();
@@ -204,4 +214,76 @@ test('getVersion runs <path> --version and parses the first x.y.z', async () => 
   // `node --version` prints v<x.y.z>, which exercises the real spawn path.
   assert.equal(await getVersion('codex', process.execPath), process.versions.node);
   assert.equal(await getVersion('codex', fileURLToPath(new URL('./does-not-exist.exe', import.meta.url))), null);
+});
+
+test('a give-up message from the adapter is shown and counts as a change', async () => {
+  let msg: string | undefined;
+  const s = setup({ ping: async () => ({ ok: false, signedIn: null, ...(msg ? { message: msg } : {}) }) });
+  assert.equal((await s.monitor.check())[0]!.message, "Codex didn't respond. Restarting it…");
+  msg = 'Codex keeps stopping. Use Check now to try again.';
+  const [h] = await s.monitor.check();
+  assert.equal(h!.status, 'degraded');
+  assert.equal(h!.message, msg);
+  assert.equal(s.updates.length, 2);
+});
+
+test('a provider installed after start is picked up by the next check', async () => {
+  let installed = false;
+  let binary: string | null = null;
+  const s = setup({ found: () => binary, hasAdapter: () => installed });
+  assert.equal((await s.monitor.check())[0]!.status, 'not_installed');
+  installed = true; binary = 'C:\bin\codex.exe';
+  const [h] = await s.monitor.check();
+  assert.equal(h!.status, 'connected');
+  assert.equal(h!.installed, true);
+});
+
+test('a manual check waits for the periodic check in flight, then runs its own with manual set', async () => {
+  let release: () => void = () => {};
+  let first = true;
+  const gate = new Promise<void>((r) => { release = r; });
+  const s = setup({ ping: async () => { if (first) { first = false; await gate; } return { ok: true, signedIn: true }; } });
+  s.monitor.start();
+  await new Promise((r) => setImmediate(r));
+  const manual = s.monitor.check();
+  await new Promise((r) => setImmediate(r));
+  assert.equal(s.pings.length, 1, 'still waiting for the first');
+  release();
+  await manual;
+  s.monitor.stop();
+  assert.deepEqual(s.manuals, [false, true]);
+});
+
+test('an unknown latest version is retried on the next health tick, not after 6 h', async () => {
+  mock.timers.enable({ apis: ['setInterval', 'setTimeout'] });
+  const flush = async () => { for (let i = 0; i < 20; i++) await new Promise((r) => setImmediate(r)); };
+  let value: string | null = null;
+  const s = setup({ latest: async () => value });
+  try {
+    s.monitor.start();
+    await flush();
+    assert.equal(s.latestCalls.length, 1);
+    assert.equal(s.monitor.latest()[0]!.latestVersion, null);
+    value = '0.164.0';
+    mock.timers.tick(60_000);
+    await flush();
+    assert.equal(s.latestCalls.length, 2);
+    assert.equal(s.monitor.latest()[0]!.latestVersion, '0.164.0');
+    mock.timers.tick(60_000);
+    await flush();
+    assert.equal(s.latestCalls.length, 2, 'known now: back to every 6 h');
+  } finally { s.monitor.stop(); mock.timers.reset(); }
+});
+
+test('when the installed version changes, an idle helper process is restarted', async () => {
+  let v = '0.163.0';
+  const s = setup({ versions: () => v });
+  await s.monitor.check();
+  assert.deepEqual(s.restarts, []);
+  v = '0.164.0';
+  const [h] = await s.monitor.check();
+  assert.deepEqual(s.restarts, ['codex']);
+  assert.equal(h!.version, '0.164.0');
+  await s.monitor.check();
+  assert.equal(s.restarts.length, 1);
 });

@@ -16,5 +16,7 @@ export interface ProviderAdapter {
    * any automatic-restart backoff; periodic pings leave it off.
    */
   ping(opts?: { manual?: boolean }): Promise<PingResult>;
+  /** After the provider's binary was updated: replace the long-lived helper process if nothing is running on it. */
+  restartIfIdle?(): Promise<boolean>;
   dispose(): Promise<void>;
 }

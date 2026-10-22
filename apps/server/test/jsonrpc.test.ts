@@ -36,12 +36,15 @@ test('close kills a running process', async () => {
   await assert.rejects(p.request('x', {}), /exited/);
 });
 
-test('a request timeout marks the process unhealthy', async () => {
-  const p = new JsonRpcProcess(process.execPath, ['-e', 'setTimeout(() => {}, 5000)'], { requestTimeoutMs: 50 });
+test('a request timeout makes the process suspect and any notification clears it', async () => {
+  const script = 'setTimeout(() => console.log(JSON.stringify({ method: "hello", params: {} })), 300); setTimeout(() => {}, 5000)';
+  const p = new JsonRpcProcess(process.execPath, ['-e', script], { requestTimeoutMs: 50 });
   try {
-    assert.equal(p.unhealthy, false);
+    assert.equal(p.suspect, false);
     await assert.rejects(p.request('anything', {}), /timed out/);
-    assert.equal(p.unhealthy, true);
+    assert.equal(p.suspect, true);
+    await new Promise((r) => setTimeout(r, 400));
+    assert.equal(p.suspect, false, 'a notification arrived');
   } finally { await p.close(); }
 });
 

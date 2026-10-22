@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import type { ConnectionHealth, ProviderId } from '@agent-kanban/shared';
-import type { ProviderAdapter } from './adapters/adapter.ts';
+import type { AdapterSource } from './adapters/registry.ts';
 import { resolveSpawnTarget } from './adapters/spawn-target.ts';
 
 const NAMES: Record<ProviderId, string> = { claude: 'Claude Code', codex: 'Codex', antigravity: 'Antigravity' };
@@ -47,16 +47,14 @@ function newer(latest: string, current: string): boolean {
   return false;
 }
 
-interface Cached { path: string; version: string | null }
-
 export class ConnectionMonitor {
   private opts: ConnectionMonitorOptions;
   private healthMs: number;
   private versionMs: number;
   private retryMs: number;
   private current = new Map<ProviderId, ConnectionHealth>();
-  private inFlight = new Map<ProviderId, Promise<ConnectionHealth>>();
-  private versions = new Map<ProviderId, Cached>();
+  private inFlight = new Map<ProviderId, { promise: Promise<ConnectionHealth>; manual: boolean }>();
+  private versions = new Map<ProviderId, string | null>();
   private latestVersions = new Map<ProviderId, string | null>();
   private versionsDue = new Set<ProviderId>(); // providers whose installed/latest version must be re-read on the next check
   private timers: NodeJS.Timeout[] = [];
@@ -120,10 +118,14 @@ export class ConnectionMonitor {
 
   private checkOne(id: ProviderId, manual: boolean): Promise<ConnectionHealth> {
     const running = this.inFlight.get(id);
-    if (running) return running;
-    const p = this.doCheck(id, manual).finally(() => { this.inFlight.delete(id); });
-    this.inFlight.set(id, p);
-    return p;
+    if (running && (running.manual || !manual)) return running.promise;
+    // A manual check waits for the periodic one in flight, then runs its own (it may restart things).
+    const after = running ? running.promise.catch(() => undefined) : Promise.resolve();
+    const entry = { promise: after.then(() => this.doCheck(id, manual)), manual };
+    const clear = () => { if (this.inFlight.get(id) === entry) this.inFlight.delete(id); };
+    entry.promise.then(clear, clear);
+    this.inFlight.set(id, entry);
+    return entry.promise;
   }
 
   private async doCheck(id: ProviderId, manual: boolean): Promise<ConnectionHealth> {
@@ -136,26 +138,31 @@ export class ConnectionMonitor {
       return this.publish({ ...base, status: 'not_installed', message: `${name} isn't installed.` });
     }
 
-    let cached = this.versions.get(id);
-    const due = this.versionsDue.delete(id);
-    if (due || !cached || cached.path !== path) {
-      const version = await this.opts.getVersion(id, path).catch(() => null);
-      cached = { path, version };
-      this.versions.set(id, cached);
-      if (due || !this.latestVersions.has(id)) this.latestVersions.set(id, await this.opts.getLatest(id).catch(() => null));
-    }
-    const version = cached.version;
-    const latestVersion = this.latestVersions.get(id) ?? null;
-    const updateAvailable = !!(version && latestVersion && newer(latestVersion, version));
+    // The installed version is cheap to read, so read it every time; the registry only when due or still unknown.
+    const previous = this.versions.get(id) ?? null;
+    const version = await this.opts.getVersion(id, path).catch(() => null);
+    this.versions.set(id, version);
+    const needLatest = this.versionsDue.delete(id) || !this.latestVersions.get(id);
+    const latestPromise = needLatest
+      ? this.opts.getLatest(id).catch(() => null).then((v) => { this.latestVersions.set(id, v); })
+      : Promise.resolve();
 
+    const adapter = await this.opts.adapters.ensure(id, path);
+    if (adapter && previous && version && previous !== version) {
+      // The binary changed under a running helper process: restart it when nothing is running on it.
+      await adapter.restartIfIdle?.().catch(() => false);
+    }
     let ping: { ok: boolean; signedIn: boolean | null; message?: string } | null = null;
-    const adapter = this.opts.adapters[id];
     if (adapter) {
       try { ping = await adapter.ping({ manual }); } catch { ping = null; }
     }
+    await latestPromise;
+    const latestVersion = this.latestVersions.get(id) ?? null;
+    const updateAvailable = !!(version && latestVersion && newer(latestVersion, version));
+
     const common = { ...base, installed: true, path, version, latestVersion, updateAvailable };
     if (!ping?.ok) {
-      return this.publish({ ...common, status: 'degraded', message: `${name} didn't respond. Restarting it…` });
+      return this.publish({ ...common, status: 'degraded', message: ping?.message || `${name} didn't respond. Restarting it…` });
     }
     const ok = { ...common, signedIn: ping.signedIn, processOk: true };
     if (ping.signedIn === false) return this.publish({ ...ok, status: 'signed_out', message: `${name} isn't signed in.` });
@@ -184,7 +191,7 @@ export interface ConnectionMonitorOptions {
   findBinary: (id: ProviderId) => Promise<string | null>;
   getVersion: (id: ProviderId, path: string) => Promise<string | null>;
   getLatest: (id: ProviderId) => Promise<string | null>;
-  adapters: Partial<Record<ProviderId, Pick<ProviderAdapter, 'ping'>>>;
+  adapters: Pick<AdapterSource, 'ensure'>;
   onUpdate: (h: ConnectionHealth) => void;
   now?: () => Date;
   healthMs?: number; // default 60 s

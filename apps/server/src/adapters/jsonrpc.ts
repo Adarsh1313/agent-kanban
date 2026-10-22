@@ -25,6 +25,7 @@ export class JsonRpcProcess {
   private stderrRing: string[] = [];
   private defaultTimeoutMs: number;
   private timedOut = false;
+  private lastNoteAt = Date.now();
   private taskkill: ((pid: number) => ChildProcess) | undefined;
 
   constructor(command: string, args: string[], opts: { cwd?: string; env?: NodeJS.ProcessEnv; requestTimeoutMs?: number; taskkill?: (pid: number) => ChildProcess } = {}) {
@@ -49,8 +50,11 @@ export class JsonRpcProcess {
   /** The last lines the process wrote to stderr (at most 20). */
   get stderrTail(): string[] { return [...this.stderrRing]; }
 
-  /** True once any request has timed out: the process is alive but may be stuck, so callers should recycle it. */
-  get unhealthy(): boolean { return this.timedOut; }
+  /** True after a request timed out and nothing has been heard since: alive but possibly stuck. Any notification clears it. */
+  get suspect(): boolean { return this.timedOut; }
+  clearSuspect(): void { this.timedOut = false; }
+  /** When the process last sent a notification (or when it was started). */
+  get lastNotificationAt(): number { return this.lastNoteAt; }
 
   request<T = unknown>(method: string, params: unknown, timeoutMs?: number): Promise<T> {
     if (this.exited) return Promise.reject(new Error('process exited'));
@@ -120,7 +124,7 @@ export class JsonRpcProcess {
     if (m === null || typeof m !== 'object') return;
     if (typeof m.method === 'string') {
       if (m.id !== undefined) void this.handleServerRequest(m.id, m.method, m.params);
-      else for (const fn of this.notificationFns) fn(m.method, m.params);
+      else { this.lastNoteAt = Date.now(); this.timedOut = false; for (const fn of this.notificationFns) fn(m.method, m.params); }
       return;
     }
     if (m.id === undefined) return;

@@ -74,6 +74,9 @@ export class ClaudeAdapter implements ProviderAdapter {
   private live = new Set<Chat>(); // every chat with a launched query, including ones still starting
   private usageQuery: Query | null = null;
   private usageTimeoutMs: number;
+  private pingFailures = 0; // consecutive failed pings: pace how soon the shared query is recreated
+  private pingRetryAt = 0;
+  private lastSignedIn: boolean | null = null;
 
   constructor(opts: { claudePath: string; query?: typeof sdkQuery; usageTimeoutMs?: number }) {
     this.usageTimeoutMs = opts.usageTimeoutMs ?? 15_000;
@@ -254,8 +257,8 @@ export class ClaudeAdapter implements ProviderAdapter {
   }
 
   /** A query to ask account/usage questions of: a live chat's, else the shared long-lived one (created on demand). */
-  private usageHandle(): { q: Query; shared: boolean } {
-    const live = [...this.live].find((c) => c.query && c.sessionRef !== null)?.query ?? null;
+  private usageHandle(sharedOnly: boolean): { q: Query; shared: boolean } {
+    const live = sharedOnly ? null : [...this.live].find((c) => c.query && c.sessionRef !== null)?.query ?? null;
     if (live) return { q: live, shared: false };
     if (!this.usageQuery) {
       // One long-lived query with an empty prompt stream; strictMcpConfig + no mcpServers keeps user MCP servers from loading.
@@ -279,8 +282,8 @@ export class ClaudeAdapter implements ProviderAdapter {
   }
 
   /** Runs `fn` against a usage handle with the timeout; a failure on the shared query closes it so the next call starts fresh. */
-  private async withUsageQuery<T>(fn: (q: Query) => Promise<T>): Promise<T> {
-    const { q, shared } = this.usageHandle();
+  private async withUsageQuery<T>(fn: (q: Query) => Promise<T>, sharedOnly = false): Promise<T> {
+    const { q, shared } = this.usageHandle(sharedOnly);
     let timer: NodeJS.Timeout | undefined;
     try {
       const timeout = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('timeout')), this.usageTimeoutMs); });
@@ -303,17 +306,35 @@ export class ClaudeAdapter implements ProviderAdapter {
     }
   }
 
-  /** Health check: ask the shared query for the account (no new process per ping). Signed in when it has a token source. */
-  async ping(): Promise<PingResult> {
+  /**
+   * Health check: ask the shared query (never a chat's) for the account. Signed in when it has a token source,
+   * or, where Claude Code leaves that out, an account email. Automatic pings back off 1 s, 2 s, 4 s ... (max 60 s)
+   * after failures; a manual ping, or one after "signed out", starts from a fresh query so a new sign-in is seen.
+   */
+  async ping(opts: { manual?: boolean } = {}): Promise<PingResult> {
     if (this.disposed) return { ok: false, signedIn: null, message: SHUT_DOWN };
+    const manual = opts.manual === true;
+    if (manual) { this.pingFailures = 0; this.pingRetryAt = 0; }
+    if (!this.usageQuery && Date.now() < this.pingRetryAt) return { ok: false, signedIn: null, message: 'Claude Code is restarting.' };
+    if (manual || this.lastSignedIn === false) this.closeUsageQuery();
     try {
-      const info = await this.withUsageQuery((q) => q.accountInfo());
-      // tokenSource is the signal when present; Claude Code 2.1.x omits it for a signed-in subscription, where the account email is set.
+      const info = await this.withUsageQuery((q) => q.accountInfo(), true);
       const signedIn = info?.tokenSource ? info.tokenSource !== 'none' : !!info?.email;
+      this.pingFailures = 0; this.pingRetryAt = 0;
+      this.lastSignedIn = signedIn;
       return { ok: true, signedIn };
-    } catch (e) {
-      return { ok: false, signedIn: null, message: e instanceof Error ? e.message : 'Claude Code did not respond.' };
+    } catch {
+      this.pingFailures++;
+      this.pingRetryAt = Date.now() + Math.min(1000 * 2 ** (this.pingFailures - 1), 60_000);
+      return { ok: false, signedIn: null };
     }
+  }
+
+  /** After Claude Code is updated: drop the shared query so the next one runs the new binary. Chats keep their own processes. */
+  async restartIfIdle(): Promise<boolean> {
+    if (!this.usageQuery) return false;
+    this.closeUsageQuery();
+    return true;
   }
 
   private closeUsageQuery(): void {

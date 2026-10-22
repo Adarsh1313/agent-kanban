@@ -1,4 +1,4 @@
-import { test } from 'node:test';
+import { test, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -444,20 +444,58 @@ test('ping reads accountInfo from the shared query and maps tokenSource to signe
   assert.deepEqual(await a.ping(), { ok: true, signedIn: true });
   info = { tokenSource: 'none', email: 'a@b.c' };
   assert.deepEqual(await a.ping(), { ok: true, signedIn: false });
-  assert.equal(f.calls.length, 1, 'pings reuse one long-lived query');
   await a.dispose();
 });
 
-test('ping failure or timeout is not ok, closes the shared query, and the next ping creates a new one', async () => {
+test('ping failure backs off 1 s, 2 s, 4 s before the shared query is recreated; a manual ping skips the wait', async () => {
+  mock.timers.enable({ apis: ['Date'], now: 0 });
   let hang = true;
   const f = fake(async function* () { await never(); }, { accountInfo: () => (hang ? never() : Promise.resolve({ tokenSource: 'claude.ai' })) });
   const a = new ClaudeAdapter({ claudePath: 'c', query: f.query, usageTimeoutMs: 30 });
-  const r = await a.ping();
-  assert.equal(r.ok, false);
-  assert.equal(f.calls[0]!.closed, 1);
-  hang = false;
-  assert.deepEqual(await a.ping(), { ok: true, signedIn: true });
+  try {
+    assert.equal((await a.ping()).ok, false);
+    assert.equal(f.calls[0]!.closed, 1);
+    assert.equal((await a.ping()).ok, false);
+    assert.equal(f.calls.length, 1, 'no new query inside the 1 s backoff');
+    mock.timers.tick(1000);
+    assert.equal((await a.ping()).ok, false);
+    assert.equal(f.calls.length, 2);
+    mock.timers.tick(1999);
+    await a.ping();
+    assert.equal(f.calls.length, 2, 'second gap is 2 s');
+    mock.timers.tick(1);
+    await a.ping();
+    assert.equal(f.calls.length, 3);
+    hang = false;
+    assert.deepEqual(await a.ping({ manual: true }), { ok: true, signedIn: true });
+    assert.equal(f.calls.length, 4);
+  } finally { mock.timers.reset(); await a.dispose(); }
+});
+
+test('ping never borrows a live chat query', async () => {
+  const f = fake(async function* (_o, input) { await input.next(); yield init(); await never(); }, { accountInfo: async () => ({ tokenSource: 'claude.ai' }) });
+  const a = new ClaudeAdapter({ claudePath: 'c', query: f.query });
+  await a.startChat({ cwd: '.', prompt: 'hi' });
+  assert.equal((await a.ping()).ok, true);
+  assert.equal(f.calls.length, 2, 'the chat query plus a separate shared one');
+  await a.dispose();
+});
+
+test('after a signed-out result, and on a manual check, ping starts from a fresh query', async () => {
+  let info: any = { tokenSource: 'none' };
+  const f = fake(async function* () { await never(); }, { accountInfo: async () => info });
+  const a = new ClaudeAdapter({ claudePath: 'c', query: f.query });
+  assert.equal((await a.ping()).signedIn, false);
+  info = { tokenSource: 'claude.ai' };
+  assert.equal((await a.ping()).signedIn, true, 'the new sign-in is seen');
   assert.equal(f.calls.length, 2);
+  assert.equal(f.calls[0]!.closed, 1);
+  await a.ping();
+  assert.equal(f.calls.length, 2, 'signed in: the query is reused');
+  await a.ping({ manual: true });
+  assert.equal(f.calls.length, 3);
+  assert.equal(await a.restartIfIdle(), true);
+  assert.equal(f.calls[2]!.closed, 1);
   await a.dispose();
 });
 

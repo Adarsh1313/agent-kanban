@@ -11,11 +11,12 @@ import type { AdapterEvent } from '@agent-kanban/shared';
 
 const fake = fileURLToPath(new URL('./fixtures/fake-codex-app-server.ts', import.meta.url));
 
-function make(scenario: string | ((n: number) => string), adapterOpts: { initializeTimeoutMs?: number; codexHome?: string; env?: Record<string, string> } = {}) {
+function make(scenario: string | ((n: number) => string), adapterOpts: { initializeTimeoutMs?: number; pingTimeoutMs?: number; codexHome?: string; env?: Record<string, string> } = {}) {
   const procs: JsonRpcProcess[] = [];
   const adapter = new CodexAdapter({
     codexPath: 'unused',
     initializeTimeoutMs: adapterOpts.initializeTimeoutMs,
+    pingTimeoutMs: adapterOpts.pingTimeoutMs,
     codexHome: adapterOpts.codexHome ?? join(tmpdir(), 'ak-no-codex-home'),
     spawn: () => {
       const sc = typeof scenario === 'string' ? scenario : scenario(procs.length);
@@ -349,41 +350,94 @@ test('user actions respawn a crashed app-server immediately even inside the ping
   } finally { mock.timers.reset(); await adapter.dispose(); }
 });
 
-function makeHangingFirst(pingTimeoutMs: number) {
-  const procs: JsonRpcProcess[] = [];
-  const adapter = new CodexAdapter({
-    codexPath: 'unused', codexHome: join(tmpdir(), 'ak-no-codex-home'), pingTimeoutMs,
-    spawn: () => {
-      const p = new JsonRpcProcess(process.execPath, ['--disable-warning=ExperimentalWarning', fake], { env: { ...process.env, FAKE_SCENARIO: procs.length === 0 ? 'hangaccount' : '' } });
-      procs.push(p);
-      return p;
-    },
-  });
-  return { adapter, procs };
-}
-
-test('a ping timeout marks the process unhealthy; the next ping kills and respawns it', async () => {
+test('a probe timeout makes the process suspect; only a second timeout with nothing running recycles it', async () => {
   mock.timers.enable({ apis: ['Date'], now: 0 });
-  const { adapter, procs } = makeHangingFirst(150);
+  const { adapter, procs } = make((n) => (n === 0 ? 'hangaccount' : ''), { pingTimeoutMs: 150 });
   try {
     assert.equal((await adapter.ping()).ok, false);
-    assert.equal(procs[0]!.unhealthy, true);
+    assert.equal(procs[0]!.suspect, true);
+    assert.equal(procs.length, 1, 'one timeout does not recycle');
     mock.timers.tick(1000);
-    assert.equal((await adapter.ping()).ok, true);
-    assert.equal(procs.length, 2);
+    assert.equal((await adapter.ping()).ok, false);
     let exited = false;
     procs[0]!.onExit(() => { exited = true; }); // fires immediately if it already exited
-    assert.equal(exited, true, 'the unresponsive process was killed');
+    assert.equal(exited, true, 'the second timeout killed it');
+    mock.timers.tick(2000);
+    assert.equal((await adapter.ping()).ok, true);
+    assert.equal(procs.length, 2);
   } finally { mock.timers.reset(); await adapter.dispose(); }
 });
 
-test('a user action recycles an unhealthy app-server right away', async () => {
-  const { adapter, procs } = makeHangingFirst(150);
+test('a probe timeout while a turn is active and notifications are flowing does not recycle', async () => {
+  mock.timers.enable({ apis: ['Date'], now: 0 });
+  const { adapter, procs, waitFor } = make((n) => (n === 0 ? 'hangbusy' : ''), { pingTimeoutMs: 150 });
   try {
+    await adapter.startChat({ cwd, prompt: 'hi' });
+    await waitFor((e) => e.type === 'turn.started');
+    assert.deepEqual(await adapter.ping(), { ok: true, signedIn: null });
+    assert.deepEqual(await adapter.ping(), { ok: true, signedIn: null });
+    assert.equal(procs.length, 1);
+    // Silent for more than 2 minutes with the turn still "active": now it is considered stuck and replaced.
+    mock.timers.tick(121_000);
     assert.equal((await adapter.ping()).ok, false);
-    const r = await adapter.startChat({ cwd, prompt: 'hi' });
-    assert.equal(r.sessionRef, 'thr_1');
+    const err = await waitFor((e) => e.type === 'error');
+    assert.ok(err.type === 'error' && /restarted/.test(err.message));
+    mock.timers.tick(5000);
+    assert.equal((await adapter.ping()).ok, true);
     assert.equal(procs.length, 2);
+  } finally { mock.timers.reset(); await adapter.dispose(); }
+});
+
+test('a deliberate recycle keeps the callers claim: its turn completes and no error is emitted for it', async () => {
+  const { adapter, procs, events, waitFor } = make('');
+  try {
+    assert.equal((await adapter.ping()).ok, true);
+    adapter.markForRecycle();
+    await adapter.sendMessage('thr_1', 'hello');
+    await waitFor((e) => e.type === 'turn.completed');
+    assert.equal(procs.length, 2);
+    assert.ok(!events.some((e) => e.type === 'error'), JSON.stringify(events));
+  } finally { await adapter.dispose(); }
+});
+
+test('a deliberate recycle tells other running chats it restarted, without saying "unexpectedly"', async () => {
+  const { adapter, events, waitFor } = make('hang');
+  try {
+    await adapter.startChat({ cwd, prompt: 'hi' });
+    await waitFor((e) => e.type === 'turn.started');
+    adapter.markForRecycle();
+    await adapter.ping();
+    const err = await waitFor((e) => e.type === 'error');
+    assert.ok(err.type === 'error');
+    assert.equal(err.message, 'Codex stopped responding and was restarted. Resume to continue.');
+    assert.doesNotMatch(err.message, /unexpectedly/);
+  } finally { await adapter.dispose(); }
+});
+
+test('manual pings ask Codex to refresh its sign-in; automatic ones do not', async () => {
+  const log = join(mkdtempSync(join(tmpdir(), 'ak-log-')), 'log.jsonl');
+  const { adapter } = make('', { env: { FAKE_LOG: log } });
+  try {
+    await adapter.ping();
+    await adapter.ping({ manual: true });
+    const reads = readFileSync(log, 'utf8').trim().split(/\r?\n/).map((l) => JSON.parse(l)).filter((m) => m.method === 'account/read');
+    assert.deepEqual(reads.map((m) => m.params.refreshToken), [false, true]);
+  } finally { await adapter.dispose(); }
+});
+
+test('restartIfIdle replaces the app-server only when no turn is running', async () => {
+  const { adapter, procs, events, waitFor } = make('hang');
+  try {
+    assert.equal(await adapter.restartIfIdle(), false, 'nothing running yet');
+    await adapter.ping();
+    assert.equal(await adapter.restartIfIdle(), true);
+    assert.equal((await adapter.ping()).ok, true);
+    assert.equal(procs.length, 2);
+    await adapter.startChat({ cwd, prompt: 'hi' });
+    await waitFor((e) => e.type === 'turn.started');
+    assert.equal(await adapter.restartIfIdle(), false, 'a turn is running');
+    assert.equal(procs.length, 2);
+    assert.ok(!events.some((e) => e.type === 'error'));
   } finally { await adapter.dispose(); }
 });
 

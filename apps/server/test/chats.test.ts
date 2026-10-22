@@ -7,6 +7,7 @@ import type { AdapterEvent, HistoryChat, ProviderId, ServerEvent } from '@agent-
 import { Store } from '../src/store.ts';
 import { ChatService, ActiveElsewhereError } from '../src/chats.ts';
 import type { ProviderAdapter } from '../src/adapters/adapter.ts';
+import { AdapterRegistry } from '../src/adapters/registry.ts';
 
 class FakeAdapter implements ProviderAdapter {
   id: ProviderId;
@@ -446,4 +447,28 @@ test('C2: auth detection uses word boundaries', async () => {
   assert.equal(await run('401 Unauthorized'), "Codex isn't signed in. Open Connections to sign in.");
   const long = await run('x'.repeat(400));
   assert.equal(long, "Codex couldn't continue: " + 'x'.repeat(300) + '…');
+});
+
+test('a provider installed after the server started works without a restart (registry creates the adapter on demand)', async () => {
+  const store = new Store(':memory:');
+  let binary: string | null = null;
+  const created: FakeAdapter[] = [];
+  const registry = new AdapterRegistry({
+    findBinary: async () => binary,
+    create: (id) => { const a = new FakeAdapter(id); created.push(a); return a as unknown as ProviderAdapter; },
+  });
+  const events: ServerEvent[] = [];
+  const svc = new ChatService({ store, adapters: registry, usage: { refresh: async () => [] } as any, broadcast: (e) => events.push(e), claudeHome: '/nowhere' });
+  assert.equal(await registry.ensure('codex'), undefined);
+  const missing = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'hi' });
+  assert.equal(missing.column, 'needs_you');
+  assert.equal(created.length, 0);
+  binary = 'C:\bin\codex.exe';
+  const chat = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'hi again' });
+  assert.equal(chat.column, 'running');
+  assert.equal(created.length, 1);
+  assert.deepEqual(created[0]!.calls, ['startChat']);
+  // events from the adapter created later still reach the service
+  created[0]!.emit({ type: 'turn.completed', sessionRef: 's1' });
+  assert.notEqual(store.getChat(chat.id)!.column, 'running');
 });
