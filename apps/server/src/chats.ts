@@ -10,6 +10,7 @@ import type { UsageService } from './usage/service.ts';
 
 const NAMES: Record<ProviderId, string> = { claude: 'Claude Code', codex: 'Codex', antigravity: 'Antigravity' };
 const ACTIVE_WINDOW_MS = 15_000;
+const OWN_WRITE_SLACK_MS = 2_000;
 const BUFFER_MAX = 500;
 const BUFFER_MAX_AGE_MS = 60_000;
 
@@ -38,6 +39,9 @@ export class ChatService {
   /** Resolves when an in-progress startChat for the chat has settled. */
   private pending = new Map<string, Promise<void>>();
   private resuming = new Map<string, Promise<void>>();
+  /** Last time this process drove or heard from each chat (ms). Distinguishes our own .jsonl writes from another app's. */
+  private lastOwn = new Map<string, number>();
+  private reported = new WeakSet<object>();
 
   constructor(opts: {
     store: Store;
@@ -74,9 +78,10 @@ export class ChatService {
     this.mustGet(chatId);
     await this.pending.get(chatId);
     const chat = this.mustGet(chatId);
-    if (chat.sessionRef && !this.live.has(chat.id) && chat.provider === 'claude' && this.isActiveElsewhere(chat.sessionRef)) {
+    if (chat.sessionRef && !this.live.has(chat.id) && chat.provider === 'claude' && this.isActiveElsewhere(chat.sessionRef, chat.id)) {
       throw new ActiveElsewhereError();
     }
+    this.touch(chatId);
     this.addMessage(chatId, 'user', text);
     this.transition(chatId, { type: 'user.message' });
     if (!chat.sessionRef) await this.begin(chat, text);
@@ -110,6 +115,8 @@ export class ChatService {
       try { await adapter.stop(chat.sessionRef); } catch { /* still park the card as stopped */ }
     }
     this.requests.delete(chatId);
+    this.live.delete(chatId);
+    this.touch(chatId);
     this.transition(chatId, { type: 'user.stop' });
   }
 
@@ -198,6 +205,7 @@ export class ChatService {
   private fail(chatId: string, provider: ProviderId, err: unknown | null): Chat {
     this.requests.delete(chatId);
     this.live.delete(chatId);
+    this.touch(chatId);
     this.addMessage(chatId, 'assistant', this.errorCopy(provider, err));
     this.transition(chatId, { type: 'error', sessionRef: '', message: '' });
     this.broadcast({ type: 'notification', chatId, kind: 'error' });
@@ -256,18 +264,29 @@ export class ChatService {
       }
       await adapter.sendMessage(chat.sessionRef, text);
     } catch (err) {
+      // Concurrent callers share one failed resume: report it once.
+      if (typeof err === 'object' && err !== null) {
+        if (this.reported.has(err)) return;
+        this.reported.add(err);
+      }
       this.fail(chat.id, chat.provider, err);
     }
   }
 
-  private isActiveElsewhere(sessionRef: string): boolean {
+  private touch(chatId: string): void {
+    this.lastOwn.set(chatId, this.now().getTime());
+  }
+
+  private isActiveElsewhere(sessionRef: string, chatId?: string): boolean {
     const root = join(this.claudeHome, 'projects');
     let dirs: string[];
     try { dirs = readdirSync(root); } catch { return false; }
     const nowMs = this.now().getTime();
+    const own = chatId === undefined ? undefined : this.lastOwn.get(chatId);
     for (const d of dirs) {
       try {
         const m = statSync(join(root, d, `${sessionRef}.jsonl`)).mtimeMs;
+        if (own !== undefined && m <= own + OWN_WRITE_SLACK_MS) continue; // our own write
         if (nowMs - m < ACTIVE_WINDOW_MS) return true;
       } catch { /* no such file in this project */ }
     }
@@ -302,6 +321,7 @@ export class ChatService {
   }
 
   private handle(chatId: string, provider: ProviderId, e: AdapterEvent): void {
+    this.touch(chatId);
     switch (e.type) {
       case 'message.delta': {
         const ids = this.idsFor(chatId);
@@ -354,6 +374,7 @@ export class ChatService {
         this.broadcast({ type: 'notification', chatId, kind: 'limit' });
         return;
       case 'error': {
+        this.live.delete(chatId);
         this.settle(chatId);
         this.addMessage(chatId, 'assistant', this.errorCopy(provider, new Error(e.message)));
         this.transition(chatId, e);
@@ -361,6 +382,7 @@ export class ChatService {
         return;
       }
       case 'stopped':
+        this.live.delete(chatId);
         this.settle(chatId);
         this.transition(chatId, e);
         return;

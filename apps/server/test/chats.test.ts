@@ -16,6 +16,7 @@ class FakeAdapter implements ProviderAdapter {
   beforeResolve: (() => void) | null = null;
   ref = 's1';
   respondError: Error | null = null;
+  resumeError: Error | null = null;
   constructor(id: ProviderId) { this.id = id; }
   async startChat() {
     this.calls.push('startChat');
@@ -26,7 +27,7 @@ class FakeAdapter implements ProviderAdapter {
   async sendMessage(ref: string, text: string) { this.calls.push(`send:${ref}:${text}`); }
   async respondToRequest(ref: string, rid: string, d: unknown) { if (this.respondError) throw this.respondError; this.calls.push(`respond:${ref}:${rid}:${JSON.stringify(d)}`); }
   async stop(ref: string) { this.calls.push(`stop:${ref}`); }
-  async resume(ref: string, cwd: string) { this.calls.push(`resume:${ref}:${cwd}`); await Promise.resolve(); }
+  async resume(ref: string, cwd: string) { this.calls.push(`resume:${ref}:${cwd}`); await Promise.resolve(); if (this.resumeError) throw this.resumeError; }
   onEvent(l: (e: AdapterEvent) => void) { this.listeners.add(l); return () => { this.listeners.delete(l); }; }
   async readUsage(): Promise<never> { throw new Error('unused'); }
   async dispose() {}
@@ -342,5 +343,50 @@ test('M3: a handler failure is logged and the chat goes to needs_you/error', asy
   }
   assert.equal(logged.length, 1);
   assert.match(String(logged[0][0]), new RegExp(chat.id));
+  assert.equal(store.getChat(chat.id)!.needsReason, 'error');
+});
+
+function claudeHomeWith(ref: string) {
+  const home = mkdtempSync(join(tmpdir(), 'ak-home-'));
+  mkdirSync(join(home, 'projects', 'proj'), { recursive: true });
+  const file = join(home, 'projects', 'proj', `${ref}.jsonl`);
+  writeFileSync(file, '{}\n');
+  return { home, file };
+}
+
+test('Fix2 (a): resume after an in-process failure is allowed (mtime is our own write)', async () => {
+  const { home, file } = claudeHomeWith('s1');
+  let t = new Date('2026-10-22T12:00:00Z').getTime();
+  const x = setup('claude', () => new Date(t), home);
+  const chat = await x.svc.start({ provider: 'claude', cwd: '/w', prompt: 'p' });
+  x.adapter.emit({ type: 'error', sessionRef: 's1', message: 'died' });
+  utimesSync(file, new Date(t), new Date(t));
+  t += 5000;
+  await x.svc.send(chat.id, 'again');
+  assert.equal(x.store.getChat(chat.id)!.column, 'running');
+  assert.deepEqual(x.adapter.calls.slice(-2), ['resume:s1:/w', 'send:s1:again']);
+});
+
+test('Fix2 (b): a write 5 s after our last activity, within 15 s of now, is activity elsewhere', async () => {
+  const { home, file } = claudeHomeWith('s1');
+  let t = new Date('2026-10-22T12:00:00Z').getTime();
+  const x = setup('claude', () => new Date(t), home);
+  const chat = await x.svc.start({ provider: 'claude', cwd: '/w', prompt: 'p' });
+  x.adapter.emit({ type: 'error', sessionRef: 's1', message: 'died' });
+  utimesSync(file, new Date(t + 5000), new Date(t + 5000));
+  t += 10_000;
+  const before = x.store.listMessages(chat.id).length;
+  await assert.rejects(x.svc.send(chat.id, 'again'), ActiveElsewhereError);
+  assert.equal(x.store.listMessages(chat.id).length, before);
+  assert.deepEqual(x.adapter.calls, ['startChat']);
+});
+
+test('Fix2: concurrent sends sharing one failed resume report the error once', async () => {
+  const { store, adapter, svc } = setup();
+  const chat = store.createChat({ provider: 'codex', cwd: '/w', title: 'old', sessionRef: 'old' });
+  adapter.resumeError = new Error('resume failed');
+  await Promise.all([svc.send(chat.id, 'a'), svc.send(chat.id, 'b')]);
+  const errs = store.listMessages(chat.id).filter((m) => m.role === 'assistant');
+  assert.equal(errs.length, 1);
   assert.equal(store.getChat(chat.id)!.needsReason, 'error');
 });
