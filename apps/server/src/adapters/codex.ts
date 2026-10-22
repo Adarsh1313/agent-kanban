@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { AdapterEvent, UsageReading } from '@agent-kanban/shared';
-import type { ProviderAdapter } from './adapter.ts';
+import type { PingResult, ProviderAdapter } from './adapter.ts';
 import { JsonRpcProcess } from './jsonrpc.ts';
 import { codexLimitsToReading } from '../usage/parse.ts';
 
@@ -34,8 +34,16 @@ export class CodexAdapter implements ProviderAdapter {
   private codexHome: string;
   private fallbackModel = new WeakMap<JsonRpcProcess, string | null>();
   private _modelNote: string | null = null;
+  // Keep-alive state for automatic (ping-driven) respawns; user actions bypass it.
+  private pingTimeoutMs: number;
+  private failures = 0; // consecutive failed pings
+  private retryAt = 0; // earliest time an automatic ping may respawn
+  private gaveUp = false; // too many failures in a row: wait for a manual check
+  private crashed = false; // a process died on its own since the last ping noticed
+  private closingByUs = new WeakSet<JsonRpcProcess>();
 
-  constructor(opts: { codexPath: string; spawn?: (cmd: string, args: string[]) => JsonRpcProcess; initializeTimeoutMs?: number; codexHome?: string }) {
+  constructor(opts: { codexPath: string; spawn?: (cmd: string, args: string[]) => JsonRpcProcess; initializeTimeoutMs?: number; pingTimeoutMs?: number; codexHome?: string }) {
+    this.pingTimeoutMs = opts.pingTimeoutMs ?? 15_000;
     const args = ['app-server'];
     this.codexHome = opts.codexHome ?? join(homedir(), '.codex');
     this.initializeTimeoutMs = opts.initializeTimeoutMs ?? 15_000;
@@ -57,31 +65,45 @@ export class CodexAdapter implements ProviderAdapter {
   /** Returns the live app-server, spawning (and initializing) one if none is running. Task 10's ping() can reuse this. */
   private ensureProcess(): Promise<JsonRpcProcess> {
     if (this.disposed) return Promise.reject(new Error('Codex adapter is shut down.'));
-    if (this.proc) return Promise.resolve(this.proc);
+    if (this.proc && !this.proc.unhealthy) return Promise.resolve(this.proc);
     if (this.starting) return this.starting;
+    const s: Promise<JsonRpcProcess> = this.spawnProcess().finally(() => { if (this.starting === s) this.starting = null; });
+    this.starting = s;
+    return s;
+  }
+
+  /** Kill a process we decided to replace; its exit is not a crash. */
+  private async recycle(p: JsonRpcProcess): Promise<void> {
+    this.closingByUs.add(p);
+    if (this.proc === p) this.proc = null;
+    await p.close();
+  }
+
+  private async spawnProcess(): Promise<JsonRpcProcess> {
+    const stale = this.proc;
+    if (stale) await this.recycle(stale); // it timed out earlier: alive but stuck
+    if (this.disposed) throw new Error('Codex adapter is shut down.');
     const p = this.makeProcess();
     this.loaded.set(p, new Set());
     this.startingProc = p;
     p.onNotification((method, params) => this.onNotification(method, params));
     p.onRequest((method, params, id) => this.onServerRequest(method, params, id));
     p.onExit(() => this.onProcessExit(p));
-    this.starting = (async () => {
-      try {
-        await p.request('initialize', { clientInfo: { name: 'agent-kanban', title: 'Agent Kanban', version: '0.0.0' } }, this.initializeTimeoutMs);
-        p.notify('initialized');
-        await this.pickModel(p);
-        if (this.disposed) throw new Error('Codex adapter is shut down.');
-        this.proc = p;
-        return p;
-      } catch (e) {
-        await p.close();
-        throw e;
-      } finally {
-        this.starting = null;
-        this.startingProc = null;
-      }
-    })();
-    return this.starting;
+    try {
+      await p.request('initialize', { clientInfo: { name: 'agent-kanban', title: 'Agent Kanban', version: '0.0.0' } }, this.initializeTimeoutMs);
+      p.notify('initialized');
+      await this.pickModel(p);
+      if (this.disposed) throw new Error('Codex adapter is shut down.');
+      this.proc = p;
+      this.crashed = false;
+      return p;
+    } catch (e) {
+      this.closingByUs.add(p);
+      await p.close();
+      throw e;
+    } finally {
+      this.startingProc = null;
+    }
   }
 
   /** Read-only: compare ~/.codex/config.toml's model with what the account can use. Any failure keeps Codex's own default. */
@@ -124,6 +146,7 @@ export class CodexAdapter implements ProviderAdapter {
   private onProcessExit(p: JsonRpcProcess): void {
     if (this.proc === p) this.proc = null;
     if (this.disposed) return;
+    if (!this.closingByUs.has(p)) this.crashed = true;
     const threads = [...this.activeTurns.keys()];
     this.activeTurns.clear();
     this.pendingStops.clear();
@@ -222,9 +245,17 @@ export class CodexAdapter implements ProviderAdapter {
   }
 
   async sendMessage(sessionRef: string, text: string): Promise<void> {
-    const p = await this.ensureProcess();
-    await this.attach(p, sessionRef);
-    await this.startTurn(p, sessionRef, text);
+    // Claim the turn before respawning/re-attaching, so a stop() that arrives meanwhile is queued, not dropped.
+    const owned = !this.activeTurns.has(sessionRef);
+    if (owned) this.activeTurns.set(sessionRef, null);
+    try {
+      const p = await this.ensureProcess();
+      await this.attach(p, sessionRef);
+      await this.startTurn(p, sessionRef, text, owned);
+    } catch (e) {
+      if (owned) { this.activeTurns.delete(sessionRef); this.pendingStops.delete(sessionRef); }
+      throw e;
+    }
   }
 
   /** A fresh process (after a crash) doesn't know our threads yet: resume before using one. */
@@ -236,8 +267,7 @@ export class CodexAdapter implements ProviderAdapter {
     known?.add(sessionRef);
   }
 
-  private async startTurn(p: JsonRpcProcess, sessionRef: string, text: string): Promise<void> {
-    const owned = !this.activeTurns.has(sessionRef);
+  private async startTurn(p: JsonRpcProcess, sessionRef: string, text: string, owned = !this.activeTurns.has(sessionRef)): Promise<void> {
     if (owned) this.activeTurns.set(sessionRef, null);
     try {
       const r = await p.request<{ turn: { id: string } }>('turn/start', { threadId: sessionRef, input: [{ type: 'text', text }] });
@@ -284,6 +314,42 @@ export class CodexAdapter implements ProviderAdapter {
       return codexLimitsToReading(r, new Date());
     } catch {
       return { provider: 'codex', status: 'error', windows: [], readAt: new Date().toISOString(), message: "Couldn't read Codex usage." };
+    }
+  }
+
+  private noteFailure(): void {
+    this.failures++;
+    if (this.failures > 3) this.gaveUp = true;
+    this.retryAt = Date.now() + Math.min(1000 * 2 ** (this.failures - 1), 60_000);
+  }
+
+  /**
+   * Health check: `account/read` on the running app-server. Automatic pings that find it dead respawn it
+   * with a 1 s, 2 s, 4 s ... (max 60 s) backoff and stop trying after a few failures in a row; a manual
+   * ping always tries once. User actions (startChat etc.) never wait for the backoff.
+   */
+  async ping(opts: { manual?: boolean } = {}): Promise<PingResult> {
+    const manual = opts.manual === true;
+    const fail = (message: string): PingResult => ({ ok: false, signedIn: null, message });
+    if (this.disposed) return fail('Codex adapter is shut down.');
+    if (manual) { this.failures = 0; this.retryAt = 0; this.gaveUp = false; this.crashed = false; }
+    // A process that timed out earlier is alive but stuck: kill it so it can be replaced.
+    const stuck = this.proc;
+    if (stuck?.unhealthy) await this.recycle(stuck);
+    if (!this.proc && !this.starting) {
+      if (this.crashed) { this.crashed = false; this.noteFailure(); return fail('Codex stopped unexpectedly.'); }
+      if (this.gaveUp) return fail('Codex keeps stopping. Use Check now to try again.');
+      if (Date.now() < this.retryAt) return fail('Codex is restarting.');
+    }
+    try {
+      const p = await this.ensureProcess();
+      const r = await p.request<{ account: unknown | null }>('account/read', { refreshToken: false }, this.pingTimeoutMs);
+      this.failures = 0; this.retryAt = 0; this.gaveUp = false;
+      return { ok: true, signedIn: r?.account != null, ...(this._modelNote ? { message: this._modelNote } : {}) };
+    } catch (e) {
+      this.crashed = false; // this failure is counted here, not again by the next ping
+      this.noteFailure();
+      return fail(e instanceof Error ? e.message : 'Codex did not respond.');
     }
   }
 

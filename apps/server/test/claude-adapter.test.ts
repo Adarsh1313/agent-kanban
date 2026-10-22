@@ -429,3 +429,51 @@ test('usage timeout returns an error reading, closes the query, next read create
   assert.equal(f.calls.length, 2);
   await a.dispose();
 });
+
+// ---- Task 10: ping and usage-query draining ----
+test('ping reads accountInfo from the shared query and maps tokenSource to signedIn', async () => {
+  let info: any = { tokenSource: 'claude.ai' };
+  const f = fake(async function* () { await never(); }, { accountInfo: async () => info });
+  const a = new ClaudeAdapter({ claudePath: 'c', query: f.query });
+  assert.deepEqual(await a.ping(), { ok: true, signedIn: true });
+  info = { tokenSource: 'none' };
+  assert.deepEqual(await a.ping(), { ok: true, signedIn: false });
+  info = {};
+  assert.deepEqual(await a.ping(), { ok: true, signedIn: false });
+  assert.equal(f.calls.length, 1, 'pings reuse one long-lived query');
+  await a.dispose();
+});
+
+test('ping failure or timeout is not ok, closes the shared query, and the next ping creates a new one', async () => {
+  let hang = true;
+  const f = fake(async function* () { await never(); }, { accountInfo: () => (hang ? never() : Promise.resolve({ tokenSource: 'claude.ai' })) });
+  const a = new ClaudeAdapter({ claudePath: 'c', query: f.query, usageTimeoutMs: 30 });
+  const r = await a.ping();
+  assert.equal(r.ok, false);
+  assert.equal(f.calls[0]!.closed, 1);
+  hang = false;
+  assert.deepEqual(await a.ping(), { ok: true, signedIn: true });
+  assert.equal(f.calls.length, 2);
+  await a.dispose();
+});
+
+test('the shared usage query is drained in the background and draining stops once it is closed', async () => {
+  let yielded = 0;
+  let release: () => void = () => {};
+  const gate = new Promise<void>((r) => { release = r; });
+  const f = fake(async function* () {
+    for (let i = 0; i < 5; i++) { yielded++; yield { type: 'noise' }; }
+    await gate;
+    for (let i = 0; i < 5; i++) { yielded++; yield { type: 'noise' }; }
+  }, { [USAGE]: () => never(), accountInfo: async () => ({ tokenSource: 'claude.ai' }) });
+  const a = new ClaudeAdapter({ claudePath: 'c', query: f.query, usageTimeoutMs: 30 });
+  await a.ping();
+  await tick();
+  assert.equal(yielded, 5, 'messages are consumed without anyone asking');
+  await a.readUsage(); // times out, which closes the shared query
+  assert.equal(f.calls[0]!.closed, 1);
+  release();
+  await tick();
+  assert.ok(yielded <= 6, `draining stopped after close (yielded ${yielded})`);
+  await a.dispose();
+});

@@ -1,4 +1,5 @@
 import { test } from 'node:test';
+import { spawn } from 'node:child_process';
 import assert from 'node:assert/strict';
 import { JsonRpcProcess } from '../src/adapters/jsonrpc.ts';
 
@@ -33,4 +34,24 @@ test('close kills a running process', async () => {
   const p = new JsonRpcProcess(process.execPath, ['-e', 'setInterval(() => {}, 1000)']);
   await p.close();
   await assert.rejects(p.request('x', {}), /exited/);
+});
+
+test('a request timeout marks the process unhealthy', async () => {
+  const p = new JsonRpcProcess(process.execPath, ['-e', 'setTimeout(() => {}, 5000)'], { requestTimeoutMs: 50 });
+  try {
+    assert.equal(p.unhealthy, false);
+    await assert.rejects(p.request('anything', {}), /timed out/);
+    assert.equal(p.unhealthy, true);
+  } finally { await p.close(); }
+});
+
+test('close falls back to child.kill() when taskkill exits non-zero', async () => {
+  const failing = () => spawn(process.execPath, ['-e', 'process.exit(1)'], { stdio: 'ignore' });
+  const p = new JsonRpcProcess(process.execPath, ['-e', 'setTimeout(() => {}, 30000)'], { taskkill: failing });
+  let exited = false;
+  p.onExit(() => { exited = true; });
+  const t0 = Date.now();
+  await p.close();
+  assert.ok(Date.now() - t0 < 3000, 'close should not wait for the 5 s cap');
+  assert.equal(exited, true);
 });

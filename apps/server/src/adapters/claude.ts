@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { query as sdkQuery } from '@anthropic-ai/claude-agent-sdk';
 import type { CanUseTool, PermissionResult, Query, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { AdapterEvent, UsageReading } from '@agent-kanban/shared';
-import type { ProviderAdapter } from './adapter.ts';
+import type { PingResult, ProviderAdapter } from './adapter.ts';
 import { resolveSpawnTarget } from './spawn-target.ts';
 import { claudeUsageToReading } from '../usage/parse.ts';
 
@@ -253,30 +253,64 @@ export class ClaudeAdapter implements ProviderAdapter {
     this.launch(chat, sessionRef);
   }
 
-  async readUsage(): Promise<UsageReading> {
-    this.assertOpen();
-    const failed: UsageReading = { provider: 'claude', status: 'error', windows: [], readAt: new Date().toISOString(), message: "Couldn't read Claude Code usage." };
-    let q = [...this.live].find((c) => c.query && c.sessionRef !== null)?.query ?? null;
-    const shared = q === null;
-    if (!q) {
-      if (!this.usageQuery) {
-        // One long-lived query with an empty prompt stream; strictMcpConfig + no mcpServers keeps user MCP servers from loading.
-        this.usageQuery = this.query({
-          prompt: new InputQueue(),
-          options: { pathToClaudeCodeExecutable: this.claudePath, permissionMode: 'default', mcpServers: {}, strictMcpConfig: true } as never,
-        });
-      }
-      q = this.usageQuery;
+  /** A query to ask account/usage questions of: a live chat's, else the shared long-lived one (created on demand). */
+  private usageHandle(): { q: Query; shared: boolean } {
+    const live = [...this.live].find((c) => c.query && c.sessionRef !== null)?.query ?? null;
+    if (live) return { q: live, shared: false };
+    if (!this.usageQuery) {
+      // One long-lived query with an empty prompt stream; strictMcpConfig + no mcpServers keeps user MCP servers from loading.
+      const q = this.query({
+        prompt: new InputQueue(),
+        options: { pathToClaudeCodeExecutable: this.claudePath, permissionMode: 'default', mcpServers: {}, strictMcpConfig: true } as never,
+      });
+      this.usageQuery = q;
+      this.drain(q);
     }
+    return { q: this.usageQuery, shared: true };
+  }
+
+  /** Nobody reads the shared query's output, so consume and discard it or its buffer grows for as long as we run. */
+  private drain(q: Query): void {
+    void (async () => {
+      try {
+        for await (const _ of q) { if (this.usageQuery !== q) break; }
+      } catch { /* closed or crashed: the next call recreates it */ }
+    })();
+  }
+
+  /** Runs `fn` against a usage handle with the timeout; a failure on the shared query closes it so the next call starts fresh. */
+  private async withUsageQuery<T>(fn: (q: Query) => Promise<T>): Promise<T> {
+    const { q, shared } = this.usageHandle();
     let timer: NodeJS.Timeout | undefined;
     try {
       const timeout = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('timeout')), this.usageTimeoutMs); });
-      return await Promise.race([readClaudeUsage(q), timeout]);
-    } catch {
+      return await Promise.race([fn(q), timeout]);
+    } catch (e) {
       if (shared && this.usageQuery === q) this.closeUsageQuery();
-      return failed;
+      throw e;
     } finally {
       clearTimeout(timer);
+    }
+  }
+
+  async readUsage(): Promise<UsageReading> {
+    this.assertOpen();
+    const failed: UsageReading = { provider: 'claude', status: 'error', windows: [], readAt: new Date().toISOString(), message: "Couldn't read Claude Code usage." };
+    try {
+      return await this.withUsageQuery(readClaudeUsage);
+    } catch {
+      return failed;
+    }
+  }
+
+  /** Health check: ask the shared query for the account (no new process per ping). Signed in when it has a token source. */
+  async ping(): Promise<PingResult> {
+    if (this.disposed) return { ok: false, signedIn: null, message: SHUT_DOWN };
+    try {
+      const info = await this.withUsageQuery((q) => q.accountInfo());
+      return { ok: true, signedIn: !!info?.tokenSource && info.tokenSource !== 'none' };
+    } catch (e) {
+      return { ok: false, signedIn: null, message: e instanceof Error ? e.message : 'Claude Code did not respond.' };
     }
   }
 

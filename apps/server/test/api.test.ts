@@ -17,7 +17,7 @@ const reading = (provider: 'claude' | 'codex', left: number): UsageReading => ({
 });
 const hist: HistoryChat[] = [{ provider: 'claude', sessionRef: 's1', title: 'h' } as unknown as HistoryChat];
 
-async function setup(overrides: Record<string, unknown> = {}, pingMs?: number) {
+async function setup(overrides: Record<string, unknown> = {}, pingMs?: number, extra: Record<string, unknown> = {}) {
   let emit: (e: ServerEvent) => void = () => {};
   const readings = [reading('claude', 40), reading('codex', 70)];
   const chats: any = {
@@ -31,7 +31,7 @@ async function setup(overrides: Record<string, unknown> = {}, pingMs?: number) {
     ...overrides,
   };
   const usage: any = { latest: () => readings, refresh: async () => readings };
-  const api = createApi({ chats, usage, history: async () => hist, token: 'tok', ...(pingMs ? { pingMs } : {}) });
+  const api = createApi({ chats, usage, history: async () => hist, token: 'tok', ...(pingMs ? { pingMs } : {}), ...extra });
   emit = api.broadcast;
   await new Promise<void>((r) => api.server.listen(0, '127.0.0.1', r));
   const addr = api.server.address() as AddressInfo;
@@ -191,5 +191,38 @@ test('a malformed upgrade target does not crash the server', async () => {
     raw.write('GET // HTTP/1.1\r\nHost: x\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n');
     await new Promise((r) => { raw.on('close', r); raw.on('error', r); raw.resume(); });
     assert.equal((await s.f('/api/chats')).status, 200);
+  } finally { s.close(); }
+});
+
+test('GET /api/connections lists health; POST /api/connections/check runs a check (optionally for one provider)', async () => {
+  const health = (provider: 'claude' | 'codex') => ({
+    provider, installed: true, path: 'p', version: '1.0.0', latestVersion: '1.0.0', updateAvailable: false,
+    signedIn: true, processOk: true, status: 'connected', message: null, checkedAt: '2026-01-01T00:00:00Z',
+  });
+  const calls: Array<string | undefined> = [];
+  const connections = {
+    latest: () => [health('claude'), health('codex')],
+    check: async (p?: string) => { calls.push(p); return p ? [health(p as 'codex')] : [health('claude'), health('codex')]; },
+  };
+  const s = await setup({}, undefined, { connections });
+  try {
+    const got = await s.f('/api/connections');
+    assert.equal(got.status, 200);
+    assert.deepEqual((await got.json() as any[]).map((h) => h.provider), ['claude', 'codex']);
+    assert.equal((await s.f('/api/connections', {}, null)).status, 401);
+    const all = await s.f('/api/connections/check', { method: 'POST' });
+    assert.equal(all.status, 200);
+    assert.equal((await all.json() as any[]).length, 2);
+    const one = await s.f('/api/connections/check', { method: 'POST', body: JSON.stringify({ provider: 'codex' }) });
+    assert.deepEqual((await one.json() as any[]).map((h) => h.provider), ['codex']);
+    assert.deepEqual(calls, [undefined, 'codex']);
+    assert.equal((await s.f('/api/connections/check', { method: 'POST', body: JSON.stringify({ provider: 'nope' }) })).status, 400);
+  } finally { s.close(); }
+});
+
+test('GET /api/connections is an empty list when no monitor is wired', async () => {
+  const s = await setup();
+  try {
+    assert.deepEqual(await (await s.f('/api/connections')).json(), []);
   } finally { s.close(); }
 });

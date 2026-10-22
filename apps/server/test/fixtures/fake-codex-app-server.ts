@@ -1,5 +1,6 @@
 // Fake `codex app-server` speaking line-delimited JSON-RPC on stdio.
-// FAKE_SCENARIO: approval | fileapproval | crash | limits | hang | hanginit | tools | limit | slowturn
+// FAKE_SCENARIO: approval | fileapproval | crash | limits | hang | hanginit | tools | limit | slowturn | dieonaccount | hangaccount
+// FAKE_SIGNED_OUT=1 makes account/read report no account; FAKE_RESUME_DELAY_MS delays thread/resume answers.
 import { createInterface } from 'node:readline';
 import { appendFileSync } from 'node:fs';
 
@@ -67,7 +68,16 @@ createInterface({ input: process.stdin }).on('line', (line) => {
       if (scenario === 'hanginit') return; // never answers
       return send({ id: m.id, result: { userAgent: 'fake' } });
     case 'thread/start': known.add(T); return send({ id: m.id, result: { thread: { id: T } } });
-    case 'thread/resume': known.add(m.params.threadId); return send({ id: m.id, result: { thread: { id: m.params.threadId } } });
+    case 'thread/resume': {
+      known.add(m.params.threadId);
+      const answer = () => send({ id: m.id, result: { thread: { id: m.params.threadId } } });
+      const delay = Number(process.env.FAKE_RESUME_DELAY_MS ?? 0);
+      return delay > 0 ? void setTimeout(answer, delay) : answer();
+    }
+    case 'account/read':
+      if (scenario === 'dieonaccount') process.exit(1);
+      if (scenario === 'hangaccount') return;
+      return send({ id: m.id, result: { account: process.env.FAKE_SIGNED_OUT ? null : { type: 'chatgpt', email: 'a@b.c', planType: 'plus' }, requiresOpenaiAuth: true } });
     case 'turn/start': {
       if (!known.has(m.params.threadId)) return send({ id: m.id, error: { code: -32600, message: 'thread not found' } });
       const reply = () => { send({ id: m.id, result: { turn: { id: 'turn_1' } } }); setTimeout(runTurn, 10); };

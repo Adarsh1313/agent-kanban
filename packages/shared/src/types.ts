@@ -55,6 +55,20 @@ export interface UsageReading { provider: ProviderId; status: 'ok' | 'unavailabl
 
 export interface HistoryChat { provider: ProviderId; sessionRef: string; title: string; cwd: string; updatedAt: string }
 
+export interface ConnectionHealth {
+  provider: ProviderId;
+  installed: boolean;
+  path: string | null;
+  version: string | null;
+  latestVersion: string | null;
+  updateAvailable: boolean;
+  signedIn: boolean | null;
+  processOk: boolean;
+  status: 'connected' | 'update_available' | 'signed_out' | 'not_installed' | 'degraded';
+  message: string | null;
+  checkedAt: string;
+}
+
 export type ServerEvent =
   | { type: 'chat.updated'; chat: Chat }
   | { type: 'message.delta'; chatId: string; messageId: string; text: string }
@@ -62,4 +76,5 @@ export type ServerEvent =
   | { type: 'tool.call'; chatId: string; toolCall: ToolCall }
   | { type: 'request.opened'; chatId: string; requestId: string; kind: 'permission' | 'question'; summary: string }
   | { type: 'usage.updated'; reading: UsageReading }
+  | { type: 'connection.updated'; health: ConnectionHealth }
   | { type: 'notification'; chatId: string; kind: 'permission' | 'question' | 'finished' | 'limit' | 'error' };

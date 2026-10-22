@@ -13,6 +13,7 @@ import { CodexAdapter } from './adapters/codex.ts';
 import type { ProviderAdapter } from './adapters/adapter.ts';
 import { findBinary } from './binaries.ts';
 import { createApi } from './api.ts';
+import { ConnectionMonitor, getLatest, getVersion } from './health.ts';
 
 const home = homedir();
 const dataDir = join(home, '.agent-kanban');
@@ -32,7 +33,13 @@ const usage = new UsageService({
   readers, store, onUpdate: (reading) => broadcast({ type: 'usage.updated', reading }),
 });
 const chats = new ChatService({ store, adapters, usage, broadcast: (e) => broadcast(e), claudeHome: join(home, '.claude') });
-const api = createApi({ chats, usage, history: () => readAllHistory(home), token });
+const connections = new ConnectionMonitor({
+  providers: ['claude', 'codex'],
+  findBinary: (id) => (id === 'claude' || id === 'codex' ? findBinary(id) : Promise.resolve(null)),
+  getVersion, getLatest, adapters,
+  onUpdate: (health) => broadcast({ type: 'connection.updated', health }),
+});
+const api = createApi({ chats, usage, history: () => readAllHistory(home), token, connections });
 broadcast = api.broadcast;
 
 chats.recoverAfterRestart();
@@ -58,12 +65,14 @@ try {
 api.server.on('error', (err) => console.error('Server error:', err));
 const addr = api.server.address() as AddressInfo;
 console.log(`Agent Kanban server: http://127.0.0.1:${addr.port}/?token=${token}`);
+connections.start();
 
 let stopping = false;
 async function shutdown(): Promise<void> {
   if (stopping) process.exit(1);
   stopping = true;
   usage.stop();
+  connections.stop();
   api.server.close();
   api.close();
   const dispose = Promise.allSettled(Object.values(adapters).map((a) => Promise.resolve().then(() => a.dispose())));

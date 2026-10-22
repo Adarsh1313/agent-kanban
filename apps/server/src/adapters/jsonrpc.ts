@@ -24,8 +24,11 @@ export class JsonRpcProcess {
   private exitCode: number | null = null;
   private stderrRing: string[] = [];
   private defaultTimeoutMs: number;
+  private timedOut = false;
+  private taskkill: ((pid: number) => ChildProcess) | undefined;
 
-  constructor(command: string, args: string[], opts: { cwd?: string; env?: NodeJS.ProcessEnv; requestTimeoutMs?: number } = {}) {
+  constructor(command: string, args: string[], opts: { cwd?: string; env?: NodeJS.ProcessEnv; requestTimeoutMs?: number; taskkill?: (pid: number) => ChildProcess } = {}) {
+    this.taskkill = opts.taskkill;
     this.defaultTimeoutMs = opts.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
     const target = resolveSpawnTarget(command);
     this.child = spawn(target.command, [...target.args, ...args], { cwd: opts.cwd, env: opts.env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
@@ -46,12 +49,16 @@ export class JsonRpcProcess {
   /** The last lines the process wrote to stderr (at most 20). */
   get stderrTail(): string[] { return [...this.stderrRing]; }
 
+  /** True once any request has timed out: the process is alive but may be stuck, so callers should recycle it. */
+  get unhealthy(): boolean { return this.timedOut; }
+
   request<T = unknown>(method: string, params: unknown, timeoutMs?: number): Promise<T> {
     if (this.exited) return Promise.reject(new Error('process exited'));
     const id = this.nextId++;
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
+        this.timedOut = true;
         reject(new Error(`${method} timed out`));
       }, timeoutMs ?? this.defaultTimeoutMs);
       this.pending.set(id, { resolve, reject, timer });
@@ -90,10 +97,12 @@ export class JsonRpcProcess {
 
   private killTree(): void {
     const pid = this.child.pid;
-    if (process.platform === 'win32' && pid !== undefined) {
+    if ((process.platform === 'win32' || this.taskkill) && pid !== undefined) {
       try {
-        const k = spawn('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
-        k.on('error', () => { try { this.child.kill(); } catch { /* already gone */ } });
+        const k = this.taskkill ? this.taskkill(pid) : spawn('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
+        const fallback = () => { try { this.child.kill(); } catch { /* already gone */ } };
+        k.on('error', fallback);
+        k.on('exit', (code) => { if (code !== 0) fallback(); });
         return;
       } catch { /* fall through */ }
     }

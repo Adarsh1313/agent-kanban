@@ -1,7 +1,7 @@
 import http from 'node:http';
 import { timingSafeEqual } from 'node:crypto';
 import { WebSocketServer, WebSocket } from 'ws';
-import type { HistoryChat, ProviderId, ServerEvent } from '@agent-kanban/shared';
+import type { ConnectionHealth, HistoryChat, ProviderId, ServerEvent } from '@agent-kanban/shared';
 import { ActiveElsewhereError } from './chats.ts';
 import type { ChatService } from './chats.ts';
 import type { UsageService } from './usage/service.ts';
@@ -69,6 +69,7 @@ export function createApi(opts: {
   chats: ChatService;
   usage: UsageService;
   history: () => Promise<HistoryChat[]>;
+  connections?: { latest: () => ConnectionHealth[]; check: (provider?: ProviderId) => Promise<ConnectionHealth[]> };
   token: string;
   pingMs?: number;
 }): { server: http.Server; broadcast: (e: ServerEvent) => void; close: () => void } {
@@ -150,6 +151,12 @@ export function createApi(opts: {
     if (match('POST', '/api/usage/refresh')) {
       await usage.refresh();
       return { status: 200, body: usageBody(usage.latest()) };
+    }
+    if (match('GET', '/api/connections')) return { status: 200, body: opts.connections?.latest() ?? [] };
+    if (match('POST', '/api/connections/check')) {
+      const b = await readJson(req);
+      const only = b.provider === undefined ? undefined : provider(b);
+      return { status: 200, body: (await opts.connections?.check(only)) ?? [] };
     }
     throw new HttpError(404, 'Not found.');
   }

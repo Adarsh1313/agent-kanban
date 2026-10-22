@@ -1,4 +1,4 @@
-import { test } from 'node:test';
+import { test, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import { mkdtempSync, writeFileSync, readFileSync } from 'node:fs';
@@ -263,4 +263,142 @@ test('M1: only top-level model counts; M4: resume uses the fallback model; note 
     assert.equal(calls.find((c) => c.method === 'thread/resume').params.model, 'gpt-a');
     assert.match(m.adapter.modelNote ?? '', /gpt-zzz/);
   } finally { await m.adapter.dispose(); }
+});
+
+// ---- Task 10: ping, keep-alive backoff, carry-forward fixes ----
+test('ping reports signed in / signed out from account/read', async () => {
+  const a = make('');
+  try {
+    assert.deepEqual(await a.adapter.ping(), { ok: true, signedIn: true });
+  } finally { await a.adapter.dispose(); }
+  const b = make('', { env: { FAKE_SIGNED_OUT: '1' } });
+  try {
+    assert.deepEqual(await b.adapter.ping(), { ok: true, signedIn: false });
+  } finally { await b.adapter.dispose(); }
+});
+
+test('ping surfaces the model note without changing ok', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'ak-codex-'));
+  writeFileSync(join(home, 'config.toml'), 'model = "gpt-9"\n');
+  const models = JSON.stringify([{ id: 'gpt-5', model: 'gpt-5', isDefault: true }]);
+  const { adapter } = make('', { codexHome: home, env: { FAKE_MODELS: models } });
+  try {
+    const r = await adapter.ping();
+    assert.equal(r.ok, true);
+    assert.match(r.message ?? '', /Your Codex settings use gpt-9/);
+  } finally { await adapter.dispose(); }
+});
+
+test('automatic pings respawn a dying app-server after 1 s, 2 s, 4 s, then give up until a manual check', async () => {
+  mock.timers.enable({ apis: ['Date'], now: 0 });
+  const { adapter, procs } = make((n) => (n < 4 ? 'dieonaccount' : ''));
+  try {
+    assert.equal((await adapter.ping()).ok, false);
+    assert.equal(procs.length, 1);
+    assert.equal((await adapter.ping()).ok, false);
+    assert.equal(procs.length, 1, 'no respawn inside the 1 s backoff');
+    mock.timers.tick(1000);
+    assert.equal((await adapter.ping()).ok, false);
+    assert.equal(procs.length, 2);
+    mock.timers.tick(1999);
+    await adapter.ping();
+    assert.equal(procs.length, 2, 'second gap is 2 s');
+    mock.timers.tick(1);
+    await adapter.ping();
+    assert.equal(procs.length, 3);
+    mock.timers.tick(3999);
+    await adapter.ping();
+    assert.equal(procs.length, 3, 'third gap is 4 s');
+    mock.timers.tick(1);
+    await adapter.ping();
+    assert.equal(procs.length, 4);
+    mock.timers.tick(120_000);
+    const stuck = await adapter.ping();
+    assert.equal(stuck.ok, false);
+    assert.equal(procs.length, 4, 'stays down until a manual check');
+    const manual = await adapter.ping({ manual: true });
+    assert.equal(manual.ok, true);
+    assert.equal(procs.length, 5);
+    assert.equal((await adapter.ping()).ok, true);
+  } finally { mock.timers.reset(); await adapter.dispose(); }
+});
+
+test('a healthy app-server killed from outside shows one failed ping, then respawns after 1 s', async () => {
+  mock.timers.enable({ apis: ['Date'], now: 0 });
+  const { adapter, procs } = make('');
+  try {
+    assert.equal((await adapter.ping()).ok, true);
+    await procs[0]!.close();
+    const down = await adapter.ping();
+    assert.equal(down.ok, false);
+    assert.equal(procs.length, 1);
+    mock.timers.tick(1000);
+    assert.equal((await adapter.ping()).ok, true);
+    assert.equal(procs.length, 2);
+  } finally { mock.timers.reset(); await adapter.dispose(); }
+});
+
+test('user actions respawn a crashed app-server immediately even inside the ping backoff', async () => {
+  mock.timers.enable({ apis: ['Date'], now: 0 });
+  const { adapter, procs } = make((n) => (n === 0 ? 'dieonaccount' : ''));
+  try {
+    assert.equal((await adapter.ping()).ok, false);
+    await adapter.startChat({ cwd, prompt: 'hi' });
+    assert.equal(procs.length, 2);
+    assert.equal((await adapter.ping()).ok, true);
+  } finally { mock.timers.reset(); await adapter.dispose(); }
+});
+
+function makeHangingFirst(pingTimeoutMs: number) {
+  const procs: JsonRpcProcess[] = [];
+  const adapter = new CodexAdapter({
+    codexPath: 'unused', codexHome: join(tmpdir(), 'ak-no-codex-home'), pingTimeoutMs,
+    spawn: () => {
+      const p = new JsonRpcProcess(process.execPath, ['--disable-warning=ExperimentalWarning', fake], { env: { ...process.env, FAKE_SCENARIO: procs.length === 0 ? 'hangaccount' : '' } });
+      procs.push(p);
+      return p;
+    },
+  });
+  return { adapter, procs };
+}
+
+test('a ping timeout marks the process unhealthy; the next ping kills and respawns it', async () => {
+  mock.timers.enable({ apis: ['Date'], now: 0 });
+  const { adapter, procs } = makeHangingFirst(150);
+  try {
+    assert.equal((await adapter.ping()).ok, false);
+    assert.equal(procs[0]!.unhealthy, true);
+    mock.timers.tick(1000);
+    assert.equal((await adapter.ping()).ok, true);
+    assert.equal(procs.length, 2);
+    let exited = false;
+    procs[0]!.onExit(() => { exited = true; }); // fires immediately if it already exited
+    assert.equal(exited, true, 'the unresponsive process was killed');
+  } finally { mock.timers.reset(); await adapter.dispose(); }
+});
+
+test('a user action recycles an unhealthy app-server right away', async () => {
+  const { adapter, procs } = makeHangingFirst(150);
+  try {
+    assert.equal((await adapter.ping()).ok, false);
+    const r = await adapter.startChat({ cwd, prompt: 'hi' });
+    assert.equal(r.sessionRef, 'thr_1');
+    assert.equal(procs.length, 2);
+  } finally { await adapter.dispose(); }
+});
+
+test('stop during a re-attach after a respawn is applied once the turn id is known', async () => {
+  const { adapter, procs, events, waitFor } = make('hang', { env: { FAKE_RESUME_DELAY_MS: '300' } });
+  try {
+    await adapter.startChat({ cwd, prompt: 'hi' });
+    await waitFor((e) => e.type === 'turn.started');
+    await procs[0]!.close();
+    await waitFor((e) => e.type === 'error');
+    events.length = 0;
+    const sending = adapter.sendMessage('thr_1', 'again');
+    await new Promise((r) => setTimeout(r, 50)); // thread/resume is still in flight
+    await adapter.stop('thr_1');
+    await sending;
+    await waitFor((e) => e.type === 'stopped');
+  } finally { await adapter.dispose(); }
 });
