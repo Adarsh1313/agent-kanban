@@ -1,0 +1,3 @@
+{"type":"custom-title","customTitle":"Old name","sessionId":"titled-1"}
+{"type":"user","message":{"role":"user","content":"build a board"},"cwd":"C:\\Users\\me\\proj-a"}
+{"type":"custom-title","customTitle":"AI agent Kanban board","sessionId":"titled-1"}

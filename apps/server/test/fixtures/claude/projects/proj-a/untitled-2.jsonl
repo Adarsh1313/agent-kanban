@@ -1,0 +1,3 @@
+{"type":"summary","cwd":"C:\\Users\\me\\proj-a"}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"x","content":"ok"}]},"cwd":"C:\\Users\\me\\proj-a"}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Fix the login bug in the header component please"}]},"cwd":"C:\\Users\\me\\proj-a"}

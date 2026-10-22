@@ -1,0 +1,3 @@
+{"type":"user","message":{"role":"user","content":"first prompt"},"cwd":"C:\\Users\\me\\proj-a"}
+{this is not json
+{"type":"custom-title","customTitle":"Survives corruption"}
