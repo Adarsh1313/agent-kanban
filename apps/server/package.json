@@ -5,6 +5,11 @@
   "type": "module",
   "dependencies": {
     "@agent-kanban/shared": "*",
-    "@anthropic-ai/claude-agent-sdk": "0.3.308"
+    "@anthropic-ai/claude-agent-sdk": "0.3.308",
+    "@types/ws": "8.18.2",
+    "ws": "8.22.0"
+  },
+  "scripts": {
+    "start": "node src/main.ts"
   }
 }

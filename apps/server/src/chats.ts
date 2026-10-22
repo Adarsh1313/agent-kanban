@@ -1,7 +1,7 @@
 import { readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import type {
-  AdapterEvent, Chat, HistoryChat, ProviderId, ServerEvent, UserAction,
+  AdapterEvent, Chat, HistoryChat, Message, ProviderId, ServerEvent, UserAction,
 } from '@agent-kanban/shared';
 import { nextState } from './columns.ts';
 import type { Store } from './store.ts';
@@ -170,6 +170,15 @@ export class ChatService {
     this.replayBuffered(h.provider, h.sessionRef, chat.id);
     await this.deliver(chat, text);
     return this.store.getChat(chat.id)!;
+  }
+
+  listChats(): Chat[] { return this.store.listChats(); }
+
+  getChat(chatId: string): Chat { return this.mustGet(chatId); }
+
+  listMessages(chatId: string): Message[] {
+    this.mustGet(chatId);
+    return this.store.listMessages(chatId);
   }
 
   recoverAfterRestart(): void {
