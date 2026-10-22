@@ -5,10 +5,18 @@
   "engines": {
     "node": ">=22.18"
   },
-  "workspaces": ["apps/*", "packages/*"],
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
-    "test": "node --disable-warning=ExperimentalWarning --test \"apps/*/test/**/*.test.ts\"",
-    "typecheck": "tsc -p tsconfig.json"
+    "test": "node --test --disable-warning=ExperimentalWarning \"apps/server/test/**/*.test.ts\" && npm test -w apps/web",
+    "typecheck": "tsc -p tsconfig.json",
+    "typecheck:web": "tsc -p apps/web/tsconfig.json",
+    "dev:web": "npm run dev -w apps/web",
+    "build:web": "npm run build -w apps/web",
+    "build": "npm run build:web",
+    "start": "node --disable-warning=ExperimentalWarning apps/server/src/main.ts"
   },
   "devDependencies": {
     "@types/node": "26.6.5",
