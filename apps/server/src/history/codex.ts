@@ -34,13 +34,19 @@ function toIso(v: unknown): string {
 export async function readCodexHistory(codexHome: string): Promise<HistoryChat[]> {
   const rollouts = new Map<string, string>();
   await indexRollouts(join(codexHome, 'sessions'), rollouts);
-  const out: HistoryChat[] = [];
+  // Codex appends a new index line when a thread is renamed or updated: the last line for an id wins.
+  const latest = new Map<string, Record<string, unknown>>();
   for await (const rec of readJsonl(join(codexHome, 'session_index.jsonl'))) {
     if (typeof rec.id !== 'string' || !rec.id) continue;
-    const path = rollouts.get(rec.id);
+    latest.delete(rec.id);
+    latest.set(rec.id, rec);
+  }
+  const out: HistoryChat[] = [];
+  for (const [id, rec] of latest) {
+    const path = rollouts.get(id);
     out.push({
       provider: 'codex',
-      sessionRef: rec.id,
+      sessionRef: id,
       title: typeof rec.thread_name === 'string' && rec.thread_name ? rec.thread_name : 'Untitled chat',
       cwd: path ? await rolloutCwd(path) : '',
       updatedAt: toIso(rec.updated_at),

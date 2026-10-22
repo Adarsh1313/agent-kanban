@@ -15,10 +15,20 @@ import { AdapterRegistry } from './adapters/registry.ts';
 import { findBinary } from './binaries.ts';
 import { createApi } from './api.ts';
 import { ConnectionMonitor, getLatest, getVersion } from './health.ts';
+import { acquireLock, releaseLock } from './lock.ts';
+
+// Last resort: a stray rejection is logged, never allowed to take the server (and every chat) down.
+process.on('unhandledRejection', (e) => console.error('[agent-kanban] unhandled', e));
 
 const home = homedir();
 const dataDir = join(home, '.agent-kanban');
 mkdirSync(dataDir, { recursive: true });
+const lockPath = join(dataDir, 'server.lock');
+if (!acquireLock(lockPath)) {
+  console.error('Agent Kanban is already running.');
+  process.exit(1);
+}
+process.on('exit', () => releaseLock(lockPath));
 const store = new Store(join(dataDir, 'agent-kanban.db'));
 const token = randomBytes(24).toString('hex');
 
@@ -53,7 +63,6 @@ const api = createApi({ chats, usage, history: () => readAllHistory(home), token
 broadcast = api.broadcast;
 
 chats.recoverAfterRestart();
-usage.start();
 
 const rawPort = process.env.AGENT_KANBAN_PORT;
 let port = 0;
@@ -70,11 +79,14 @@ try {
 } catch (err) {
   const code = (err as NodeJS.ErrnoException).code;
   console.error(code === 'EADDRINUSE' ? `Port ${port} is already in use. Close the other program or pick another AGENT_KANBAN_PORT.` : `Couldn't start the server: ${(err as Error).message}`);
+  // The adapters may already hold helper processes: shut them down before leaving.
+  await Promise.race([adapters.dispose().catch(() => {}), new Promise((r) => setTimeout(r, 5_000))]);
   process.exit(1);
 }
 api.server.on('error', (err) => console.error('Server error:', err));
 const addr = api.server.address() as AddressInfo;
 console.log(`Agent Kanban server: http://127.0.0.1:${addr.port}/?token=${token}`);
+usage.start();
 connections.start();
 
 let stopping = false;

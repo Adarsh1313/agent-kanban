@@ -2,6 +2,9 @@
   "name": "agent-kanban",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
   "workspaces": ["apps/*", "packages/*"],
   "scripts": {
     "test": "node --disable-warning=ExperimentalWarning --test \"apps/*/test/**/*.test.ts\"",

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -70,4 +70,21 @@ test('readAllHistory sorts newest first and fixtures stay unchanged', async () =
   await readCodexHistory(join(fixtures, 'codex'));
   await readAntigravityHistory(join(fixtures, 'antigravity/conversation_summaries.db'));
   assert.equal(hashTree(fixtures), before);
+});
+
+test('codex: a session listed more than once in the index appears once, with its last entry', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'ak-codex-'));
+  const id = '11111111-2222-3333-4444-555555555555';
+  const other = '66666666-7777-8888-9999-000000000000';
+  const lines = [
+    { id, thread_name: 'Old name', updated_at: '2026-10-01T00:00:00Z' },
+    { id: other, thread_name: 'Other', updated_at: '2026-10-02T00:00:00Z' },
+    { id, thread_name: 'New name', updated_at: '2026-10-03T00:00:00Z' },
+  ];
+  writeFileSync(join(home, 'session_index.jsonl'), lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
+  const chats = await readCodexHistory(home);
+  assert.equal(chats.length, 2);
+  const mine = chats.find((c) => c.sessionRef === id)!;
+  assert.equal(mine.title, 'New name');
+  assert.equal(mine.updatedAt, '2026-10-03T00:00:00.000Z');
 });
