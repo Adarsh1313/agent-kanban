@@ -9,6 +9,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="tokens.css">
 <link rel="stylesheet" href="components.css">
+<link rel="stylesheet" href="views.css">
 <style>
   html, body { height: 100%; overflow: hidden; }
   .app { display: flex; height: 100vh; overflow: hidden; }
@@ -45,7 +46,7 @@
       <span class="cap"></span>
       <button class="navitem" type="button" data-nav="board" aria-current="page"><span data-icon="board"></span>Board <span class="count" id="navBoard">0</span></button>
       <button class="navitem" type="button" data-nav="projects"><span data-icon="projects"></span>Projects <span class="count" id="navProjects">0</span></button>
-      <button class="navitem" type="button" data-nav="connections"><span data-icon="plug"></span>Connections <span class="count">3</span></button>
+      <button class="navitem" type="button" data-nav="connections"><span data-icon="plug"></span>Connections <span class="count" id="navConn">3</span></button>
     </nav>
 
     <div class="scroll">
@@ -72,15 +73,19 @@
   <!-- ───────── Main ───────── -->
   <div class="main">
     <header class="topbar">
-      <div class="title"><span data-icon="board"></span>Board<span class="crumb" id="crumb"></span></div>
+      <div class="title"><span id="viewIcon"><span data-icon="board"></span></span><span id="viewTitle">Board</span><span class="crumb" id="crumb"></span></div>
       <button class="chip-btn" type="button" id="filterBtn" aria-haspopup="true" aria-expanded="false"><span data-icon="filter" data-size="sm"></span>Filter</button>
       <span class="spacer"></span>
       <div class="usage-area" id="usageArea"></div>
       <button class="btn icon-only ghost bell" type="button" id="bellBtn" aria-haspopup="true" aria-expanded="false" aria-label="Notifications" data-tip="Notifications"><span data-icon="bell"></span><span class="dot" id="bellDot" data-n="0">0</span></button>
       <button class="btn primary" type="button" id="topNew"><span data-icon="plus"></span><span class="new-label">New chat</span> <span class="kbd">N</span></button>
     </header>
-    <div class="filterbar" id="filterbar" hidden></div>
-    <main class="board" id="board" aria-label="Board"></main>
+    <div class="view" id="viewBoard" data-view="board">
+      <div class="filterbar" id="filterbar" hidden></div>
+      <main class="board" id="board" aria-label="Board"></main>
+    </div>
+    <div class="view" id="viewProjects" data-view="projects" hidden><div class="page" id="projectsPage"></div></div>
+    <div class="view" id="viewConnections" data-view="connections" hidden><div class="page" id="connPage"></div></div>
   </div>
 </div>
 
@@ -650,10 +655,27 @@ function renderSidebar() {
     r.querySelector('.row-more').addEventListener('click', e => { e.stopPropagation(); openActions(find(+r.dataset.chat), e.currentTarget); });
   });
   document.querySelectorAll('[data-newin]').forEach(b => b.addEventListener('click', e => { e.stopPropagation(); openDialog(b.dataset.newin); }));
+  document.querySelectorAll('.sidebar .proj-row').forEach(r => r.addEventListener('click', () => go('projects', r.dataset.proj)));
   document.querySelectorAll('[data-expand]').forEach(b => b.addEventListener('click', () => { const id = b.dataset.expand; expandedProjects.has(id) ? expandedProjects.delete(id) : expandedProjects.add(id); renderSidebar(); }));
   bindTooltips(document.querySelector('.sidebar'));
 }
-bindNav($('#nav'), it => { if (it.dataset.nav !== 'board') toast(it.dataset.nav === 'projects' ? 'The Projects page is designed next' : 'Connections (including free providers) is designed next'); });
+/* ═════════ Views: Board · Projects · Connections ═════════ */
+const VIEW_META = { board: ['board', 'Board'], projects: ['projects', 'Projects'], connections: ['plug', 'Connections'] };
+let currentView = 'board', pendingArg = null;
+function showView(name, arg) {
+  closePops();
+  const changed = name !== currentView; currentView = name;
+  document.querySelectorAll('.view').forEach(v => v.hidden = v.dataset.view !== name);
+  $('#viewIcon').innerHTML = icon(VIEW_META[name][0]); $('#viewTitle').textContent = VIEW_META[name][1];
+  $('#filterBtn').hidden = name !== 'board';
+  $('#crumb').textContent = name === 'board' && focusedProvider() ? ` › ${PROVIDERS[focusedProvider()].name}` : '';
+  if (name === 'projects') { if (!arg && changed) projectsState.mode = 'list'; renderProjects(arg); }
+  if (name === 'connections') renderConnections();
+  if (name === 'board' && changed) { const v = $('#viewBoard'); v.classList.remove('entering'); v.offsetWidth; v.classList.add('entering'); }
+}
+// Programmatic navigation goes through the nav so the capsule slides too
+function go(name, arg) { pendingArg = arg; document.querySelector(`.navitem[data-nav="${name}"]`).click(); }
+bindNav($('#nav'), it => { const a = pendingArg; pendingArg = null; showView(it.dataset.nav, a); });
 [['#provToggle', '#provList'], ['#pinToggle', '#pinList'], ['#recentToggle', '#recentList']].forEach(([t, l]) => bindDisclosure($(t), $(l)));
 $('#themeBtn').addEventListener('click', toggleTheme);
 
@@ -737,5 +759,7 @@ renderNotifs();
 renderFilterBar();
 bindTooltips();
 </script>
+<script src="projects.js"></script>
+<script src="connections.js"></script>
 </body>
 </html>

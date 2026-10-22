@@ -106,3 +106,23 @@ UI. Most tempting for this direction, and banned:
 - Per-message timestamps in the chat panel.
 - Folder glyph colours are hard-coded sample values; the real app should derive them from a small
   fixed palette in `tokens.css`.
+
+## Revision 3: Projects and Connections
+
+- **Projects list** (Linear-style rows): project, who has worked on it (provider logos with chat
+  counts), a status bar of its chats (working / needs you / to review / done / history only), last
+  activity. Sort by name or last activity; search by name or path; "Add a folder".
+- **Project detail**: "Providers that know this project" (one card each; providers that haven't worked
+  there are shown dashed), the project's chats with a provider segmented filter, and an About column
+  with location, stack, git branch and last commit, top folders, and which instruction file each
+  provider reads (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`) and whether it exists.
+- **Connections**: one card per coding agent with a status dot and label. States: Not installed →
+  Installing (progress bar, step text crossfades) → Signed out ("Installed. Sign in to finish.") →
+  Waiting for sign-in (browser opened, updates on its own) → Connected (version, chats found, usage,
+  switches for "Show its chats in Recent chats" and "Suggest it for new chats"). Failed sign-in shows
+  what happened and "Try again". Sign out asks first and says what stops working.
+- **More agents, coming later** (including free ones): OpenCode, Qwen Code, Cursor CLI, GitHub Copilot
+  CLI with "Notify me", plus "Something else?" to request one. Free-tier claims must be checked
+  before launch.
+- Views switch with an 8px slide and fade (`--duration-pop`); going back slides the other way. The
+  projects list staggers in only on first visit.
