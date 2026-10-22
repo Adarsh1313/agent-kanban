@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { applySnapshot, initialState, type AppState, type Filters } from '../src/state/reducer.ts';
-import { boardColumns, focusedProvider, pinned, recentChatsByProject, suggestFor, unreadCount, visibleChats } from '../src/state/selectors.ts';
+import { boardColumns, focusedProvider, pinned, projectLabel, providerCounts, recentChatsByProject, suggestFor, unreadCount, visibleChats } from '../src/state/selectors.ts';
 import { chat } from './helpers.ts';
 
 const NOW = Date.parse('2026-10-23T12:00:00.000Z');
@@ -124,5 +124,23 @@ describe('pinned, unreadCount, suggestFor', () => {
     expect(suggestFor(state([], { suggested: null }), ['antigravity', 'claude'])).toEqual({ provider: 'antigravity', suggested: false });
     expect(suggestFor(state([], { suggested: 'codex' }), ['claude'])).toEqual({ provider: 'claude', suggested: false });
     expect(suggestFor(state(), [])).toBeNull();
+  });
+});
+
+describe('sidebar helpers', () => {
+  it('providerCounts adds history chats the board does not already hold', () => {
+    const s = state([chat({ id: 'a', sessionRef: 'known' }), chat({ id: 'b', provider: 'codex', sessionRef: 'x', archived: true })], {}, [
+      { provider: 'claude', sessionRef: 'known', title: 'dup', cwd: '/x', updatedAt: '2026-10-01T00:00:00.000Z' },
+      { provider: 'claude', sessionRef: 'new', title: 'new', cwd: '/x', updatedAt: '2026-10-01T00:00:00.000Z' },
+    ]);
+    expect(providerCounts(s)).toEqual({ claude: 2, codex: 0, antigravity: 0 });
+  });
+  it('recentChatsByProject lists every chat of an expanded project', () => {
+    const s = state(Array.from({ length: 5 }, (_, i) => chat({ id: `c${i}`, sessionRef: `r${i}`, updatedAt: `2026-10-23T10:0${i}:00.000Z` })));
+    expect(recentChatsByProject(s, NOW)[0]!.chats).toHaveLength(3);
+    expect(recentChatsByProject(s, NOW, undefined, new Set(['/work/alpha']))[0]!.chats).toHaveLength(5);
+  });
+  it('projectLabel falls back to the folder name', () => {
+    expect(projectLabel(state(), String.raw`C:\Users\me\open-project`)).toBe('open-project');
   });
 });

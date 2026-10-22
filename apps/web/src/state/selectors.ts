@@ -28,7 +28,7 @@ export interface ProjectGroup {
 }
 
 const isSnoozed = (c: { snoozedUntil: string | null }, now: number) => c.snoozedUntil !== null && Date.parse(c.snoozedUntil) > now;
-const baseName = (p: string) => p.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || p;
+export const baseName = (p: string) => p.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || p;
 
 export function focusedProvider(s: AppState): ProviderId | null {
   if (s.ui.focusProvider) return s.ui.focusProvider;
@@ -100,6 +100,8 @@ export function recentChatsByProject(
   s: AppState,
   now: number = Date.now(),
   limits: { projects: number; chats: number } = { projects: MAX_SIDEBAR_PROJECTS, chats: MAX_SIDEBAR_CHATS },
+  /** Projects whose chats are all listed (the sidebar's "N more"). */
+  expanded: ReadonlySet<string> = new Set(),
 ): ProjectGroup[] {
   const byProject = new Map<string, SidebarChat[]>();
   for (const c of sidebarChats(s, now)) {
@@ -112,7 +114,7 @@ export function recentChatsByProject(
     .map(([projectId, list]) => ({ projectId, list: list.sort(byRecent) }))
     .sort((a, b) => byRecent(a.list[0]!, b.list[0]!))
     .slice(0, limits.projects)
-    .map(({ projectId, list }) => ({ projectId, name: names.get(projectId) ?? baseName(projectId), chats: list.slice(0, limits.chats), total: list.length }));
+    .map(({ projectId, list }) => ({ projectId, name: names.get(projectId) ?? baseName(projectId), chats: expanded.has(projectId) ? list : list.slice(0, limits.chats), total: list.length }));
 }
 
 /** The provider to preselect in New chat: the server's suggestion if allowed, else the first allowed one. */
@@ -124,4 +126,21 @@ export function suggestFor(s: AppState, allowed: ProviderId[]): { provider: Prov
 
 export function unreadCount(s: AppState): number {
   return s.notifications.filter((n) => n.unread).length;
+}
+
+/** Chats per provider for the sidebar's Providers rows: board chats plus provider-history chats not on the board. */
+export function providerCounts(s: AppState): Record<ProviderId, number> {
+  const counts: Record<ProviderId, number> = { claude: 0, codex: 0, antigravity: 0 };
+  const known = new Set<string>();
+  for (const c of Object.values(s.chats)) {
+    if (c.sessionRef) known.add(`${c.provider}\u0000${c.sessionRef}`);
+    if (!c.archived) counts[c.provider] += 1;
+  }
+  for (const h of s.history) if (!known.has(`${h.provider}\u0000${h.sessionRef}`)) counts[h.provider] += 1;
+  return counts;
+}
+
+/** The name to show for a project folder: the server's project name when known, else the folder's last part. */
+export function projectLabel(s: AppState, projectId: string): string {
+  return s.projects.find((p) => p.id === projectId)?.name ?? baseName(projectId);
 }

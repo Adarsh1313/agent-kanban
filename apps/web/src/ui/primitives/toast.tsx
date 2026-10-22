@@ -1,0 +1,86 @@
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { cssMs } from './motion.ts';
+
+export interface ToastAction { label: string; run: () => void }
+interface ToastItem { id: number; message: string; action?: ToastAction }
+
+let items: ToastItem[] = [];
+let seq = 0;
+const listeners = new Set<() => void>();
+const emit = () => { for (const l of [...listeners]) l(); };
+const subscribe = (l: () => void) => {
+  listeners.add(l);
+  return () => { listeners.delete(l); };
+};
+const snapshot = () => items;
+
+/** Shows a message (plain words; for a failed action, the server's own error text) with an optional action such as Undo. */
+export function toast(message: string, action?: ToastAction): void {
+  items = [...items, { id: ++seq, message, action }];
+  emit();
+}
+
+function dismiss(id: number) {
+  items = items.filter((t) => t.id !== id);
+  emit();
+}
+
+function ToastView({ item }: { item: ToastItem }) {
+  const [leaving, setLeaving] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const exit = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const left = useRef(cssMs('--duration-toast', 5000));
+  const started = useRef(0);
+  const armed = useRef(false);
+
+  const leave = useRef(() => {});
+  leave.current = () => {
+    clearTimeout(timer.current);
+    armed.current = false;
+    setLeaving(true);
+    exit.current = setTimeout(() => dismiss(item.id), cssMs('--duration-exit', 150));
+  };
+  const arm = useRef(() => {});
+  arm.current = () => {
+    if (armed.current) return;
+    armed.current = true;
+    started.current = Date.now();
+    timer.current = setTimeout(() => leave.current(), left.current);
+  };
+  const pause = useRef(() => {});
+  pause.current = () => {
+    if (!armed.current) return;
+    armed.current = false;
+    clearTimeout(timer.current);
+    left.current -= Date.now() - started.current;
+  };
+
+  useEffect(() => {
+    const onVisibility = () => (document.hidden ? pause.current() : arm.current());
+    document.addEventListener('visibilitychange', onVisibility);
+    if (!document.hidden) arm.current();
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      clearTimeout(timer.current);
+      clearTimeout(exit.current);
+    };
+  }, []);
+
+  return (
+    <div className={`toast${leaving ? ' leaving' : ''}`} onMouseEnter={() => pause.current()} onMouseLeave={() => { if (!document.hidden) arm.current(); }}>
+      <span>{item.message}</span>
+      {item.action && (
+        <button className="btn" type="button" onClick={() => { item.action!.run(); leave.current(); }}>{item.action.label}</button>
+      )}
+    </div>
+  );
+}
+
+export function Toasts() {
+  const list = useSyncExternalStore(subscribe, snapshot, snapshot);
+  return (
+    <div className="toasts" role="status">
+      {list.map((t) => <ToastView key={t.id} item={t} />)}
+    </div>
+  );
+}
