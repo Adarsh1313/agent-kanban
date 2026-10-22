@@ -10,6 +10,8 @@ import { suggest } from './usage/parse.ts';
 
 const PROVIDERS: ProviderId[] = ['claude', 'codex', 'antigravity'];
 const MAX_BODY = 1_000_000;
+const MAX_DRAIN = 16_000_000; // past this, an oversized upload is cut off rather than read to the end
+const DRAIN_MS = 5_000;
 const PING_MS = 30_000;
 const MAX_BUFFERED = 4_000_000;
 
@@ -192,6 +194,25 @@ export function createApi(opts: {
       res.writeHead(status, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(body));
     };
+    // Answer a too-large body only once the client has finished sending it (bounded), so it reads the 413
+    // instead of a connection reset; the connection is then closed.
+    const reject413 = (message: string) => {
+      let done = false;
+      const reply = () => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        res.setHeader('Connection', 'close');
+        send(413, { error: message });
+      };
+      const timer = setTimeout(reply, DRAIN_MS);
+      if (req.complete) return reply();
+      let drained = 0;
+      req.on('data', (c: Buffer) => { drained += c.length; if (drained > MAX_DRAIN) reply(); });
+      req.on('end', reply);
+      req.on('error', reply);
+      req.resume();
+    };
     if (req.method === 'OPTIONS') return send(204);
     let url: URL;
     try { url = new URL(req.url ?? '/', 'http://127.0.0.1'); } catch { return send(404, { error: 'Not found.' }); }
@@ -207,7 +228,7 @@ export function createApi(opts: {
       (err: unknown) => {
         if (err instanceof URIError) return send(404, { error: 'Not found.' });
         if (err instanceof HttpError) {
-          if (err.status === 413) { res.setHeader('Connection', 'close'); req.resume(); }
+          if (err.status === 413) return reject413(err.message);
           return send(err.status, { error: err.message });
         }
         const msg = err instanceof Error ? err.message : '';
