@@ -440,6 +440,10 @@ test('ping reads accountInfo from the shared query and maps tokenSource to signe
   assert.deepEqual(await a.ping(), { ok: true, signedIn: false });
   info = {};
   assert.deepEqual(await a.ping(), { ok: true, signedIn: false });
+  info = { email: 'a@b.c', subscriptionType: 'Claude Pro' }; // real Claude Code 2.1.308 reply: no tokenSource
+  assert.deepEqual(await a.ping(), { ok: true, signedIn: true });
+  info = { tokenSource: 'none', email: 'a@b.c' };
+  assert.deepEqual(await a.ping(), { ok: true, signedIn: false });
   assert.equal(f.calls.length, 1, 'pings reuse one long-lived query');
   await a.dispose();
 });

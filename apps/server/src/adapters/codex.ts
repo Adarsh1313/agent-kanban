@@ -95,7 +95,6 @@ export class CodexAdapter implements ProviderAdapter {
       await this.pickModel(p);
       if (this.disposed) throw new Error('Codex adapter is shut down.');
       this.proc = p;
-      this.crashed = false;
       return p;
     } catch (e) {
       this.closingByUs.add(p);
@@ -336,8 +335,14 @@ export class CodexAdapter implements ProviderAdapter {
     // A process that timed out earlier is alive but stuck: kill it so it can be replaced.
     const stuck = this.proc;
     if (stuck?.unhealthy) await this.recycle(stuck);
+    if (this.crashed) {
+      // Report a crash once, even if a user action or usage read already restarted it, so the status shows it.
+      this.crashed = false;
+      const down = !this.proc && !this.starting;
+      if (down) this.noteFailure();
+      return fail(down ? 'Codex stopped unexpectedly.' : 'Codex stopped unexpectedly and was restarted.');
+    }
     if (!this.proc && !this.starting) {
-      if (this.crashed) { this.crashed = false; this.noteFailure(); return fail('Codex stopped unexpectedly.'); }
       if (this.gaveUp) return fail('Codex keeps stopping. Use Check now to try again.');
       if (Date.now() < this.retryAt) return fail('Codex is restarting.');
     }

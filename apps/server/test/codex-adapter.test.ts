@@ -402,3 +402,19 @@ test('stop during a re-attach after a respawn is applied once the turn id is kno
     await waitFor((e) => e.type === 'stopped');
   } finally { await adapter.dispose(); }
 });
+
+test('a crash that a usage read already recovered from is still reported once by the next ping', async () => {
+  mock.timers.enable({ apis: ['Date'], now: 0 });
+  const { adapter, procs } = make('');
+  try {
+    assert.equal((await adapter.ping()).ok, true);
+    await procs[0]!.close(); // killed from outside
+    await adapter.readUsage(); // the usage poll respawns it first (a user-path action)
+    assert.equal(procs.length, 2);
+    const noticed = await adapter.ping();
+    assert.equal(noticed.ok, false);
+    assert.match(noticed.message ?? '', /restarted/);
+    assert.equal(procs.length, 2, 'no extra spawn');
+    assert.equal((await adapter.ping()).ok, true, 'and healthy straight after');
+  } finally { mock.timers.reset(); await adapter.dispose(); }
+});

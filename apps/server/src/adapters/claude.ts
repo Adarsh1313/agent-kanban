@@ -308,7 +308,9 @@ export class ClaudeAdapter implements ProviderAdapter {
     if (this.disposed) return { ok: false, signedIn: null, message: SHUT_DOWN };
     try {
       const info = await this.withUsageQuery((q) => q.accountInfo());
-      return { ok: true, signedIn: !!info?.tokenSource && info.tokenSource !== 'none' };
+      // tokenSource is the signal when present; Claude Code 2.1.x omits it for a signed-in subscription, where the account email is set.
+      const signedIn = info?.tokenSource ? info.tokenSource !== 'none' : !!info?.email;
+      return { ok: true, signedIn };
     } catch (e) {
       return { ok: false, signedIn: null, message: e instanceof Error ? e.message : 'Claude Code did not respond.' };
     }
