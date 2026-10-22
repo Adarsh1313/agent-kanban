@@ -90,18 +90,26 @@
 
   <!-- 3. Sidebar -->
   <h2>Sidebar</h2>
-  <p class="lede">Linear's structure, made ours: workspace switcher, New chat with its shortcut, then Needs you, Board, Usage and Connect. Folders and Providers collapse. The selected item gets a soft capsule that slides, not a coloured left border. The Needs you count is the only tinted number.</p>
+  <p class="lede">Linear's structure with Claude's chat list. Board, Projects and Connections at the top. <b>Providers</b> act as a quick focus: clicking one filters the board and swaps the top-bar usage to just that provider. <b>Pinned</b> and <b>Recent chats</b> list the real chats found in each provider's history, grouped by project, with the same titles the provider uses. Each project row shows which providers have worked on it.</p>
   <div class="grid2">
-    <div class="stage nav" style="padding:0;height:520px;display:flex"><aside class="sidebar" id="sidebarDemo" style="width:100%"></aside></div>
+    <div class="stage nav" style="padding:0;height:600px;display:flex"><aside class="sidebar" id="sidebarDemo" style="width:100%"></aside></div>
     <div>
       <h3>Rules</h3>
       <ul class="lede" style="padding-left:18px;margin:0">
         <li>One capsule, sliding over <code>--duration-move</code> with <code>--ease-out</code>.</li>
-        <li>Hover tints the row; it never moves.</li>
-        <li>Provider rows show the logo and a connection dot paired with a tooltip label.</li>
-        <li>Section chevrons rotate; the list opens with a height and opacity reveal.</li>
-        <li>Keyboard: N opens New chat with no animation delay on the trigger.</li>
+        <li>Hover tints the row; it never moves. Row actions (…, +) fade in on hover or focus.</li>
+        <li>A chat row's state shows only when it needs attention: the running ring or a needs-you dot.</li>
+        <li>Three chats per project, then "Show N more".</li>
+        <li>Section chevrons rotate; lists open with a height and opacity reveal.</li>
       </ul>
+      <h3>Notifications</h3>
+      <div class="row"><button class="btn icon-only ghost bell" type="button" id="bellDemo" aria-label="Notifications" style="background:var(--color-control)"><span data-icon="bell"></span><span class="dot" id="bellDemoDot" data-n="2">2</span></button>
+        <button class="btn" type="button" id="bellRing">Simulate an agent asking for you</button></div>
+      <p class="note">The bell replaces a Needs you page. New events ring it once (a short damped swing) and play a soft two-note chime if sound is on. Both can be switched off:</p>
+      <div style="max-width:280px;display:flex;flex-direction:column;gap:var(--space-2)">
+        <div class="toggle-row"><span>Desktop notifications</span><button class="switch" type="button" role="switch" aria-checked="true" aria-label="Desktop notifications"></button></div>
+        <div class="toggle-row"><span>Sound</span><button class="switch" type="button" role="switch" aria-checked="false" aria-label="Sound"></button></div>
+      </div>
     </div>
   </div>
 
@@ -299,20 +307,33 @@ $('#sidebarDemo').innerHTML = `
   <button class="workspace" type="button"><span class="mark"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="3" y="4" width="5" height="16" rx="1.5"/><rect x="10" y="4" width="5" height="11" rx="1.5"/><rect x="17" y="4" width="4" height="7" rx="1.5"/></svg></span>Agent Kanban<span class="chev">${icon('updown')}</span></button>
   <div class="side-actions"><button class="btn new" type="button">${icon('plus')}New chat <span class="kbd">N</span></button><button class="btn icon-only ghost" type="button" aria-label="Search" data-tip="Search chats">${icon('search')}</button></div>
   <nav class="navlist" id="navDemo"><span class="cap"></span>
-    <button class="navitem" type="button">${icon('inbox')}Needs you <span class="count attn">2</span></button>
     <button class="navitem" type="button" aria-current="page">${icon('board')}Board <span class="count">6</span></button>
-    <button class="navitem" type="button">${icon('gauge')}Usage</button>
-    <button class="navitem" type="button">${icon('plug')}Connect</button></nav>
-  <div class="side-section"><button class="side-title" type="button" aria-expanded="true" id="fT">${icon('chevron-down', 'sm')}Folders</button>
-    <div class="collapsible" id="fL"><div>
-      <button class="navitem" type="button"><span class="folder-glyph" style="background:#b5654a">B</span>bakery-site<span class="count">4</span></button>
-      <button class="navitem" type="button"><span class="folder-glyph" style="background:#4a7ab5">N</span>newsletter<span class="count">1</span></button>
-      <button class="navitem" type="button"><span class="folder-glyph" style="background:#5a8f6a">R</span>reports<span class="count">1</span></button></div></div></div>
+    <button class="navitem" type="button">${icon('projects')}Projects <span class="count">6</span></button>
+    <button class="navitem" type="button">${icon('plug')}Connections <span class="count">3</span></button></nav>
   <div class="side-section"><button class="side-title" type="button" aria-expanded="true" id="pT">${icon('chevron-down', 'sm')}Providers</button>
-    <div class="collapsible" id="pL"><div>${Object.keys(PROVIDERS).map(id => `<button class="navitem" type="button" data-tip="Connected · ${PROVIDERS[id].plan} plan">${logo(id)}${PROVIDERS[id].name}<span class="dot" style="background:var(--color-success)"></span></button>`).join('')}</div></div></div>
-  <div class="side-foot"><button class="navitem" type="button">${icon('settings')}Settings</button><button class="navitem" type="button">${icon('help')}Help</button></div>`;
+    <div class="collapsible" id="pL"><div>${Object.keys(PROVIDERS).map((id, i) => `<button class="navitem prov" type="button" aria-pressed="${i === 2}">${logo(id)}${PROVIDERS[id].name}<span class="meta-r">${[9, 3, 1][i]}</span></button>`).join('')}</div></div></div>
+  <div class="side-section"><button class="side-title" type="button" aria-expanded="true" id="rT">${icon('chevron-down', 'sm')}Recent chats</button>
+    <div class="collapsible" id="rL"><div>
+      ${[['open-project', '#6b6b66', ['claude'], [['claude', 'AI agent Kanban board', 'running']]],
+         ['lila-black', '#3f6fb0', ['codex', 'antigravity'], [['codex', 'Implement LILA BLACK player viz', ''], ['antigravity', 'Heatmap layer for match replays', 'needs']]],
+         ['Portfolio', '#b5654a', ['claude'], [['claude', 'Portfolio status and live demo', ''], ['claude', 'Server restart', '']]]]
+        .map(([name, col, owners, rows]) => `<div class="proj"><div class="proj-row">${`<span class="folder-glyph" style="background:${col};width:14px;height:14px;font-size:8px">${name[0].toUpperCase()}</span>`}<span class="name">${name}</span><span class="owners">${owners.map(o => logo(o, 'sm')).join('')}</span><button class="add" type="button" aria-label="New chat in ${name}">${icon('plus', 'sm')}</button></div>
+          ${rows.map(([p, t, s]) => `<div class="chat-row" role="button" tabindex="0">${logo(p, 'sm')}<span class="t">${t}</span>${s === 'running' ? statusIcon('running') : s === 'needs' ? '<span style="width:6px;height:6px;border-radius:50%;background:var(--color-needs);flex:none"></span>' : ''}<button class="row-more" type="button" aria-label="More actions">${icon('more', 'sm')}</button></div>`).join('')}</div>`).join('')}
+    </div></div></div>
+  <div class="side-foot"><button class="navitem" type="button">${icon('settings')}Settings</button></div>`;
 bindNav($('#navDemo'));
-bindDisclosure($('#fT'), $('#fL')); bindDisclosure($('#pT'), $('#pL'));
+bindDisclosure($('#pT'), $('#pL')); bindDisclosure($('#rT'), $('#rL'));
+$('#sidebarDemo').querySelectorAll('.navitem.prov').forEach(b => b.addEventListener('click', () => {
+  const on = b.getAttribute('aria-pressed') !== 'true';
+  $('#sidebarDemo').querySelectorAll('.navitem.prov').forEach(x => x.setAttribute('aria-pressed', 'false')); b.setAttribute('aria-pressed', on);
+}));
+document.querySelectorAll('.switch').forEach(s => s.addEventListener('click', () => s.setAttribute('aria-checked', s.getAttribute('aria-checked') !== 'true')));
+let bellN = 2;
+$('#bellRing').addEventListener('click', () => {
+  bellN++; const d = $('#bellDemoDot'); d.textContent = bellN; d.dataset.n = bellN;
+  const b = $('#bellDemo'); b.classList.remove('ring'); b.offsetWidth; if (!KB.reduced()) b.classList.add('ring');
+});
+$('#bellDemo').addEventListener('click', () => { bellN = 0; $('#bellDemoDot').dataset.n = 0; });
 
 /* ── 4. Usage ── */
 const USAGE = {

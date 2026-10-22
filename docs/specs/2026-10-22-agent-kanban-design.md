@@ -233,7 +233,64 @@ plan depends on it.
 - Manual end-to-end: real `claude` and `codex` on the developer's machine; Antigravity when `agy` is
   installed.
 
-## 11. Out of scope for the MVP
+## 11. Revision: existing chats, projects and notifications
+
+Decided after the first design review.
+
+### Existing chats come from each provider's own history
+
+Each provider keeps a local index of its chats with a title and project folder. The app reads these
+(read-only) to fill the sidebar and the Projects list:
+
+| Provider | Where | Title | Project |
+|---|---|---|---|
+| Claude Code | `~/.claude/projects/<encoded cwd>/<session>.jsonl` | `custom-title` record, else the first prompt | `cwd` field in the records |
+| Codex | `~/.codex/session_index.jsonl` (+ `sessions/YYYY/MM/DD/*.jsonl.zst`) | `thread_name` | `session_meta.cwd` in the rollout |
+| Antigravity | `~/.gemini/antigravity/conversation_summaries.db` (SQLite) | `title` | `workspace_uris` |
+
+Prefer the provider's own API when it exposes the same list (Codex app-server thread listing, ACP
+session listing); fall back to these files. Verify the Antigravity CLI and IDE share this store.
+
+### Continuing a chat continues the same chat
+
+Opening a chat from the sidebar shows its history; sending a message resumes **the same session id**
+(Claude SDK `resume`, Codex `thread/resume`, ACP session load), so the conversation stays one chat and
+still appears in the provider's own app. We do not embed the provider's UI; we render the same
+conversation. Don't resume a session that is active in the provider's app at the same moment (check
+for recent writes / a lock first). Chats only in the provider's history are not on the board; sending
+a message puts them there.
+
+### Projects decide which providers can be used
+
+A project lists the providers that have chats in it. New chat picks a project first, then offers only
+those providers (others shown disabled: "Hasn't worked on <project> yet"). A brand-new folder works with
+any provider.
+
+### Notifications replace the Needs you page
+
+A bell in the top bar collects "needs you" and "finished" events, with switches for desktop
+notifications and sound. The Needs you column stays.
+
+### Filters
+
+Linear-style filter menu: Provider, Project, Status, Model, Waiting on you for, Last activity, Started
+in. Multi-select panes have Select all / None. Active filters show as removable chips. Clicking a
+provider in the sidebar is a shortcut for "Provider is X" and shows only that provider's limits in the
+top bar, with a "Usage for all providers" button.
+
+### Chat actions (from T3 Code)
+
+Open in <provider app>, Pin to sidebar, Snooze (1 hour / this evening / tomorrow / next week), Rename,
+Copy project path, Archive chat. Archive and Snooze are undoable from a toast.
+
+### Future, not designed or built: cross-provider handoff
+
+Idea to revisit after using the product: each project keeps a progress and context file (for example
+`PROGRESS.md`) that every provider reads first and updates when it finishes. That would let a project
+started on Claude continue on Codex when Claude's limits run out, and keep each provider up to date
+afterwards without re-explaining. Until then, providers are limited per project as above.
+
+## 12. Out of scope for the MVP
 
 Mobile, remote access, git worktrees and diff review, multiple accounts per provider, teams and
 sharing, providers other than the three above, auto-update of the app.

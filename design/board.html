@@ -13,20 +13,25 @@
   html, body { height: 100%; overflow: hidden; }
   .app { display: flex; height: 100vh; overflow: hidden; }
   .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
-  .usage-chips { display: flex; gap: 2px; }
+  .usage-area { display: flex; align-items: center; gap: 2px; }
   .refresh .icon.spinning { animation: spin 700ms var(--ease-out); }
   .card.collapsing { overflow: hidden; }
   .empty-note { color: var(--color-text-faint); font-size: var(--text-caption); padding: var(--space-2) var(--space-1); }
-  .filter-pop { width: 220px; padding: var(--space-1); --origin: top right; }
-  .filter-pop .pick-row .t b { font-weight: var(--weight-regular); }
-  .model-pop, .folder-pop { width: 240px; padding: var(--space-1); --origin: top left; }
+  .no-results { flex: 1; display: grid; place-items: center; text-align: center; color: var(--color-text-muted); }
+  .no-results h3 { margin: var(--space-2) 0 var(--space-1); color: var(--color-text); font-size: var(--text-title); font-weight: var(--weight-semibold); }
+  .no-results p { margin: 0 0 var(--space-3); font-size: var(--text-body); }
+  .sidebar .scroll { flex: 1; overflow-y: auto; margin: 0 calc(var(--space-2) * -1); padding: 0 var(--space-2); }
+  .show-more-row { font-size: var(--text-caption); color: var(--color-text-faint); padding: 0 var(--space-2) 0 30px; height: 24px; border-radius: var(--radius-control); width: 100%; text-align: left; }
+  @media (hover: hover) and (pointer: fine) { .show-more-row:hover { color: var(--color-text); background: var(--color-nav-hover); } }
+  .crumb { color: var(--color-text-faint); font-weight: var(--weight-regular); }
+  .dlg-note { font-size: var(--text-caption); color: var(--color-text-muted); display: flex; gap: 6px; align-items: center; }
   @media (max-width: 900px) { .sidebar { display: none; } }
-  @media (max-width: 640px) { .usage-chips .usage-chip .pct { display: none; } .topbar .new-label { display: none; } }
+  @media (max-width: 640px) { .usage-area .pct, .topbar .new-label, .usage-focus .m span { display: none; } }
 </style>
 </head>
 <body>
 <div class="app">
-  <!-- Sidebar -->
+  <!-- ───────── Sidebar ───────── -->
   <aside class="sidebar" aria-label="Sidebar">
     <button class="workspace" type="button">
       <span class="mark"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="3" y="4" width="5" height="16" rx="1.5"/><rect x="10" y="4" width="5" height="11" rx="1.5"/><rect x="17" y="4" width="4" height="7" rx="1.5"/></svg></span>
@@ -34,191 +39,266 @@
     </button>
     <div class="side-actions">
       <button class="btn new" type="button" id="sideNew"><span data-icon="plus"></span>New chat <span class="kbd">N</span></button>
-      <button class="btn icon-only ghost" type="button" aria-label="Search" data-tip="Search chats"><span data-icon="search"></span></button>
+      <button class="btn icon-only ghost" type="button" aria-label="Search chats" data-tip="Search chats"><span data-icon="search"></span></button>
     </div>
     <nav class="navlist" id="nav" aria-label="Main">
       <span class="cap"></span>
-      <button class="navitem" type="button" data-nav="needs"><span data-icon="inbox"></span>Needs you <span class="count attn" id="navNeeds">0</span></button>
       <button class="navitem" type="button" data-nav="board" aria-current="page"><span data-icon="board"></span>Board <span class="count" id="navBoard">0</span></button>
-      <button class="navitem" type="button" data-nav="usage"><span data-icon="gauge"></span>Usage</button>
-      <button class="navitem" type="button" data-nav="connect"><span data-icon="plug"></span>Connect</button>
+      <button class="navitem" type="button" data-nav="projects"><span data-icon="projects"></span>Projects <span class="count" id="navProjects">0</span></button>
+      <button class="navitem" type="button" data-nav="connections"><span data-icon="plug"></span>Connections <span class="count">3</span></button>
     </nav>
 
-    <div class="side-section">
-      <button class="side-title" type="button" aria-expanded="true" id="foldersToggle"><span data-icon="chevron-down" data-size="sm"></span>Folders</button>
-      <div class="collapsible" id="foldersList"><div id="folderItems"></div></div>
-    </div>
-    <div class="side-section">
-      <button class="side-title" type="button" aria-expanded="true" id="provToggle"><span data-icon="chevron-down" data-size="sm"></span>Providers</button>
-      <div class="collapsible" id="provList"><div id="provItems"></div></div>
+    <div class="scroll">
+      <div class="side-section">
+        <button class="side-title" type="button" aria-expanded="true" id="provToggle"><span data-icon="chevron-down" data-size="sm"></span>Providers</button>
+        <div class="collapsible" id="provList"><div id="provItems"></div></div>
+      </div>
+      <div class="side-section" id="pinnedSection">
+        <button class="side-title" type="button" aria-expanded="true" id="pinToggle"><span data-icon="chevron-down" data-size="sm"></span>Pinned</button>
+        <div class="collapsible" id="pinList"><div id="pinItems"></div></div>
+      </div>
+      <div class="side-section">
+        <button class="side-title" type="button" aria-expanded="true" id="recentToggle"><span data-icon="chevron-down" data-size="sm"></span>Recent chats</button>
+        <div class="collapsible" id="recentList"><div id="recentItems"></div></div>
+      </div>
     </div>
 
     <div class="side-foot">
       <button class="navitem" type="button" id="themeBtn"><span data-icon="moon"></span>Light / dark</button>
       <button class="navitem" type="button"><span data-icon="settings"></span>Settings</button>
-      <button class="navitem" type="button"><span data-icon="help"></span>Help</button>
     </div>
   </aside>
 
-  <!-- Main -->
+  <!-- ───────── Main ───────── -->
   <div class="main">
     <header class="topbar">
-      <div class="title"><span data-icon="board"></span>Board</div>
-      <button class="chip-btn" type="button" id="filterBtn" aria-haspopup="true" aria-expanded="false"><span data-icon="filter" data-size="sm"></span><span id="filterLabel">All providers</span></button>
+      <div class="title"><span data-icon="board"></span>Board<span class="crumb" id="crumb"></span></div>
+      <button class="chip-btn" type="button" id="filterBtn" aria-haspopup="true" aria-expanded="false"><span data-icon="filter" data-size="sm"></span>Filter</button>
       <span class="spacer"></span>
-      <div class="usage-chips" id="usageChips"></div>
+      <div class="usage-area" id="usageArea"></div>
+      <button class="btn icon-only ghost bell" type="button" id="bellBtn" aria-haspopup="true" aria-expanded="false" aria-label="Notifications" data-tip="Notifications"><span data-icon="bell"></span><span class="dot" id="bellDot" data-n="0">0</span></button>
       <button class="btn primary" type="button" id="topNew"><span data-icon="plus"></span><span class="new-label">New chat</span> <span class="kbd">N</span></button>
     </header>
+    <div class="filterbar" id="filterbar" hidden></div>
     <main class="board" id="board" aria-label="Board"></main>
   </div>
 </div>
 
-<!-- Usage popover -->
-<div class="popover usage-pop" id="usagePop" data-state="closed" role="dialog" aria-label="Usage limits">
+<!-- Popovers -->
+<div class="popover usage-pop" id="usagePop" data-state="closed" role="dialog" aria-label="Usage for all providers">
   <div class="hd"><div><b>Usage left</b><br><small id="updated">Updated just now</small></div>
     <button class="btn ghost refresh" type="button" id="refreshBtn"><span data-icon="refresh"></span>Refresh</button></div>
   <div id="usageBlocks"></div>
 </div>
-
-<!-- Filter popover -->
-<div class="popover filter-pop" id="filterPop" data-state="closed" role="menu" aria-label="Filter by provider"></div>
+<div class="popover menu" id="filterPop" data-state="closed" role="menu" aria-label="Filter"></div>
+<div class="popover menu" id="actionPop" data-state="closed" role="menu" aria-label="Chat actions"></div>
+<div class="popover notif-pop" id="notifPop" data-state="closed" role="dialog" aria-label="Notifications">
+  <div class="notif-head"><b>Notifications</b><button class="link-btn" type="button" id="markRead">Mark all read</button></div>
+  <div class="notif-list" id="notifList"></div>
+  <div class="notif-foot">
+    <div class="toggle-row"><span data-icon="bell" data-size="sm"></span><span>Desktop notifications</span><button class="switch" type="button" role="switch" aria-checked="true" id="swNotif" aria-label="Desktop notifications"></button></div>
+    <div class="toggle-row"><span data-icon="volume" data-size="sm"></span><span>Sound</span><button class="switch" type="button" role="switch" aria-checked="true" id="swSound" aria-label="Sound"></button></div>
+  </div>
+</div>
 
 <!-- New chat dialog -->
 <div class="scrim" id="scrim" data-state="closed"></div>
 <div class="dialog" id="dialog" data-state="closed" role="dialog" aria-modal="true" aria-labelledby="dlgTitle">
   <div class="dialog-head"><h2 id="dlgTitle">New chat</h2><button class="btn icon-only ghost" type="button" id="dlgClose" aria-label="Close"><span data-icon="x"></span></button></div>
   <div class="dialog-body">
-    <textarea id="prompt" placeholder="What should the agent do? For example: add a sign-up page to the bakery site" aria-label="Prompt"></textarea>
+    <textarea id="prompt" placeholder="What should the agent do next?" aria-label="Prompt"></textarea>
     <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
+      <button class="chip-btn" type="button" id="projBtn" aria-haspopup="true" aria-expanded="false"></button>
       <button class="chip-btn" type="button" id="provBtn" aria-haspopup="true" aria-expanded="false"></button>
       <button class="chip-btn" type="button" id="modelBtn" aria-haspopup="true" aria-expanded="false"></button>
-      <button class="chip-btn" type="button" id="folderBtn" aria-haspopup="true" aria-expanded="false"></button>
     </div>
+    <div class="dlg-note" id="dlgNote"></div>
   </div>
   <div class="dialog-foot"><span class="grow" style="color:var(--color-text-faint);font-size:var(--text-caption)" id="dlgHint"></span>
     <button class="btn ghost" type="button" id="dlgCancel">Cancel</button>
     <button class="btn primary" type="button" id="dlgStart">Start chat <span class="kbd">Ctrl ↵</span></button></div>
 </div>
-<div class="popover provider-pick" id="provPop" data-state="closed" role="listbox" aria-label="Provider"></div>
-<div class="popover model-pop" id="modelPop" data-state="closed" role="listbox" aria-label="Model"></div>
-<div class="popover folder-pop" id="folderPop" data-state="closed" role="listbox" aria-label="Folder"></div>
+<div class="popover menu" id="dlgPop" data-state="closed" role="listbox" style="width:320px"></div>
 
 <!-- Chat panel -->
 <aside class="panel" id="panel" data-state="closed" aria-label="Chat"></aside>
 
 <script src="components.js"></script>
 <script>
-const { icon, statusIcon, logo, PROVIDERS, flip, swapText, bindDisclosure, bindPopover, closeAll, toast, bindTooltips, bindNav, level, toggleTheme, ms } = KB;
+const { icon, statusIcon, logo, PROVIDERS, flip, swapText, bindDisclosure, toast, bindTooltips, bindNav, level, toggleTheme, ms, css } = KB;
 const $ = s => document.querySelector(s);
+const PIDS = Object.keys(PROVIDERS);
+const APP = { claude: 'Claude Code', codex: 'Codex', antigravity: 'Antigravity' };
 
-/* ───────── Data ───────── */
-const COLUMNS = [
-  { id: 'running', name: 'Running' },
-  { id: 'needs', name: 'Needs you' },
-  { id: 'review', name: 'Review' },
-  { id: 'done', name: 'Done' },
-];
-const FOLDERS = [
-  { id: 'bakery-site', glyph: 'B', colour: '#b5654a' },
-  { id: 'newsletter', glyph: 'N', colour: '#4a7ab5' },
-  { id: 'reports', glyph: 'R', colour: '#5a8f6a' },
+/* ═════════ Data: what the app found in each provider's local history ═════════ */
+const PROJECTS = [
+  { id: 'open-project', path: 'C:\\Users\\Adarsh\\open-project', colour: '#6b6b66', owners: ['claude'] },
+  { id: 'lila-black', path: 'C:\\Users\\Adarsh\\lila-black', colour: '#3f6fb0', owners: ['codex', 'antigravity'] },
+  { id: 'local-flow', path: 'C:\\Users\\Adarsh\\local-flow', colour: '#4a8f7a', owners: ['claude', 'codex'] },
+  { id: 'Portfolio', path: 'C:\\Users\\Adarsh\\Portfolio', colour: '#b5654a', owners: ['claude'] },
+  { id: '20x', path: 'C:\\Users\\Adarsh\\Peakflo\\20x', colour: '#8a6ab5', owners: ['claude'] },
+  { id: 'github-manage', path: 'C:\\Users\\Adarsh\\github-manage', colour: '#7a7a72', owners: ['claude'] },
 ];
 const USAGE = {
-  claude: { fiveHour: { left: 72, reset: '2:40 pm' }, weekly: { left: 58, reset: 'Thu 9:00 am' },
-    models: [{ name: 'Opus', window: 'weekly', left: 34, reset: 'Thu' }, { name: 'Sonnet', window: 'weekly', left: 61, reset: 'Thu' }] },
-  codex: { fiveHour: { left: 31, reset: '4:10 pm' }, weekly: { left: 18, reset: 'Fri 11:00 am' },
-    models: [{ name: 'GPT-5 Codex', window: 'weekly', left: 18, reset: 'Fri' }, { name: 'Codex Mini', window: 'weekly', left: 64, reset: 'Fri' }] },
-  antigravity: { fiveHour: { left: 88, reset: '5:55 pm' }, weekly: { left: 74, reset: 'Mon 8:00 am' },
-    models: [{ name: 'Gemini 3 Pro', window: '5-hour', left: 88, reset: '5:55 pm' }, { name: 'Gemini 3 Flash', window: '5-hour', left: 96, reset: '5:55 pm' }, { name: 'Claude & GPT models', window: '5-hour', left: 40, reset: '5:55 pm' }] },
+  claude: { fiveHour: { left: 72, reset: '2:40 pm' }, weekly: { left: 58, reset: 'Thu 9:00 am' }, models: [{ name: 'Opus', window: 'weekly', left: 34, reset: 'Thu' }, { name: 'Sonnet', window: 'weekly', left: 61, reset: 'Thu' }] },
+  codex: { fiveHour: { left: 31, reset: '4:10 pm' }, weekly: { left: 18, reset: 'Fri 11:00 am' }, models: [{ name: 'GPT-5 Codex', window: 'weekly', left: 18, reset: 'Fri' }, { name: 'Codex Mini', window: 'weekly', left: 64, reset: 'Fri' }] },
+  antigravity: { fiveHour: { left: 88, reset: '5:55 pm' }, weekly: { left: 74, reset: 'Mon 8:00 am' }, models: [{ name: 'Gemini 3 Pro', window: '5-hour', left: 88, reset: '5:55 pm' }, { name: 'Gemini 3 Flash', window: '5-hour', left: 96, reset: '5:55 pm' }, { name: 'Claude & GPT models', window: '5-hour', left: 40, reset: '5:55 pm' }] },
 };
 const MODELS = { claude: ['Sonnet', 'Opus', 'Haiku'], codex: ['GPT-5 Codex', 'Codex Mini'], antigravity: ['Gemini 3 Pro', 'Gemini 3 Flash'] };
-
-const STEP_LIBRARY = {
-  site: [
-    ['eye', 'Reading <span class="mono">src/pages/index.tsx</span>'],
-    ['search2', 'Looking for the existing form styles'],
-    ['edit', 'Editing <span class="mono">signup.tsx</span>'],
-    ['edit', 'Editing <span class="mono">signup.css</span>'],
-    ['terminal', 'Running <span class="mono">npm test</span>'],
-    ['check', 'Tests passed, writing a summary'],
-  ],
-  table: [
-    ['eye', 'Reading <span class="mono">pricing.html</span>'],
-    ['edit', 'Editing <span class="mono">pricing.css</span>'],
-    ['globe', 'Checking the layout at phone width'],
-    ['terminal', 'Running <span class="mono">npm run build</span>'],
-  ],
-  generic: [
-    ['eye', 'Reading the folder'],
-    ['search2', 'Finding the files that matter'],
-    ['edit', 'Making the changes'],
-    ['terminal', 'Running checks'],
-    ['check', 'Writing a summary'],
-  ],
+const STEPS = {
+  build: [['eye', 'Reading <span class="mono">design/board.html</span>'], ['search2', 'Looking at how T3 Code lists sessions'], ['edit', 'Editing <span class="mono">components.css</span>'], ['edit', 'Editing <span class="mono">board.html</span>'], ['terminal', 'Running <span class="mono">npm test</span>'], ['check', 'Writing a summary']],
+  viz: [['eye', 'Reading <span class="mono">player_events.parquet</span>'], ['edit', 'Editing <span class="mono">heatmap.ts</span>'], ['globe', 'Checking the map at phone width'], ['terminal', 'Running <span class="mono">npm run build</span>']],
+  generic: [['eye', 'Reading the project'], ['search2', 'Finding the files that matter'], ['edit', 'Making the changes'], ['terminal', 'Running checks'], ['check', 'Writing a summary']],
 };
-
-let nextId = 10;
+let nextId = 100;
+// column: null = only in the provider's own history (not on the board yet)
 const chats = [
-  { id: 1, title: 'Add a sign-up page to the bakery site', provider: 'claude', model: 'Sonnet', folder: 'bakery-site', column: 'running', steps: STEP_LIBRARY.site, step: 2, ago: '2m', askAt: null },
-  { id: 2, title: 'Make the pricing table work on phones', provider: 'codex', model: 'GPT-5 Codex', folder: 'bakery-site', column: 'running', steps: STEP_LIBRARY.table, step: 1, ago: '1m', askAt: 3 },
-  { id: 3, title: 'Fix broken links in the newsletter', provider: 'codex', model: 'GPT-5 Codex', folder: 'newsletter', column: 'needs', reason: 'permission', request: 'npm run check-links', steps: STEP_LIBRARY.generic, step: 3, ago: '6m' },
-  { id: 4, title: 'Rename the product photos', provider: 'antigravity', model: 'Gemini 3 Flash', folder: 'bakery-site', column: 'needs', reason: 'question', question: 'Should I keep the old names in a list?', steps: STEP_LIBRARY.generic, step: 2, ago: '12m' },
-  { id: 5, title: "Summarize last month's sales sheet", provider: 'antigravity', model: 'Gemini 3 Pro', folder: 'reports', column: 'review', steps: STEP_LIBRARY.generic, step: 5, ago: '1h' },
-  { id: 6, title: 'Write alt text for the gallery images', provider: 'claude', model: 'Haiku', folder: 'bakery-site', column: 'review', steps: STEP_LIBRARY.generic, step: 5, ago: '3h' },
-  { id: 7, title: 'Set up the contact form', provider: 'claude', model: 'Sonnet', folder: 'bakery-site', column: 'done', steps: STEP_LIBRARY.generic, step: 5, ago: 'Yesterday' },
+  { id: 1, title: 'AI agent Kanban board', provider: 'claude', model: 'Opus', project: 'open-project', column: 'running', steps: STEPS.build, step: 2, ago: '2m', askAt: null, files: 6 },
+  { id: 2, title: 'Implement LILA BLACK player viz', provider: 'codex', model: 'GPT-5 Codex', project: 'lila-black', column: 'running', steps: STEPS.viz, step: 1, ago: '1m', askAt: 3, files: 3 },
+  { id: 3, title: 'Wispr flow local setup', provider: 'codex', model: 'GPT-5 Codex', project: 'local-flow', column: 'needs', reason: 'permission', request: 'pip install faster-whisper', steps: STEPS.generic, step: 2, ago: '6m', files: 1 },
+  { id: 4, title: 'Heatmap layer for match replays', provider: 'antigravity', model: 'Gemini 3 Flash', project: 'lila-black', column: 'needs', reason: 'question', question: 'Should the heatmap use the last 7 days or all matches?', steps: STEPS.generic, step: 2, ago: '12m', files: 2 },
+  { id: 5, title: 'Portfolio status and live demo', provider: 'claude', model: 'Sonnet', project: 'Portfolio', column: 'review', steps: STEPS.generic, step: 4, ago: '1h', files: 4, took: '6m' },
+  { id: 6, title: 'Review PRD before coding', provider: 'codex', model: 'GPT-5 Codex', project: 'lila-black', column: 'review', steps: STEPS.generic, step: 4, ago: '3h', files: 0, took: '2m' },
+  { id: 7, title: 'Server restart', provider: 'claude', model: 'Haiku', project: 'Portfolio', column: 'done', steps: STEPS.generic, step: 4, ago: 'Yesterday', files: 1, took: '1m' },
+  { id: 8, title: 'Settings/scratch pad UI redesign', provider: 'claude', model: 'Opus', project: 'local-flow', column: null, steps: STEPS.generic, step: 4, ago: '2d', pinned: true },
+  { id: 9, title: 'Remove Peaflo repo from GitHub', provider: 'claude', model: 'Sonnet', project: '20x', column: null, steps: STEPS.generic, step: 4, ago: '3d' },
+  { id: 10, title: 'Peakflo PM interview prep', provider: 'claude', model: 'Opus', project: '20x', column: null, steps: STEPS.generic, step: 4, ago: '4d' },
+  { id: 11, title: '20x repo setup and overview', provider: 'claude', model: 'Sonnet', project: '20x', column: null, steps: STEPS.generic, step: 4, ago: '5d' },
+  { id: 12, title: 'GitHub repos management', provider: 'claude', model: 'Sonnet', project: 'github-manage', column: null, steps: STEPS.generic, step: 4, ago: '6d' },
+  { id: 13, title: 'Product management portfolio', provider: 'claude', model: 'Opus', project: 'Portfolio', column: null, steps: STEPS.generic, step: 4, ago: '1w' },
 ];
-const filter = new Set(Object.keys(PROVIDERS));
 const find = id => chats.find(c => c.id === id);
+const proj = id => PROJECTS.find(p => p.id === id);
+const onBoard = c => c.column && !c.archived && !c.snoozed;
+const glyph = (p, size = 16) => `<span class="folder-glyph" style="background:${p.colour};width:${size}px;height:${size}px;font-size:${Math.round(size * .6)}px">${p.id[0].toUpperCase()}</span>`;
+function hydrateIcons(scope = document) { scope.querySelectorAll('[data-icon]').forEach(el => { el.outerHTML = icon(el.dataset.icon, el.dataset.size || ''); }); }
 
-/* ───────── Static icons ───────── */
-function hydrateIcons(scope = document) {
-  scope.querySelectorAll('[data-icon]').forEach(el => { el.outerHTML = icon(el.dataset.icon, el.dataset.size || ''); });
+/* ═════════ Popover manager ═════════ */
+const openPops = new Set();
+function openPop(pop, anchor, { align = 'left', z } = {}) {
+  closePops(pop);
+  const r = anchor.getBoundingClientRect();
+  pop.style.position = 'fixed'; pop.style.top = (r.bottom + 6) + 'px'; if (z) pop.style.zIndex = z;
+  const w = pop.offsetWidth || 300;
+  const left = align === 'right' ? r.right - w : r.left;
+  pop.style.left = Math.max(8, Math.min(left, innerWidth - w - 8)) + 'px';
+  pop.style.setProperty('--origin', `${r.left + r.width / 2 - parseFloat(pop.style.left)}px top`);
+  pop.dataset.state = 'open'; anchor.setAttribute('aria-expanded', 'true'); pop._anchor = anchor; openPops.add(pop);
+}
+function closePops(except) {
+  openPops.forEach(p => { if (p === except) return; p.dataset.state = 'closed'; p._anchor?.setAttribute('aria-expanded', 'false'); openPops.delete(p); });
+}
+document.addEventListener('click', () => closePops());
+document.querySelectorAll('.popover').forEach(p => p.addEventListener('click', e => e.stopPropagation()));
+function togglePop(pop, anchor, opts) { if (pop.dataset.state === 'open' && pop._anchor === anchor) closePops(); else openPop(pop, anchor, opts); }
+
+/* ═════════ Filters (single source of truth) ═════════ */
+// null = not filtering on this key; a Set = only these values
+const filters = { provider: null, project: null, status: null, model: null, reason: null, activity: null, source: null };
+const FILTER_DEFS = {
+  provider: { label: 'Provider', icon: 'plug', options: () => PIDS.map(id => ({ v: id, label: PROVIDERS[id].name, html: logo(id, 'sm') })), test: (c, s) => s.has(c.provider) },
+  project: { label: 'Project', icon: 'projects', options: () => PROJECTS.map(p => ({ v: p.id, label: p.id, html: glyph(p, 14) })), test: (c, s) => s.has(c.project) },
+  status: { label: 'Status', icon: 'board', options: () => [['running', 'Running'], ['needs', 'Needs you'], ['review', 'Review'], ['done', 'Done']].map(([v, label]) => ({ v, label, html: statusIcon(v) })), test: (c, s) => s.has(c.column) },
+  model: { label: 'Model', icon: 'gauge', options: () => PIDS.flatMap(p => MODELS[p].map(m => ({ v: m, label: m, html: logo(p, 'sm') }))), test: (c, s) => s.has(c.model) },
+  reason: { label: 'Waiting on you for', icon: 'bell', options: () => [['permission', 'Permission to run a command'], ['question', 'An answer to a question'], ['stopped', 'You stopped it'], ['limit', 'Usage limit reached']].map(([v, label]) => ({ v, label })), test: (c, s) => s.has(c.reason) },
+  activity: { label: 'Last activity', icon: 'clock', single: true, options: () => [['hour', 'In the last hour'], ['today', 'Today'], ['week', 'This week']].map(([v, label]) => ({ v, label })),
+    test: (c, s) => { const v = [...s][0], a = c.ago; const mins = a === 'now' ? 0 : a.endsWith('m') ? parseInt(a) : a.endsWith('h') ? parseInt(a) * 60 : a === 'Yesterday' ? 1440 : 99999; return v === 'hour' ? mins < 60 : v === 'today' ? mins < 1440 : mins < 10080; } },
+  source: { label: 'Started in', icon: 'external', options: () => [['here', 'Agent Kanban'], ['native', "The provider's own app"]].map(([v, label]) => ({ v, label })), test: (c, s) => s.has(c.startedHere ? 'here' : 'native') },
+};
+const passes = c => Object.entries(filters).every(([k, s]) => !s || FILTER_DEFS[k].test(c, s));
+const focusedProvider = () => filters.provider && filters.provider.size === 1 ? [...filters.provider][0] : null;
+
+function setFilter(key, set, { animate = true } = {}) {
+  const all = FILTER_DEFS[key].options().length;
+  filters[key] = set && !(set.size === all && !FILTER_DEFS[key].single) ? set : null;
+  applyFilters(animate);
+}
+function applyFilters(animate = true) {
+  const cards = board.querySelectorAll('.card');
+  const run = () => { cards.forEach(el => { el.hidden = !passes(find(+el.dataset.id)); }); refreshCounts(animate); };
+  animate ? flip(cards, run) : run();
+  renderFilterBar(); renderUsage(); renderSidebar();
+  const fp = focusedProvider();
+  $('#crumb').textContent = fp ? ` › ${PROVIDERS[fp].name}` : '';
 }
 
-/* ───────── Board ───────── */
+function renderFilterBar() {
+  const active = Object.entries(filters).filter(([, s]) => s);
+  const bar = $('#filterbar');
+  bar.hidden = active.length === 0;
+  bar.innerHTML = active.map(([k, s]) => {
+    const d = FILTER_DEFS[k], opts = d.options().filter(o => s.has(o.v));
+    const op = d.single || s.size <= 1 ? 'is' : 'is any of';
+    const v = s.size === 0 ? 'none selected' : opts.length <= 2 ? opts.map(o => `${o.html || ''}${o.label}`).join(', ') : `${opts.slice(0, 2).map(o => o.html || '').join('')}${opts.length} ${d.label.toLowerCase()}s`;
+    return `<span class="fchip"><span class="k">${icon(d.icon, 'sm')}${d.label}</span><span class="op">${op}</span><span class="v">${v}</span><button type="button" data-clear="${k}" aria-label="Remove ${d.label} filter">${icon('x', 'sm')}</button></span>`;
+  }).join('') + (active.length ? `<button class="link-btn" type="button" id="clearAll">Clear all</button>` : '');
+  bar.querySelectorAll('[data-clear]').forEach(b => b.addEventListener('click', () => setFilter(b.dataset.clear, null)));
+  $('#clearAll')?.addEventListener('click', () => { Object.keys(filters).forEach(k => filters[k] = null); applyFilters(); });
+}
+
+/* Filter menu: categories → options pane, with search, Select all / None */
+const filterPop = $('#filterPop');
+function filterRoot(back = false) {
+  filterPop.innerHTML = `<div class="pane ${back ? 'back' : ''}"><input class="menu-search" placeholder="Filter by…" aria-label="Search filters" id="fSearch">
+    <div id="fItems">${Object.entries(FILTER_DEFS).map(([k, d]) => `<button class="menu-item" type="button" data-key="${k}">${icon(d.icon)}${d.label}<span class="r">${filters[k] ? (d.single ? 1 : filters[k].size) : ''}${icon('chevron-right', 'sm')}</span></button>`).join('')}</div></div>`;
+  filterPop.querySelectorAll('[data-key]').forEach(b => b.addEventListener('click', () => filterPane(b.dataset.key)));
+  const s = $('#fSearch'); s.focus({ preventScroll: true });
+  s.addEventListener('input', () => {
+    const q = s.value.toLowerCase();
+    if (!q) return filterRoot();
+    // Linear-style: typing a value jumps straight to matching options across categories
+    const hits = Object.entries(FILTER_DEFS).flatMap(([k, d]) => d.options().filter(o => o.label.toLowerCase().includes(q)).map(o => ({ k, o, d })));
+    $('#fItems').innerHTML = hits.length ? hits.slice(0, 8).map(({ k, o, d }) => `<button class="menu-item" type="button" data-k="${k}" data-v="${o.v}">${o.html || icon(d.icon)}${o.label}<span class="r">${d.label}</span></button>`).join('') : `<div class="menu-label">No matches</div>`;
+    $('#fItems').querySelectorAll('[data-k]').forEach(b => b.addEventListener('click', () => { setFilter(b.dataset.k, new Set([b.dataset.v])); closePops(); }));
+  });
+}
+function filterPane(key) {
+  const d = FILTER_DEFS[key], cur = filters[key] || new Set(d.single ? [] : d.options().map(o => o.v));
+  filterPop.innerHTML = `<div class="pane"><div class="menu-label"><button class="btn icon-only ghost" type="button" id="fBack" aria-label="Back" style="width:22px;height:22px">${icon('back', 'sm')}</button>${d.label}
+    ${d.single ? '' : `<span class="links"><button type="button" id="fAll">Select all</button><button type="button" id="fNone">None</button></span>`}</div>
+    ${d.options().map(o => `<button class="menu-item" type="button" role="menuitemcheckbox" data-v="${o.v}" aria-checked="${cur.has(o.v)}"><span class="box"><svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span>${o.html || ''}${o.label}</button>`).join('')}</div>`;
+  $('#fBack').addEventListener('click', () => filterRoot(true));
+  const sync = set => { filterPop.querySelectorAll('[data-v]').forEach(b => b.setAttribute('aria-checked', set.has(b.dataset.v))); setFilter(key, new Set(set)); };
+  $('#fAll')?.addEventListener('click', () => sync(new Set(d.options().map(o => o.v))));
+  $('#fNone')?.addEventListener('click', () => sync(new Set()));
+  filterPop.querySelectorAll('[data-v]').forEach(b => b.addEventListener('click', () => {
+    const set = new Set(filters[key] || (d.single ? [] : d.options().map(o => o.v)));
+    if (d.single) { set.clear(); set.add(b.dataset.v); } else set.has(b.dataset.v) ? set.delete(b.dataset.v) : set.add(b.dataset.v);
+    sync(set);
+  }));
+}
+$('#filterBtn').addEventListener('click', e => { e.stopPropagation(); filterRoot(); togglePop(filterPop, e.currentTarget); });
+
+/* ═════════ Board ═════════ */
 const board = $('#board');
+const COLUMNS = [['running', 'Running'], ['needs', 'Needs you'], ['review', 'Review'], ['done', 'Done']];
 function buildColumns() {
-  board.innerHTML = COLUMNS.map(c => `
-    <section class="column" data-col="${c.id}" aria-label="${c.name}">
-      <div class="col-head">${statusIcon(c.id)}<span>${c.name}</span><span class="count" data-count>0</span>
-        ${c.id === 'running' ? `<button class="btn icon-only ghost add" type="button" data-tip="New chat" aria-label="New chat">${icon('plus')}</button>` : ''}</div>
+  board.innerHTML = COLUMNS.map(([id, name]) => `
+    <section class="column" data-col="${id}" aria-label="${name}">
+      <div class="col-head">${statusIcon(id)}<span>${name}</span><span class="count" data-count>0</span>
+        ${id === 'running' ? `<button class="btn icon-only ghost add" type="button" data-tip="New chat" aria-label="New chat">${icon('plus')}</button>` : ''}</div>
       <div class="col-body"></div>
-    </section>`).join('');
-  board.querySelector('.add').addEventListener('click', openDialog);
+    </section>`).join('') + `<div class="no-results" id="noResults" hidden><div>${icon('filter')}<h3>No chats match these filters</h3><p>Try fewer filters, or clear them all.</p><button class="btn" type="button" id="nrClear">Clear filters</button></div></div>`;
+  board.querySelector('.add').addEventListener('click', e => { e.stopPropagation(); openDialog(); });
+  $('#nrClear').addEventListener('click', () => { Object.keys(filters).forEach(k => filters[k] = null); applyFilters(); });
 }
-
 function reasonBadge(c) {
-  switch (c.reason) {
-    case 'permission': return `<span class="badge needs">Wants to run a command</span>`;
-    case 'question': return `<span class="badge needs">Asked you a question</span>`;
-    case 'stopped': return `<span class="badge quiet">${icon('stop', 'sm')}Stopped</span>`;
-    case 'limit': return `<span class="badge danger">Limit reached · resets 4:10 pm</span>`;
-  }
-  return '';
+  return ({ permission: `<span class="badge needs">Wants to run a command</span>`, question: `<span class="badge needs">Asked you a question</span>`,
+    stopped: `<span class="badge quiet">${icon('stop', 'sm')}Stopped</span>`, limit: `<span class="badge danger">Limit reached · resets 4:10 pm</span>` })[c.reason] || '';
 }
-
 function stepsHtml(c) {
   const from = Math.max(0, c.step - 4);
-  return c.steps.slice(from, c.step + 1).map((s, i) => {
-    const idx = from + i, state = idx < c.step ? 'done' : 'current';
-    return `<li class="${state}">${icon(state === 'done' ? 'check' : s[0], 'sm')}<span>${s[1]}</span></li>`;
-  }).join('');
+  return c.steps.slice(from, c.step + 1).map((s, i) => { const done = from + i < c.step; return `<li class="${done ? 'done' : 'current'}">${icon(done ? 'check' : s[0], 'sm')}<span>${s[1]}</span></li>`; }).join('');
 }
-
 function cardHtml(c) {
-  const folder = FOLDERS.find(f => f.id === c.folder);
-  const running = c.column === 'running';
-  const actions = running
-    ? `<button class="btn icon-only" type="button" data-act="stop" data-tip="Stop agent" aria-label="Stop agent">${icon('stop', 'sm')}</button>`
-    : c.reason === 'stopped'
-      ? `<button class="btn" type="button" data-act="resume">${icon('resume', 'sm')}Resume</button><button class="btn icon-only" type="button" data-act="archive" data-tip="Archive chat" aria-label="Archive chat">${icon('archive', 'sm')}</button>`
-      : `<button class="btn icon-only" type="button" data-act="archive" data-tip="Archive chat" aria-label="Archive chat">${icon('archive', 'sm')}</button>`;
+  const p = proj(c.project), running = c.column === 'running';
+  const lead = running ? `<button class="btn icon-only" type="button" data-act="stop" data-tip="Stop agent" aria-label="Stop agent">${icon('stop', 'sm')}</button>`
+    : c.reason === 'stopped' ? `<button class="btn" type="button" data-act="resume">${icon('resume', 'sm')}Resume</button>` : '';
   return `
     <div class="card-top"><div class="card-title">${c.title}</div></div>
-    <div class="card-meta">${logo(c.provider, 'sm')}<span>${c.model}</span><span class="sep">·</span>
-      <span style="display:inline-flex;align-items:center;gap:4px"><span class="folder-glyph" style="background:${folder.colour};width:12px;height:12px;font-size:8px">${folder.glyph}</span>${c.folder}</span>
-      <span class="sep">·</span><span class="tnum">${c.ago}</span></div>
+    <div class="card-meta">${logo(c.provider, 'sm')}<span>${c.model}</span><span class="sep">·</span><span style="display:inline-flex;align-items:center;gap:4px">${glyph(p, 12)}${p.id}</span><span class="sep">·</span><span class="tnum">${c.ago}</span></div>
     ${c.column === 'needs' ? `<div class="card-meta">${reasonBadge(c)}</div>` : ''}
+    ${(c.column === 'review' || c.column === 'done') && c.took ? `<div class="card-meta">${icon('files', 'sm')}<span>${c.files ? `${c.files} file${c.files > 1 ? 's' : ''} changed` : 'No file changes'}</span><span class="sep">·</span>${icon('clock', 'sm')}<span>${c.took}</span></div>` : ''}
     ${running ? `
       <div class="activity">
         <div class="activity-line">${icon(c.steps[c.step][0], 'sm')}<span class="now">${c.steps[c.step][1]}</span>
@@ -226,149 +306,183 @@ function cardHtml(c) {
         <div class="sweep" aria-hidden="true"></div>
         <div class="collapsible closed"><div><ol class="steps">${stepsHtml(c)}</ol></div></div>
       </div>` : ''}
-    <div class="card-actions">${actions}</div>`;
+    <div class="card-actions">${lead}<button class="btn icon-only" type="button" data-act="more" aria-label="More actions" aria-haspopup="true" data-tip="More">${icon('more', 'sm')}</button></div>`;
 }
-
 function makeCard(c) {
   const el = document.createElement('article');
-  el.className = 'card'; el.tabIndex = 0; el.dataset.id = c.id;
-  el.setAttribute('aria-label', c.title);
-  el.innerHTML = cardHtml(c);
-  wireCard(el);
-  el.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target === el) openPanel(+el.dataset.id); });
+  el.className = 'card'; el.tabIndex = 0; el.dataset.id = c.id; el.setAttribute('aria-label', c.title);
+  el.innerHTML = cardHtml(c); wireCard(el);
+  el.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target === el) openPanel(c.id); });
   bindDrag(el);
   return el;
 }
-
-function rerenderCard(c) {
-  const el = cardEl(c.id); if (!el) return;
-  const open = el.querySelector('.more-toggle')?.getAttribute('aria-expanded') === 'true';
-  el.innerHTML = cardHtml(c);
-  wireCard(el);
-  if (open && c.column === 'running') el.querySelector('.more-toggle').click();
-}
-
 function wireCard(el) {
-  const toggle = el.querySelector('.more-toggle');
-  if (toggle) bindDisclosure(toggle, el.querySelector('.collapsible'), { labels: ['Show more', 'Show less'] });
+  const t = el.querySelector('.more-toggle');
+  if (t) bindDisclosure(t, el.querySelector('.collapsible'), { labels: ['Show more', 'Show less'] });
   el.querySelectorAll('[data-act]').forEach(b => b.addEventListener('click', e => {
-    e.stopPropagation();
-    const c = find(+el.dataset.id);
-    ({ stop: () => stopChat(c, b), resume: () => resumeChat(c), archive: () => archiveChat(c) })[b.dataset.act]();
+    e.stopPropagation(); const c = find(+el.dataset.id);
+    ({ stop: () => stopChat(c, b), resume: () => resumeChat(c), more: () => openActions(c, b) })[b.dataset.act]();
   }));
   bindTooltips(el);
 }
-
 const cardEl = id => board.querySelector(`.card[data-id="${id}"]`);
 const colBody = id => board.querySelector(`.column[data-col="${id}"] .col-body`);
-
-function renderAll() {
-  COLUMNS.forEach(col => {
-    const body = colBody(col.id); body.innerHTML = '';
-    chats.filter(c => c.column === col.id && !c.archived).forEach(c => body.append(makeCard(c)));
-  });
-  refreshCounts(false); applyFilter(false);
+function renderBoard() {
+  COLUMNS.forEach(([id]) => { const body = colBody(id); body.innerHTML = ''; chats.filter(c => onBoard(c) && c.column === id).forEach(c => body.append(makeCard(c))); });
+  board.querySelectorAll('.card').forEach(el => el.hidden = !passes(find(+el.dataset.id)));
+  refreshCounts(false);
 }
-
 function refreshCounts(animate = true) {
-  COLUMNS.forEach(col => {
-    const n = chats.filter(c => c.column === col.id && !c.archived && filter.has(c.provider)).length;
-    const el = board.querySelector(`.column[data-col="${col.id}"] [data-count]`);
+  let shown = 0;
+  COLUMNS.forEach(([id]) => {
+    const n = chats.filter(c => onBoard(c) && c.column === id && passes(c)).length; shown += n;
+    const el = board.querySelector(`.column[data-col="${id}"] [data-count]`);
     if (el.textContent !== String(n)) { el.textContent = n; if (animate) { el.classList.remove('tick'); el.offsetWidth; el.classList.add('tick'); } }
-    const body = colBody(col.id);
-    body.querySelector('.drop-hint, .empty-note')?.remove();
-    if (n === 0) {
-      const hint = document.createElement('div');
-      if (col.id === 'done') { hint.className = 'drop-hint'; hint.textContent = 'Drag a finished chat here'; }
-      else { hint.className = 'empty-note'; hint.textContent = { running: 'No agents working right now', needs: 'Nothing needs you', review: 'Nothing to review yet' }[col.id]; }
-      body.append(hint);
-    }
+    const body = colBody(id); body.querySelector('.drop-hint, .empty-note')?.remove();
+    if (n === 0) { const h = document.createElement('div'); if (id === 'done') { h.className = 'drop-hint'; h.textContent = 'Drag a finished chat here'; } else { h.className = 'empty-note'; h.textContent = { running: 'No agents working right now', needs: 'Nothing needs you', review: 'Nothing to review yet' }[id]; } body.append(h); }
   });
-  const needs = chats.filter(c => c.column === 'needs' && !c.archived).length;
-  $('#navNeeds').textContent = needs; $('#navNeeds').hidden = needs === 0;
-  $('#navBoard').textContent = chats.filter(c => !c.archived && c.column !== 'done').length;
+  const anyFilter = Object.values(filters).some(Boolean);
+  $('#noResults').hidden = !(anyFilter && shown === 0);
+  board.querySelectorAll('.column').forEach(c => c.hidden = anyFilter && shown === 0);
+  $('#navBoard').textContent = chats.filter(c => onBoard(c) && c.column !== 'done').length;
+  $('#navProjects').textContent = PROJECTS.length;
 }
-
-/* Move a chat to another column with FLIP. Every card on the board can shift, so all of them animate. */
 function moveTo(c, column, patch = {}) {
-  const el = cardEl(c.id);
-  const all = board.querySelectorAll('.card');
+  let el = cardEl(c.id);
   Object.assign(c, patch, { column, ago: 'now' });
-  return flip(all, () => {
-    const body = colBody(column);
-    el.style.transform = '';
-    body.prepend(el);
-    el.innerHTML = cardHtml(c); wireCard(el);
-    refreshCounts();
-  }, { lift: el });
+  if (!el) { el = makeCard(c); el.classList.add('new'); }
+  return flip(board.querySelectorAll('.card'), () => {
+    el.style.transform = ''; colBody(column).prepend(el); el.innerHTML = cardHtml(c); wireCard(el); el.hidden = !passes(c); refreshCounts();
+  }, { lift: el }).then(renderSidebar);
 }
 
-/* ───────── Agent simulation (stands in for real adapter events) ───────── */
+/* ═════════ Agents (simulated events) ═════════ */
 function tick() {
   chats.filter(c => c.column === 'running' && !c.archived && !c.stopping).forEach(c => {
-    if (c.askAt !== null && c.askAt !== undefined && c.step + 1 === c.askAt) {
-      c.step = c.askAt;
-      moveTo(c, 'needs', { reason: 'permission', request: 'npm run build', askAt: null });
-      syncPanel(c); return;
-    }
-    if (c.step + 1 >= c.steps.length) { moveTo(c, 'review', { reason: null }); syncPanel(c); return; }
+    if (c.askAt != null && c.step + 1 === c.askAt) { c.step = c.askAt; moveTo(c, 'needs', { reason: 'permission', request: 'npm run build', askAt: null }); notify(c, 'permission'); syncPanel(c); return; }
+    if (c.step + 1 >= c.steps.length) { moveTo(c, 'review', { reason: null, took: '4m', files: c.files || 2 }); notify(c, 'finished'); syncPanel(c); return; }
     c.step++;
     const el = cardEl(c.id); if (!el) return;
-    const line = el.querySelector('.activity-line');
-    line.querySelector('svg').outerHTML = icon(c.steps[c.step][0], 'sm');
-    swapText(line.querySelector('.now'), c.steps[c.step][1]);
-    el.querySelector('.steps').innerHTML = stepsHtml(c);
-    syncPanel(c);
+    const line = el.querySelector('.activity-line'); line.querySelector('svg').outerHTML = icon(c.steps[c.step][0], 'sm');
+    swapText(line.querySelector('.now'), c.steps[c.step][1]); el.querySelector('.steps').innerHTML = stepsHtml(c); syncPanel(c);
   });
 }
-setInterval(tick, 3200);
+setInterval(tick, 3400);
 
-/* ───────── Stop / resume / archive ───────── */
+/* ═════════ Notifications (bell) ═════════ */
+const notifs = [
+  { id: 1, chat: 3, kind: 'permission', when: '6m', unread: true },
+  { id: 2, chat: 4, kind: 'question', when: '12m', unread: true },
+  { id: 3, chat: 5, kind: 'finished', when: '1h', unread: false },
+];
+const prefs = { desktop: true, sound: true };
+const NOTE_TEXT = { permission: 'wants to run a command', question: 'asked you a question', finished: 'finished. Ready for review', stopped: 'was stopped', limit: 'hit its usage limit' };
+function renderNotifs(newId) {
+  const unread = notifs.filter(n => n.unread).length;
+  $('#bellDot').textContent = unread; $('#bellDot').dataset.n = unread;
+  $('#bellBtn').setAttribute('aria-label', `Notifications, ${unread} unread`);
+  $('#notifList').innerHTML = notifs.length ? notifs.map(n => {
+    const c = find(n.chat);
+    return `<button class="notif ${n.unread ? 'unread' : ''} ${n.id === newId ? 'enter' : ''}" type="button" data-n="${n.id}">${logo(c.provider)}
+      <span class="body"><b>${c.title}</b><small>${PROVIDERS[c.provider].name} ${NOTE_TEXT[n.kind]}</small></span><span class="when">${n.when}</span></button>`;
+  }).join('') : `<div class="notif-empty">You're all caught up.</div>`;
+  $('#notifList').querySelectorAll('[data-n]').forEach(b => b.addEventListener('click', () => { const n = notifs.find(x => x.id === +b.dataset.n); n.unread = false; renderNotifs(); closePops(); openPanel(n.chat); }));
+}
+let nid = 10;
+function notify(c, kind) {
+  const n = { id: nid++, chat: c.id, kind, when: 'now', unread: true };
+  notifs.unshift(n); renderNotifs(n.id);
+  const bell = $('#bellBtn'); bell.classList.remove('ring'); bell.offsetWidth; if (!KB.reduced()) bell.classList.add('ring');
+  if (prefs.sound) chime(kind === 'finished');
+}
+// Soft two-note chime, generated (no audio file)
+let actx;
+function chime(soft) {
+  try {
+    actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+    [[880, 0], [soft ? 1100 : 1320, 0.09]].forEach(([f, t]) => {
+      const o = actx.createOscillator(), g = actx.createGain(); o.type = 'sine'; o.frequency.value = f;
+      g.gain.setValueAtTime(0, actx.currentTime + t); g.gain.linearRampToValueAtTime(0.06, actx.currentTime + t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, actx.currentTime + t + 0.35);
+      o.connect(g).connect(actx.destination); o.start(actx.currentTime + t); o.stop(actx.currentTime + t + 0.4);
+    });
+  } catch {}
+}
+$('#bellBtn').addEventListener('click', e => { e.stopPropagation(); togglePop($('#notifPop'), e.currentTarget, { align: 'right' }); });
+$('#markRead').addEventListener('click', () => { notifs.forEach(n => n.unread = false); renderNotifs(); });
+[['#swNotif', 'desktop'], ['#swSound', 'sound']].forEach(([s, k]) => $(s).addEventListener('click', e => {
+  prefs[k] = !prefs[k]; e.currentTarget.setAttribute('aria-checked', prefs[k]);
+  if (k === 'sound' && prefs.sound) chime(true);
+  $('#bellBtn').querySelector('svg').outerHTML = icon(prefs.desktop || prefs.sound ? 'bell' : 'bell-off');
+}));
+
+/* ═════════ Stop / resume / archive / snooze / pin ═════════ */
 function stopChat(c, btn) {
-  if (c.stopping) return;
-  c.stopping = true;
+  if (c.stopping) return; c.stopping = true;
   const label = btn.querySelector('.label');
-  if (label) { label.classList.add('swapping'); setTimeout(() => { label.innerHTML = `${icon('stop', 'sm')}Stopping…`; label.classList.remove('swapping'); }, ms('--duration-swap') / 2); }
-  else btn.disabled = true;
+  if (label) { label.classList.add('swapping'); setTimeout(() => { label.innerHTML = `${icon('stop', 'sm')}Stopping…`; label.classList.remove('swapping'); }, ms('--duration-swap') / 2); } else btn.disabled = true;
   setTimeout(() => { c.stopping = false; moveTo(c, 'needs', { reason: 'stopped' }); syncPanel(c); }, 700);
 }
 function resumeChat(c) { moveTo(c, 'running', { reason: null }); syncPanel(c); }
-function archiveChat(c) {
+function removeCard(c, flag, message) {
   const el = cardEl(c.id);
-  const done = () => { c.archived = true; el.remove(); refreshCounts(); if (openId === c.id) closePanel(); };
-  if (KB.reduced()) done();
+  const done = () => { el?.remove(); refreshCounts(); renderSidebar(); if (openId === c.id && flag === 'archived') closePanel(); };
+  c[flag] = true;
+  if (!el || KB.reduced()) done();
   else {
-    const h = el.offsetHeight;
-    el.classList.add('collapsing');
-    el.animate([{ height: h + 'px', opacity: 1 }, { height: '0px', opacity: 0, paddingTop: 0, paddingBottom: 0, marginTop: '-8px', borderWidth: 0 }],
-      { duration: ms('--duration-expand'), easing: KB.css('--ease-out') }).finished.then(done);
+    const anim = el.animate([{ height: el.offsetHeight + 'px', opacity: 1 }, { height: '0px', opacity: 0, paddingTop: 0, paddingBottom: 0, marginTop: '-8px', borderWidth: 0 }], { duration: ms('--duration-expand'), easing: css('--ease-out') });
+    // A hidden window pauses animations; don't leave the card stranded
+    Promise.race([anim.finished, new Promise(r => setTimeout(r, ms('--duration-expand') + 150))]).then(done);
   }
-  toast('Chat archived', { label: 'Undo', run: () => {
-    c.archived = false;
-    const card = makeCard(c); card.classList.add('new');
-    flip(board.querySelectorAll('.card'), () => { colBody(c.column).prepend(card); refreshCounts(); });
-  } });
+  toast(message, { label: 'Undo', run: () => { c[flag] = false; const card = makeCard(c); card.classList.add('new'); flip(board.querySelectorAll('.card'), () => { colBody(c.column).prepend(card); refreshCounts(); }); renderSidebar(); } });
+}
+const archiveChat = c => removeCard(c, 'archived', 'Chat archived');
+const snoozeChat = (c, until) => removeCard(c, 'snoozed', `Snoozed until ${until}`);
+function togglePin(c) { c.pinned = !c.pinned; renderSidebar(); toast(c.pinned ? 'Pinned to the sidebar' : 'Unpinned'); }
+
+/* Chat actions menu (card "…", sidebar row "…", panel "…"), from T3 Code */
+const actionPop = $('#actionPop');
+function openActions(c, anchor, back) {
+  actionPop.innerHTML = `<div class="pane ${back ? 'back' : ''}">
+    <button class="menu-item" type="button" data-a="native">${icon('external')}Open in ${APP[c.provider]}</button>
+    <button class="menu-item" type="button" data-a="pin">${icon('pin')}${c.pinned ? 'Unpin' : 'Pin to sidebar'}</button>
+    ${c.column && c.column !== 'done' ? `<button class="menu-item" type="button" data-a="snooze">${icon('snooze')}Snooze<span class="r">${icon('chevron-right', 'sm')}</span></button>` : ''}
+    <button class="menu-item" type="button" data-a="rename">${icon('rename')}Rename</button>
+    <button class="menu-item" type="button" data-a="path">${icon('copy')}Copy project path</button>
+    <div class="menu-sep"></div>
+    <button class="menu-item danger" type="button" data-a="archive" ${c.column ? '' : 'aria-disabled="true"'}>${icon('archive')}Archive chat</button></div>`;
+  actionPop.querySelectorAll('[data-a]').forEach(b => b.addEventListener('click', () => {
+    const a = b.dataset.a;
+    if (a === 'snooze') {
+      actionPop.innerHTML = `<div class="pane"><div class="menu-label"><button class="btn icon-only ghost" type="button" id="aBack" aria-label="Back" style="width:22px;height:22px">${icon('back', 'sm')}</button>Snooze until</div>
+        ${[['In 1 hour', '4:40 pm'], ['This evening', '7:00 pm'], ['Tomorrow morning', 'tomorrow 9:00 am'], ['Next week', 'Monday 9:00 am']].map(([l, u]) => `<button class="menu-item" type="button" data-until="${u}">${l}<span class="r">${u}</span></button>`).join('')}</div>`;
+      $('#aBack').onclick = () => openActions(c, anchor, true);
+      actionPop.querySelectorAll('[data-until]').forEach(x => x.onclick = () => { closePops(); snoozeChat(c, x.dataset.until); });
+      return;
+    }
+    if (b.getAttribute('aria-disabled') === 'true') return;
+    closePops();
+    if (a === 'native') toast(`Opens this same chat in ${APP[c.provider]}`);
+    if (a === 'pin') togglePin(c);
+    if (a === 'rename') toast('Rename edits the title here and in the provider’s history');
+    if (a === 'path') toast(`Copied ${proj(c.project).path}`);
+    if (a === 'archive') archiveChat(c);
+  }));
+  if (!back) openPop(actionPop, anchor, { align: 'right' });
 }
 
-/* ───────── Drag to Done (agents move the other columns) ───────── */
+/* ═════════ Drag to Done ═════════ */
 function bindDrag(el) {
   el.addEventListener('pointerdown', e => {
     if (e.button !== 0 || e.target.closest('button')) return;
-    const c = find(+el.dataset.id);
-    const start = { x: e.clientX, y: e.clientY };
+    const c = find(+el.dataset.id), start = { x: e.clientX, y: e.clientY };
     let dragging = false, overCol = null;
     const allowed = col => c.column === 'done' ? col === 'review' : col === 'done';
     const move = ev => {
       const dx = ev.clientX - start.x, dy = ev.clientY - start.y;
       if (!dragging && Math.hypot(dx, dy) < 5) return;
-      if (!dragging) {
-        dragging = true; try { el.setPointerCapture(e.pointerId); } catch {} el.classList.add('dragging'); closeAll();
-        board.querySelectorAll('.column').forEach(col => col.classList.toggle('drop-ok', allowed(col.dataset.col)));
-      }
-      el.style.transform = `translate(${dx}px, ${dy}px) rotate(1.5deg) scale(${KB.css('--lift-scale')})`;
-      el.style.pointerEvents = 'none';
-      const under = document.elementFromPoint(ev.clientX, ev.clientY)?.closest('.column');
-      el.style.pointerEvents = '';
+      if (!dragging) { dragging = true; try { el.setPointerCapture(e.pointerId); } catch {} el.classList.add('dragging'); closePops(); board.querySelectorAll('.column').forEach(col => col.classList.toggle('drop-ok', allowed(col.dataset.col))); }
+      el.style.transform = `translate(${dx}px, ${dy}px) rotate(1.5deg) scale(${css('--lift-scale')})`;
+      el.style.pointerEvents = 'none'; const under = document.elementFromPoint(ev.clientX, ev.clientY)?.closest('.column'); el.style.pointerEvents = '';
       overCol = under?.dataset.col || null;
       board.querySelectorAll('.column').forEach(col => col.classList.toggle('drop-hot', col.dataset.col === overCol && allowed(overCol)));
     };
@@ -377,13 +491,10 @@ function bindDrag(el) {
       board.querySelectorAll('.column').forEach(col => col.classList.remove('drop-ok', 'drop-hot'));
       if (!dragging) { openPanel(c.id); return; }
       el.classList.remove('dragging');
-      if (overCol && allowed(overCol)) {
-        const target = overCol;
-        moveTo(c, target, { reason: null });
-        syncPanel(c);
-      } else {
+      if (overCol && allowed(overCol)) { moveTo(c, overCol, { reason: null }); syncPanel(c); }
+      else {
         const from = el.style.transform; el.style.transform = '';
-        if (!KB.reduced()) el.animate([{ transform: from }, { transform: 'none' }], { duration: 200, easing: KB.css('--ease-out') });
+        if (!KB.reduced()) el.animate([{ transform: from }, { transform: 'none' }], { duration: 200, easing: css('--ease-out') });
         if (overCol && overCol !== c.column) toast(c.column === 'done' ? 'Done chats can only go back to Review' : 'Agents move cards between these columns. Drag to Done when you’re finished.');
       }
     };
@@ -391,66 +502,64 @@ function bindDrag(el) {
   });
 }
 
-/* ───────── Chat panel ───────── */
+/* ═════════ Chat panel: the same chat as in the provider's app ═════════ */
 const panel = $('#panel');
 let openId = null;
 function panelHtml(c) {
-  const folder = FOLDERS.find(f => f.id === c.folder);
-  const stateText = { running: 'Running', needs: 'Needs you', review: 'Ready for review', done: 'Done' }[c.column];
-  const headBtn = c.column === 'running'
-    ? `<button class="btn danger" type="button" data-p="stop"><span class="label">${icon('stop', 'sm')}Stop</span></button>`
+  const p = proj(c.project), col = c.column;
+  const stateText = col ? { running: 'Running', needs: 'Needs you', review: 'Ready for review', done: 'Done' }[col] : `Last active ${c.ago} ago`;
+  const headBtn = col === 'running' ? `<button class="btn danger" type="button" data-p="stop"><span class="label">${icon('stop', 'sm')}Stop</span></button>`
     : c.reason === 'stopped' ? `<button class="btn" type="button" data-p="resume">${icon('resume', 'sm')}Resume</button>`
-    : c.column === 'review' ? `<button class="btn primary" type="button" data-p="done">${icon('check', 'sm')}Mark done</button>` : '';
-  const done = c.steps.slice(0, c.step + (c.column === 'running' ? 0 : 1));
-  const req = c.column === 'needs' && c.reason === 'permission'
-    ? `<div class="request"><div style="display:flex;align-items:center;gap:6px;font-weight:var(--weight-medium)">${statusIcon('needs')}${PROVIDERS[c.provider].name} wants to run a command</div>
-        <div class="cmd">${c.request}</div>
+    : col === 'review' ? `<button class="btn primary" type="button" data-p="done">${icon('check', 'sm')}Mark done</button>` : '';
+  const shown = c.steps.slice(0, c.step + 1);
+  const req = col === 'needs' && c.reason === 'permission'
+    ? `<div class="request"><div style="display:flex;align-items:center;gap:6px;font-weight:var(--weight-medium)">${statusIcon('needs')}${PROVIDERS[c.provider].name} wants to run a command</div><div class="cmd">${c.request}</div>
         <div class="row"><button class="btn primary" type="button" data-p="allow">Allow</button><button class="btn" type="button" data-p="deny">Deny</button></div></div>`
-    : c.column === 'needs' && c.reason === 'question'
-    ? `<div class="request"><div style="display:flex;align-items:center;gap:6px;font-weight:var(--weight-medium)">${statusIcon('needs')}${c.question}</div><div style="color:var(--color-text-muted);font-size:var(--text-caption)">Reply below and the agent carries on.</div></div>`
+    : col === 'needs' && c.reason === 'question' ? `<div class="request"><div style="display:flex;align-items:center;gap:6px;font-weight:var(--weight-medium)">${statusIcon('needs')}${c.question}</div><div style="color:var(--color-text-muted);font-size:var(--text-caption)">Reply below and the agent carries on.</div></div>`
     : c.reason === 'stopped' ? `<div style="color:var(--color-text-muted);font-size:var(--text-caption);display:flex;gap:6px;align-items:center">${icon('stop', 'sm')}You stopped the agent. Resume to let it carry on, or send a new instruction.</div>` : '';
+  const working = col === 'running';
   return `
     <div class="panel-head">${logo(c.provider, 'lg')}
-      <div class="t"><b>${c.title}</b><small>${statusIcon(c.column)}${stateText}<span>·</span>${c.model}<span>·</span><span class="folder-glyph" style="background:${folder.colour};width:12px;height:12px;font-size:8px">${folder.glyph}</span>${c.folder}</small></div>
+      <div class="t"><b>${c.title}</b><small>${col ? statusIcon(col) : ''}${stateText}<span>·</span>${c.model}<span>·</span>${glyph(p, 12)}${p.id}</small></div>
       ${headBtn}
-      ${c.column !== 'done' ? `<button class="btn icon-only ghost" type="button" data-p="archive" data-tip="Archive chat" aria-label="Archive chat">${icon('archive')}</button>` : ''}
+      <button class="btn icon-only ghost" type="button" data-p="more" aria-label="More actions" data-tip="More">${icon('more')}</button>
       <button class="btn icon-only ghost" type="button" data-p="close" aria-label="Close panel" data-tip="Close · Esc">${icon('x')}</button>
     </div>
+    <div style="padding:var(--space-2) var(--space-4) 0;display:flex;gap:var(--space-2);align-items:center;flex-wrap:wrap">
+      <span class="source"><span class="live-dot"></span>Same chat as in ${APP[c.provider]}</span>
+      <button class="link-btn" type="button" data-p="native">${icon('external', 'sm')}Open in ${APP[c.provider]}</button>
+    </div>
     <div class="thread">
+      ${col ? '' : `<div style="color:var(--color-text-faint);font-size:var(--text-caption);text-align:center">Earlier messages from ${APP[c.provider]} · ${c.ago} ago</div>`}
       <div class="msg user">${c.title}.</div>
       <div class="msg agent" style="width:100%">
         <div class="who">${logo(c.provider, 'sm')}${PROVIDERS[c.provider].name}</div>
         <div class="work">
-          <button class="work-head" type="button" aria-expanded="${c.column === 'running'}">${c.column === 'running' ? statusIcon('running') : icon('check', 'sm')}
-            <span class="grow">${c.column === 'running' ? 'Working' : 'Worked'} · ${done.length} step${done.length === 1 ? '' : 's'}</span><span class="more-toggle" aria-hidden="true"><span class="lbl">${c.column === 'running' ? 'Show less' : 'Show more'}</span>${icon('chevron-down', 'sm')}</span></button>
-          <div class="collapsible ${c.column === 'running' ? '' : 'closed'}"><div><ol class="steps">${c.steps.slice(0, c.step + 1).map((s, i) => `<li class="${i < c.step || c.column !== 'running' ? 'done' : 'current'}">${icon(i < c.step || c.column !== 'running' ? 'check' : s[0], 'sm')}<span>${s[1]}</span></li>`).join('')}</ol></div></div>
+          <button class="work-head" type="button" aria-expanded="${working}">${working ? statusIcon('running') : icon('check', 'sm')}
+            <span class="grow">${working ? 'Working' : 'Worked'} · ${shown.length} step${shown.length === 1 ? '' : 's'}</span><span class="more-toggle" aria-hidden="true"><span class="lbl">${working ? 'Show less' : 'Show more'}</span>${icon('chevron-down', 'sm')}</span></button>
+          <div class="collapsible ${working ? '' : 'closed'}"><div><ol class="steps">${shown.map((s, i) => { const d = i < c.step || !working; return `<li class="${d ? 'done' : 'current'}">${icon(d ? 'check' : s[0], 'sm')}<span>${s[1]}</span></li>`; }).join('')}</ol></div></div>
         </div>
-        ${c.column === 'review' || c.column === 'done' ? `<p style="margin:var(--space-3) 0 0">Done. I made the changes and checked them. Open the folder to look, or ask me to adjust anything.</p>` : ''}
+        ${col === 'review' || col === 'done' || !col ? `<p style="margin:var(--space-3) 0 0">Done. I made the changes and checked them. Open the project to look, or ask me to adjust anything.</p>` : ''}
       </div>
       ${req}
     </div>
     <div class="composer"><div class="composer-box">
-      <textarea placeholder="${c.column === 'running' ? 'Send a note. It reaches the agent after this step' : 'Reply or give a new instruction'}" aria-label="Message"></textarea>
-      <div class="composer-row"><span class="grow">Enter to send · Shift+Enter for a new line</span><button class="btn primary icon-only" type="button" data-p="send" aria-label="Send">${icon('send')}</button></div>
+      <textarea placeholder="${working ? 'Send a note. It reaches the agent after this step' : col ? 'Reply or give a new instruction' : `Continue this ${APP[c.provider]} chat`}" aria-label="Message"></textarea>
+      <div class="composer-row"><span class="grow">${col ? 'Enter to send · Shift+Enter for a new line' : 'Sending puts this chat on the board'}</span><button class="btn primary icon-only" type="button" data-p="send" aria-label="Send">${icon('send')}</button></div>
     </div></div>`;
 }
 function wirePanel(c) {
   const wh = panel.querySelector('.work-head');
-  wh.addEventListener('click', () => {
-    const open = wh.getAttribute('aria-expanded') !== 'true';
-    wh.setAttribute('aria-expanded', open);
-    panel.querySelector('.work .collapsible').classList.toggle('closed', !open);
-    const t = wh.querySelector('.more-toggle'); t.setAttribute('aria-expanded', open); t.querySelector('.lbl').textContent = open ? 'Show less' : 'Show more';
-  });
-  wh.querySelector('.more-toggle').setAttribute('aria-expanded', wh.getAttribute('aria-expanded'));
-  panel.querySelectorAll('[data-p]').forEach(b => b.addEventListener('click', () => {
-    const a = b.dataset.p;
+  const setWh = open => { wh.setAttribute('aria-expanded', open); panel.querySelector('.work .collapsible').classList.toggle('closed', !open); const t = wh.querySelector('.more-toggle'); t.setAttribute('aria-expanded', open); t.querySelector('.lbl').textContent = open ? 'Show less' : 'Show more'; };
+  wh.addEventListener('click', () => setWh(wh.getAttribute('aria-expanded') !== 'true')); setWh(wh.getAttribute('aria-expanded') === 'true');
+  panel.querySelectorAll('[data-p]').forEach(b => b.addEventListener('click', e => {
+    e.stopPropagation(); const a = b.dataset.p;
     if (a === 'close') closePanel();
     if (a === 'stop') stopChat(c, b);
-    if (a === 'resume' || a === 'allow') resumeChat(c);
-    if (a === 'deny') { moveTo(c, 'running', { reason: null }); syncPanel(c); }
+    if (a === 'resume' || a === 'allow' || a === 'deny') resumeChat(c);
     if (a === 'done') { moveTo(c, 'done', { reason: null }); syncPanel(c); }
-    if (a === 'archive') archiveChat(c);
+    if (a === 'more') openActions(c, b);
+    if (a === 'native') toast(`Opens this same chat in ${APP[c.provider]}`);
     if (a === 'send') sendMessage(c);
   }));
   const ta = panel.querySelector('textarea');
@@ -458,218 +567,174 @@ function wirePanel(c) {
   bindTooltips(panel);
 }
 function sendMessage(c) {
-  const ta = panel.querySelector('textarea'); const text = ta.value.trim(); if (!text) return;
+  const ta = panel.querySelector('textarea'), text = ta.value.trim(); if (!text) return;
   ta.value = '';
-  const thread = panel.querySelector('.thread');
-  const m = document.createElement('div'); m.className = 'msg user'; m.style.animation = `rise var(--duration-pop) var(--ease-out)`; m.textContent = text;
-  thread.append(m); thread.scrollTop = thread.scrollHeight;
-  if (c.column !== 'running') {
-    if (c.step + 1 >= c.steps.length) { c.steps = STEP_LIBRARY.generic; c.step = 0; }
-    setTimeout(() => { moveTo(c, 'running', { reason: null }); syncPanel(c); }, 350);
-  }
+  const m = document.createElement('div'); m.className = 'msg user'; m.style.animation = 'rise var(--duration-pop) var(--ease-out)'; m.textContent = text;
+  const thread = panel.querySelector('.thread'); thread.append(m); thread.scrollTop = thread.scrollHeight;
+  if (c.column !== 'running') { c.steps = STEPS.generic; c.step = 0; setTimeout(() => { moveTo(c, 'running', { reason: null }); syncPanel(c); }, 350); }
 }
 function openPanel(id) {
   const c = find(id); if (!c) return;
-  board.querySelectorAll('.card[aria-selected]').forEach(x => x.removeAttribute('aria-selected'));
-  cardEl(id)?.setAttribute('aria-selected', 'true');
   openId = id; panel.innerHTML = panelHtml(c); wirePanel(c); panel.dataset.state = 'open';
+  board.querySelectorAll('.card[aria-selected]').forEach(x => x.removeAttribute('aria-selected')); cardEl(id)?.setAttribute('aria-selected', 'true');
+  renderSidebar();
 }
 function syncPanel(c) {
   if (openId !== c.id) return;
-  const keepText = panel.querySelector('textarea')?.value || '';
-  panel.innerHTML = panelHtml(c); wirePanel(c);
-  panel.querySelector('textarea').value = keepText;
+  const keep = panel.querySelector('textarea')?.value || '';
+  panel.innerHTML = panelHtml(c); wirePanel(c); panel.querySelector('textarea').value = keep;
   cardEl(c.id)?.setAttribute('aria-selected', 'true');
 }
-function closePanel() {
-  panel.dataset.state = 'closed'; openId = null;
-  board.querySelectorAll('.card[aria-selected]').forEach(x => x.removeAttribute('aria-selected'));
-}
+function closePanel() { panel.dataset.state = 'closed'; openId = null; board.querySelectorAll('.card[aria-selected]').forEach(x => x.removeAttribute('aria-selected')); renderSidebar(); }
 
-/* ───────── Usage ───────── */
+/* ═════════ Usage: all chips, or one provider when it's focused ═════════ */
 const score = id => Math.min(USAGE[id].fiveHour.left, USAGE[id].weekly.left);
-const suggested = () => Object.keys(USAGE).sort((a, b) => score(b) - score(a))[0];
+const suggestFrom = ids => [...ids].sort((a, b) => score(b) - score(a))[0];
 function renderUsage() {
-  $('#usageChips').innerHTML = Object.keys(PROVIDERS).map(id => {
-    const u = USAGE[id];
-    return `<button class="usage-chip" type="button" data-prov="${id}" aria-haspopup="true" aria-expanded="false" aria-label="${PROVIDERS[id].name}: ${score(id)}% left">
-      ${logo(id, 'sm')}<span class="minimeter" aria-hidden="true">
-        <i data-level="${level(u.fiveHour.left)}" style="--left:${u.fiveHour.left / 100}"></i>
-        <i data-level="${level(u.weekly.left)}" style="--left:${u.weekly.left / 100}"></i></span><span class="pct">${score(id)}%</span></button>`;
-  }).join('');
-  $('#usageChips').querySelectorAll('.usage-chip').forEach(ch => {
-    ch.addEventListener('click', e => { e.stopPropagation(); const willOpen = $('#usagePop').dataset.state !== 'open' || usageAnchor !== ch; closeAll(); if (willOpen) openUsage(ch); });
-  });
-  renderUsageBlocks();
+  const fp = focusedProvider(), area = $('#usageArea');
+  if (fp) {
+    const u = USAGE[fp];
+    area.innerHTML = `<span class="usage-focus" aria-label="${PROVIDERS[fp].name} usage">${logo(fp, 'sm')}
+      <span class="m" data-level="${level(u.fiveHour.left)}"><span>5-hour</span><i style="--left:${u.fiveHour.left / 100}"></i><b>${u.fiveHour.left}%</b></span>
+      <span class="m" data-level="${level(u.weekly.left)}"><span>Weekly</span><i style="--left:${u.weekly.left / 100}"></i><b>${u.weekly.left}%</b></span></span>
+      <button class="link-btn" type="button" id="allUsage" aria-haspopup="true" aria-expanded="false">${icon('gauge', 'sm')}Usage for all providers</button>`;
+    $('#allUsage').addEventListener('click', e => { e.stopPropagation(); togglePop($('#usagePop'), e.currentTarget, { align: 'right' }); });
+  } else {
+    area.innerHTML = PIDS.map(id => { const u = USAGE[id]; return `<button class="usage-chip" type="button" data-prov="${id}" aria-haspopup="true" aria-expanded="false" aria-label="${PROVIDERS[id].name}: ${score(id)}% left">${logo(id, 'sm')}<span class="minimeter" aria-hidden="true"><i data-level="${level(u.fiveHour.left)}" style="--left:${u.fiveHour.left / 100}"></i><i data-level="${level(u.weekly.left)}" style="--left:${u.weekly.left / 100}"></i></span><span class="pct">${score(id)}%</span></button>`; }).join('');
+    area.querySelectorAll('.usage-chip').forEach(ch => ch.addEventListener('click', e => { e.stopPropagation(); togglePop($('#usagePop'), ch, { align: 'right' }); }));
+  }
 }
-function meter(name, w) {
-  return `<div class="meter" data-level="${level(w.left)}"><span class="name">${name}</span><span class="val">${w.left}% left</span>
-    <span class="track"><span class="fill" style="--left:${w.left / 100}"></span></span><span class="reset">Resets ${w.reset}</span></div>`;
-}
+const meter = (name, w) => `<div class="meter" data-level="${level(w.left)}"><span class="name">${name}</span><span class="val">${w.left}% left</span><span class="track"><span class="fill" style="--left:${w.left / 100}"></span></span><span class="reset">Resets ${w.reset}</span></div>`;
 function renderUsageBlocks() {
-  const open = new Set([...$('#usageBlocks').querySelectorAll('.model-toggle[aria-expanded="true"]')].map(b => b.dataset.prov));
-  $('#usageBlocks').innerHTML = Object.keys(PROVIDERS).map(id => {
-    const u = USAGE[id], p = PROVIDERS[id];
-    return `<div class="prov-block">
-      <div class="prov-head">${logo(id)}${p.name} <span class="plan">${p.plan}</span>${suggested() === id ? '<span class="state suggested">Most room</span>' : ''}</div>
+  const best = suggestFrom(PIDS);
+  $('#usageBlocks').innerHTML = PIDS.map(id => { const u = USAGE[id], p = PROVIDERS[id];
+    return `<div class="prov-block"><div class="prov-head">${logo(id)}${p.name} <span class="plan">${p.plan}</span>${best === id ? '<span class="state suggested">Most room</span>' : ''}</div>
       ${meter('5-hour', u.fiveHour)}${meter('Weekly', u.weekly)}
-      <button class="model-toggle" type="button" data-prov="${id}" aria-expanded="${open.has(id)}">${icon('chevron-right', 'sm')}By model</button>
-      <div class="collapsible ${open.has(id) ? '' : 'closed'}"><div><div class="models">${u.models.map(m => meter(`${m.name} · ${m.window}`, m)).join('')}</div></div></div>
-    </div>`;
-  }).join('');
+      <button class="model-toggle" type="button" aria-expanded="false">${icon('chevron-right', 'sm')}By model</button>
+      <div class="collapsible closed"><div><div class="models">${u.models.map(m => meter(`${m.name} · ${m.window}`, m)).join('')}</div></div></div></div>`; }).join('');
   $('#usageBlocks').querySelectorAll('.model-toggle').forEach(b => bindDisclosure(b, b.nextElementSibling));
 }
-let usageAnchor = null;
-function openUsage(anchor) {
-  usageAnchor = anchor;
-  const pop = $('#usagePop'), r = anchor.getBoundingClientRect();
-  pop.style.position = 'fixed'; pop.style.top = (r.bottom + 6) + 'px';
-  pop.style.left = Math.max(8, Math.min(r.right - 340, innerWidth - 348)) + 'px';
-  pop.style.setProperty('--origin', `${r.left + r.width / 2 - parseFloat(pop.style.left)}px top`);
-  $('#usageChips').querySelectorAll('.usage-chip').forEach(c => c.setAttribute('aria-expanded', c === anchor));
-  pop.dataset.state = 'open';
-  usageCloser = () => { pop.dataset.state = 'closed'; $('#usageChips').querySelectorAll('.usage-chip').forEach(c => c.setAttribute('aria-expanded', false)); };
-  closers.add(usageCloser);
-}
-let usageCloser; const closers = new Set();
-document.addEventListener('click', () => { closers.forEach(fn => fn()); closers.clear(); });
-document.addEventListener('keydown', e => { if (e.key === 'Escape') { closers.forEach(fn => fn()); closers.clear(); } });
-$('#usagePop').addEventListener('click', e => e.stopPropagation());
 $('#refreshBtn').addEventListener('click', () => {
-  const ic = $('#refreshBtn .icon'); ic.classList.remove('spinning'); ic.offsetWidth; ic.classList.add('spinning');
-  $('#updated').textContent = 'Checking…';
-  setTimeout(() => {
-    USAGE.claude.fiveHour.left = Math.max(2, USAGE.claude.fiveHour.left - 3);
-    USAGE.codex.fiveHour.left = Math.max(2, USAGE.codex.fiveHour.left - 7);
-    USAGE.antigravity.fiveHour.left = Math.max(2, USAGE.antigravity.fiveHour.left - 2);
-    USAGE.antigravity.models[0].left = USAGE.antigravity.fiveHour.left;
-    updateUsageInPlace();
-    $('#updated').textContent = 'Updated just now';
-  }, 700);
-});
-/* Update fills in place so the bars glide instead of re-rendering */
-function updateUsageInPlace() {
-  $('#usageChips').querySelectorAll('.usage-chip').forEach(ch => {
-    const u = USAGE[ch.dataset.prov], [a, b] = ch.querySelectorAll('.minimeter i');
-    a.style.setProperty('--left', u.fiveHour.left / 100); a.dataset.level = level(u.fiveHour.left);
-    b.style.setProperty('--left', u.weekly.left / 100); b.dataset.level = level(u.weekly.left);
-    ch.querySelector('.pct').textContent = score(ch.dataset.prov) + '%';
-  });
-  $('#usageBlocks').querySelectorAll('.prov-block').forEach((blk, i) => {
-    const id = Object.keys(PROVIDERS)[i], u = USAGE[id];
-    const ms_ = blk.querySelectorAll(':scope > .meter');
-    [[ms_[0], u.fiveHour], [ms_[1], u.weekly]].forEach(([m, w]) => {
-      m.dataset.level = level(w.left); m.querySelector('.fill').style.setProperty('--left', w.left / 100); m.querySelector('.val').textContent = w.left + '% left';
-    });
-    blk.querySelectorAll('.models .meter').forEach((m, j) => { const w = u.models[j]; m.dataset.level = level(w.left); m.querySelector('.fill').style.setProperty('--left', w.left / 100); m.querySelector('.val').textContent = w.left + '% left'; });
-  });
-}
-setInterval(() => { if ($('#updated').textContent.startsWith('Updated')) $('#updated').textContent = 'Updated 1 min ago'; }, 60000);
-
-/* ───────── Filter ───────── */
-function renderFilter() {
-  $('#filterPop').innerHTML = `<div class="pick-label">Show chats from</div>` + Object.keys(PROVIDERS).map(id => `
-    <button class="pick-row" type="button" role="menuitemcheckbox" data-prov="${id}" aria-selected="${filter.has(id)}" aria-checked="${filter.has(id)}">${logo(id)}<span class="t"><b>${PROVIDERS[id].name}</b></span><span class="check">${icon('check', 'sm')}</span></button>`).join('');
-  $('#filterPop').querySelectorAll('.pick-row').forEach(r => r.addEventListener('click', () => {
-    const id = r.dataset.prov;
-    if (filter.has(id) && filter.size > 1) filter.delete(id); else filter.add(id);
-    renderFilter(); applyFilter(true);
-  }));
-  $('#filterLabel').textContent = filter.size === 3 ? 'All providers' : [...filter].map(id => PROVIDERS[id].name).join(', ');
-}
-function applyFilter(animate) {
-  const all = board.querySelectorAll('.card');
-  const run = () => all.forEach(el => { el.hidden = !filter.has(find(+el.dataset.id).provider); });
-  if (animate) flip(all, () => { run(); refreshCounts(); }); else { run(); refreshCounts(false); }
-}
-bindPopover($('#filterBtn'), $('#filterPop'), { place: (t, p) => { const r = t.getBoundingClientRect(); p.style.position = 'fixed'; p.style.top = (r.bottom + 6) + 'px'; p.style.left = r.left + 'px'; p.style.setProperty('--origin', 'top left'); } });
-
-/* ───────── New chat dialog ───────── */
-const draft = { provider: suggested(), model: null, folder: 'bakery-site' };
-function setDraftProvider(id) { draft.provider = id; draft.model = MODELS[id][0]; renderDialogChips(); }
-function renderDialogChips() {
-  $('#provBtn').innerHTML = `${logo(draft.provider, 'sm')}${PROVIDERS[draft.provider].name}${draft.provider === suggested() ? ' <span class="suggested">Suggested</span>' : ''}${icon('chevron-down', 'sm')}`;
-  $('#modelBtn').innerHTML = `${draft.model}${icon('chevron-down', 'sm')}`;
-  const f = FOLDERS.find(x => x.id === draft.folder);
-  $('#folderBtn').innerHTML = `<span class="folder-glyph" style="background:${f.colour}">${f.glyph}</span>${f.id}${icon('chevron-down', 'sm')}`;
-  const u = USAGE[draft.provider];
-  $('#dlgHint').textContent = `${PROVIDERS[draft.provider].name}: ${u.fiveHour.left}% of 5-hour · ${u.weekly.left}% of weekly left`;
-  $('#provPop').innerHTML = `<div class="pick-label">Start on</div>` + Object.keys(PROVIDERS).sort((a, b) => score(b) - score(a)).map(id => {
-    const x = USAGE[id];
-    return `<button class="pick-row" type="button" role="option" data-prov="${id}" aria-selected="${draft.provider === id}">${logo(id, 'lg')}
-      <span class="t"><b>${PROVIDERS[id].name}${suggested() === id ? '<span class="suggested">Suggested</span>' : ''}</b>
-      <small>${x.fiveHour.left}% of 5-hour · ${x.weekly.left}% of weekly left</small></span>
-      <span class="minimeter" aria-hidden="true"><i data-level="${level(x.fiveHour.left)}" style="--left:${x.fiveHour.left / 100}"></i><i data-level="${level(x.weekly.left)}" style="--left:${x.weekly.left / 100}"></i></span>
-      <span class="check">${icon('check', 'sm')}</span></button>`;
-  }).join('');
-  $('#provPop').querySelectorAll('.pick-row').forEach(r => r.addEventListener('click', () => { setDraftProvider(r.dataset.prov); closeAll(); }));
-  const models = USAGE[draft.provider].models;
-  $('#modelPop').innerHTML = `<div class="pick-label">${PROVIDERS[draft.provider].name} models</div>` + MODELS[draft.provider].map(m => {
-    const lim = models.find(x => x.name === m);
-    return `<button class="pick-row" type="button" role="option" data-model="${m}" aria-selected="${draft.model === m}"><span class="t"><b>${m}</b>${lim ? `<small>${lim.left}% of ${lim.window} left</small>` : '<small>Shares the plan limit</small>'}</span><span class="check">${icon('check', 'sm')}</span></button>`;
-  }).join('');
-  $('#modelPop').querySelectorAll('.pick-row').forEach(r => r.addEventListener('click', () => { draft.model = r.dataset.model; renderDialogChips(); closeAll(); }));
-  $('#folderPop').innerHTML = `<div class="pick-label">Recent folders</div>` + FOLDERS.map(f => `
-    <button class="pick-row" type="button" role="option" data-folder="${f.id}" aria-selected="${draft.folder === f.id}"><span class="folder-glyph" style="background:${f.colour}">${f.glyph}</span><span class="t"><b>${f.id}</b></span><span class="check">${icon('check', 'sm')}</span></button>`).join('')
-    + `<div class="pick-sep"></div><button class="pick-row" type="button">${icon('folder')}<span class="t"><b>Choose another folder…</b></span></button>`;
-  $('#folderPop').querySelectorAll('[data-folder]').forEach(r => r.addEventListener('click', () => { draft.folder = r.dataset.folder; renderDialogChips(); closeAll(); }));
-}
-const placeBelow = (t, p) => { const r = t.getBoundingClientRect(); p.style.position = 'fixed'; p.style.top = (r.bottom + 6) + 'px'; p.style.left = r.left + 'px'; p.style.zIndex = 65; };
-bindPopover($('#provBtn'), $('#provPop'), { place: placeBelow });
-bindPopover($('#modelBtn'), $('#modelPop'), { place: placeBelow });
-bindPopover($('#folderBtn'), $('#folderPop'), { place: placeBelow });
-
-function openDialog() {
-  closeAll(); setDraftProvider(suggested());
-  $('#scrim').dataset.state = 'open'; $('#dialog').dataset.state = 'open';
-  $('#prompt').focus({ preventScroll: true });
-}
-function closeDialog() { $('#scrim').dataset.state = 'closed'; $('#dialog').dataset.state = 'closed'; closeAll(); }
-function startChat() {
-  const text = $('#prompt').value.trim();
-  if (!text) { $('#prompt').focus(); $('#prompt').animate([{ transform: 'translateX(0)' }, { transform: 'translateX(-4px)' }, { transform: 'translateX(4px)' }, { transform: 'translateX(0)' }], { duration: 200 }); return; }
-  const c = { id: nextId++, title: text.charAt(0).toUpperCase() + text.slice(1, 60), provider: draft.provider, model: draft.model, folder: draft.folder, column: 'running', steps: STEP_LIBRARY.generic, step: 0, ago: 'now', askAt: null };
-  chats.push(c); $('#prompt').value = ''; closeDialog();
-  filter.add(c.provider); renderFilter();
-  const card = makeCard(c); card.classList.add('new');
-  setTimeout(() => flip(board.querySelectorAll('.card'), () => { colBody('running').prepend(card); refreshCounts(); }), 120);
-}
-$('#scrim').addEventListener('click', closeDialog);
-$('#dlgClose').addEventListener('click', closeDialog);
-$('#dlgCancel').addEventListener('click', closeDialog);
-$('#dlgStart').addEventListener('click', startChat);
-$('#prompt').addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) startChat(); });
-$('#dialog').addEventListener('click', e => { if (!e.target.closest('.chip-btn')) closeAll(); });
-['#sideNew', '#topNew'].forEach(s => $(s).addEventListener('click', e => { e.stopPropagation(); openDialog(); }));
-
-/* ───────── Keyboard ───────── */
-document.addEventListener('keydown', e => {
-  const typing = e.target instanceof Element && e.target.matches('input, textarea');
-  if (e.key === 'Escape') { if ($('#dialog').dataset.state === 'open') closeDialog(); else if (openId) closePanel(); }
-  if (!typing && (e.key === 'n' || e.key === 'N') && !e.ctrlKey && !e.metaKey) { e.preventDefault(); openDialog(); }
+  const ic = $('#refreshBtn .icon'); ic.classList.remove('spinning'); ic.offsetWidth; ic.classList.add('spinning'); $('#updated').textContent = 'Checking…';
+  setTimeout(() => { PIDS.forEach(id => { USAGE[id].fiveHour.left = Math.max(2, USAGE[id].fiveHour.left - 2); }); renderUsageBlocks(); renderUsage(); $('#updated').textContent = 'Updated just now'; }, 700);
 });
 
-/* ───────── Sidebar ───────── */
+/* ═════════ Sidebar: providers, pinned, recent chats by project ═════════ */
+const expandedProjects = new Set();
+function chatRow(c) {
+  const st = c.column === 'running' ? statusIcon('running') : c.column === 'needs' ? `<span class="state-dot" style="width:6px;height:6px;border-radius:50%;background:var(--color-needs);flex:none" title="Needs you"></span>` : '';
+  return `<div class="chat-row" role="button" tabindex="0" data-chat="${c.id}" ${openId === c.id ? 'aria-current="true"' : ''}>${logo(c.provider, 'sm')}<span class="t">${c.title}</span>${st}
+    <button class="row-more" type="button" aria-label="More actions for ${c.title}">${icon('more', 'sm')}</button></div>`;
+}
 function renderSidebar() {
-  $('#folderItems').innerHTML = FOLDERS.map(f => `<button class="navitem" type="button"><span class="folder-glyph" style="background:${f.colour}">${f.glyph}</span>${f.id}<span class="count">${chats.filter(c => c.folder === f.id && !c.archived && c.column !== 'done').length}</span></button>`).join('');
-  $('#provItems').innerHTML = Object.keys(PROVIDERS).map(id => `<button class="navitem" type="button" data-tip="Connected · ${PROVIDERS[id].plan} plan">${logo(id)}${PROVIDERS[id].name}<span class="dot" style="background:var(--color-success)"></span></button>`).join('');
+  const fp = focusedProvider();
+  $('#provItems').innerHTML = PIDS.map(id => `<button class="navitem prov" type="button" data-prov="${id}" aria-pressed="${fp === id}">${logo(id)}${PROVIDERS[id].name}<span class="meta-r">${chats.filter(c => c.provider === id && !c.archived).length}</span></button>`).join('');
+  $('#provItems').querySelectorAll('[data-prov]').forEach(b => b.addEventListener('click', () => {
+    const id = b.dataset.prov; setFilter('provider', focusedProvider() === id ? null : new Set([id]));
+  }));
+  const pinned = chats.filter(c => c.pinned && !c.archived);
+  $('#pinnedSection').hidden = pinned.length === 0;
+  $('#pinItems').innerHTML = pinned.map(chatRow).join('');
+  const visible = chats.filter(c => !c.archived && (!fp || c.provider === fp));
+  $('#recentItems').innerHTML = PROJECTS.filter(p => visible.some(c => c.project === p.id && !c.pinned)).map(p => {
+    const list = visible.filter(c => c.project === p.id && !c.pinned), open = expandedProjects.has(p.id), shown = open ? list : list.slice(0, 3);
+    return `<div class="proj"><div class="proj-row" data-proj="${p.id}" title="${p.path}">${glyph(p, 14)}<span class="name">${p.id}</span>
+        <span class="owners">${p.owners.map(o => logo(o, 'sm')).join('')}</span>
+        <button class="add" type="button" data-newin="${p.id}" aria-label="New chat in ${p.id}" data-tip="New chat in ${p.id}">${icon('plus', 'sm')}</button></div>
+      ${shown.map(chatRow).join('')}
+      ${list.length > 3 ? `<button class="show-more-row" type="button" data-expand="${p.id}">${open ? 'Show less' : `Show ${list.length - 3} more`}</button>` : ''}</div>`;
+  }).join('');
+  document.querySelectorAll('.sidebar .chat-row').forEach(r => {
+    r.addEventListener('click', () => openPanel(+r.dataset.chat));
+    r.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target === r) openPanel(+r.dataset.chat); });
+    r.querySelector('.row-more').addEventListener('click', e => { e.stopPropagation(); openActions(find(+r.dataset.chat), e.currentTarget); });
+  });
+  document.querySelectorAll('[data-newin]').forEach(b => b.addEventListener('click', e => { e.stopPropagation(); openDialog(b.dataset.newin); }));
+  document.querySelectorAll('[data-expand]').forEach(b => b.addEventListener('click', () => { const id = b.dataset.expand; expandedProjects.has(id) ? expandedProjects.delete(id) : expandedProjects.add(id); renderSidebar(); }));
+  bindTooltips(document.querySelector('.sidebar'));
 }
-bindNav($('#nav'), it => {
-  if (it.dataset.nav === 'usage') { setTimeout(() => openUsage($('#usageChips .usage-chip')), 0); }
-  if (it.dataset.nav === 'connect') toast('The Connect screen is designed next');
-});
-bindDisclosure($('#foldersToggle'), $('#foldersList'));
-bindDisclosure($('#provToggle'), $('#provList'));
+bindNav($('#nav'), it => { if (it.dataset.nav !== 'board') toast(it.dataset.nav === 'projects' ? 'The Projects page is designed next' : 'Connections (including free providers) is designed next'); });
+[['#provToggle', '#provList'], ['#pinToggle', '#pinList'], ['#recentToggle', '#recentList']].forEach(([t, l]) => bindDisclosure($(t), $(l)));
 $('#themeBtn').addEventListener('click', toggleTheme);
 
-/* ───────── Boot ───────── */
+/* ═════════ New chat: project first, then a provider that knows it ═════════ */
+const draft = { project: 'open-project', provider: 'claude', model: 'Opus' };
+const dlgPop = $('#dlgPop');
+const allowedProviders = () => proj(draft.project).owners;
+function pickProvider() { draft.provider = suggestFrom(allowedProviders()); draft.model = MODELS[draft.provider][0]; }
+function renderDialog() {
+  const p = proj(draft.project), allowed = allowedProviders(), best = suggestFrom(allowed);
+  $('#projBtn').innerHTML = `${glyph(p, 14)}${p.id}${icon('chevron-down', 'sm')}`;
+  $('#provBtn').innerHTML = `${logo(draft.provider, 'sm')}${PROVIDERS[draft.provider].name}${draft.provider === best && allowed.length > 1 ? ' <span class="suggested">Suggested</span>' : ''}${icon('chevron-down', 'sm')}`;
+  $('#modelBtn').innerHTML = `${draft.model}${icon('chevron-down', 'sm')}`;
+  const u = USAGE[draft.provider];
+  $('#dlgHint').textContent = `${PROVIDERS[draft.provider].name}: ${u.fiveHour.left}% of 5-hour · ${u.weekly.left}% of weekly left`;
+  $('#dlgNote').innerHTML = allowed.length < PIDS.length ? `${icon('projects', 'sm')}${p.id} has been worked on with ${allowed.map(a => PROVIDERS[a].name).join(' and ')}, so ${allowed.length > 1 ? 'those are' : 'that’s'} the provider${allowed.length > 1 ? 's' : ''} that know${allowed.length > 1 ? '' : 's'} it.` : '';
+}
+function dlgMenu(kind, anchor) {
+  if (kind === 'project') {
+    dlgPop.innerHTML = `<div class="pane"><div class="menu-label">Projects found on this computer</div>${PROJECTS.map(p => `<button class="menu-item" type="button" data-proj="${p.id}">${glyph(p, 14)}<span style="flex:1">${p.id}</span><span class="r">${p.owners.map(o => logo(o, 'sm')).join('')}${draft.project === p.id ? icon('check', 'sm') : ''}</span></button>`).join('')}
+      <div class="menu-sep"></div><button class="menu-item" type="button" data-proj="__new">${icon('folder')}Choose another folder…</button></div>`;
+    dlgPop.querySelectorAll('[data-proj]').forEach(b => b.onclick = () => { if (b.dataset.proj === '__new') { toast('Opens the folder picker. A new folder works with any provider'); return; } draft.project = b.dataset.proj; if (!allowedProviders().includes(draft.provider)) pickProvider(); renderDialog(); closePops(); });
+  }
+  if (kind === 'provider') {
+    const allowed = allowedProviders(), best = suggestFrom(allowed);
+    dlgPop.innerHTML = `<div class="pane"><div class="menu-label">Start on</div>${PIDS.map(id => { const x = USAGE[id], ok = allowed.includes(id);
+      return `<button class="pick-row" type="button" data-prov="${id}" aria-selected="${draft.provider === id}" ${ok ? '' : 'aria-disabled="true"'}>${logo(id, 'lg')}<span class="t"><b>${PROVIDERS[id].name}${ok && best === id && allowed.length > 1 ? '<span class="suggested">Suggested</span>' : ''}</b>
+        <small>${ok ? `${x.fiveHour.left}% of 5-hour · ${x.weekly.left}% of weekly left` : `Hasn’t worked on ${draft.project} yet`}</small></span>
+        ${ok ? `<span class="minimeter" aria-hidden="true"><i data-level="${level(x.fiveHour.left)}" style="--left:${x.fiveHour.left / 100}"></i><i data-level="${level(x.weekly.left)}" style="--left:${x.weekly.left / 100}"></i></span>` : ''}<span class="check">${icon('check', 'sm')}</span></button>`; }).join('')}</div>`;
+    dlgPop.querySelectorAll('[data-prov]').forEach(b => b.onclick = () => { if (b.getAttribute('aria-disabled') === 'true') return; draft.provider = b.dataset.prov; draft.model = MODELS[draft.provider][0]; renderDialog(); closePops(); });
+  }
+  if (kind === 'model') {
+    dlgPop.innerHTML = `<div class="pane"><div class="menu-label">${PROVIDERS[draft.provider].name} models</div>${MODELS[draft.provider].map(m => { const lim = USAGE[draft.provider].models.find(x => x.name === m);
+      return `<button class="pick-row" type="button" data-model="${m}" aria-selected="${draft.model === m}"><span class="t"><b>${m}</b><small>${lim ? `${lim.left}% of ${lim.window} left` : 'Shares the plan limit'}</small></span><span class="check">${icon('check', 'sm')}</span></button>`; }).join('')}</div>`;
+    dlgPop.querySelectorAll('[data-model]').forEach(b => b.onclick = () => { draft.model = b.dataset.model; renderDialog(); closePops(); });
+  }
+  togglePop(dlgPop, anchor, { z: 65 });
+}
+[['#projBtn', 'project'], ['#provBtn', 'provider'], ['#modelBtn', 'model']].forEach(([s, k]) => $(s).addEventListener('click', e => { e.stopPropagation(); dlgMenu(k, e.currentTarget); }));
+function openDialog(projectId) {
+  closePops();
+  const fp = focusedProvider();
+  draft.project = projectId || (fp ? PROJECTS.find(p => p.owners.includes(fp)).id : 'open-project');
+  pickProvider();
+  if (fp && allowedProviders().includes(fp)) { draft.provider = fp; draft.model = MODELS[fp][0]; }
+  renderDialog();
+  $('#scrim').dataset.state = 'open'; $('#dialog').dataset.state = 'open'; $('#prompt').focus({ preventScroll: true });
+}
+function closeDialog() { $('#scrim').dataset.state = 'closed'; $('#dialog').dataset.state = 'closed'; closePops(); }
+function startChat() {
+  const text = $('#prompt').value.trim();
+  if (!text) { $('#prompt').focus(); if (!KB.reduced()) $('#prompt').animate([{ transform: 'translateX(0)' }, { transform: 'translateX(-4px)' }, { transform: 'translateX(4px)' }, { transform: 'translateX(0)' }], { duration: 200 }); return; }
+  const c = { id: nextId++, title: text.charAt(0).toUpperCase() + text.slice(1, 60), provider: draft.provider, model: draft.model, project: draft.project, column: 'running', steps: STEPS.generic, step: 0, ago: 'now', askAt: null, startedHere: true };
+  chats.unshift(c); $('#prompt').value = ''; closeDialog();
+  if (!passes(c)) { Object.keys(filters).forEach(k => filters[k] = null); applyFilters(false); }
+  const card = makeCard(c); card.classList.add('new');
+  setTimeout(() => flip(board.querySelectorAll('.card'), () => { colBody('running').prepend(card); refreshCounts(); }).then(renderSidebar), 120);
+}
+$('#scrim').addEventListener('click', closeDialog); $('#dlgClose').addEventListener('click', closeDialog); $('#dlgCancel').addEventListener('click', closeDialog); $('#dlgStart').addEventListener('click', startChat);
+$('#prompt').addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) startChat(); });
+$('#dialog').addEventListener('click', e => { if (!e.target.closest('.chip-btn')) closePops(); });
+['#sideNew', '#topNew'].forEach(s => $(s).addEventListener('click', e => { e.stopPropagation(); openDialog(); }));
+
+/* ═════════ Keyboard ═════════ */
+document.addEventListener('keydown', e => {
+  const typing = e.target instanceof Element && e.target.matches('input, textarea');
+  if (e.key === 'Escape') { if (openPops.size) closePops(); else if ($('#dialog').dataset.state === 'open') closeDialog(); else if (openId) closePanel(); return; }
+  if (typing || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.key === 'n' || e.key === 'N') { e.preventDefault(); openDialog(); }
+  if (e.key === 'f' || e.key === 'F') { e.preventDefault(); filterRoot(); openPop(filterPop, $('#filterBtn')); }
+});
+
+/* ═════════ Boot ═════════ */
 hydrateIcons();
 buildColumns();
+renderBoard();
 renderSidebar();
-renderAll();
 renderUsage();
-renderFilter();
-setDraftProvider(suggested());
+renderUsageBlocks();
+renderNotifs();
+renderFilterBar();
 bindTooltips();
 </script>
 </body>

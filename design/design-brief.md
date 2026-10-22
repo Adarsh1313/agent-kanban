@@ -83,9 +83,24 @@ UI. Most tempting for this direction, and banned:
 - Monospace creeping into labels and numbers.
 - Every button looking the same weight.
 
+## Revision 2 conventions
+
+- **Sidebar:** Board · Projects · Connections, then Providers (a focus toggle), Pinned, and Recent chats
+  grouped by project (Claude's layout) using each provider's own chat titles and logos.
+- **Focusing a provider** filters the board, adds a "Provider is X" chip, and swaps the top-bar usage
+  for that provider's 5-hour and weekly meters plus a "Usage for all providers" button.
+- **Notifications** live behind a bell (count badge, one damped ring per new event, optional soft
+  chime). Desktop notifications and sound each have a switch.
+- **Filters** follow Linear: category list, then an options pane that slides in, with Select all / None;
+  typing searches values across categories; active filters become chips with ×; F opens it.
+- **New chat** is project-first; providers that haven't worked on that project are shown but disabled
+  with the reason.
+- **The chat panel** says "Same chat as in Claude Code" and offers "Open in Claude Code".
+
 ## Open questions / extend here
 
-- Connect screen and first-run onboarding (3–5 steps) are not designed yet.
+- Projects page, Connections page (room for free providers), Connect flow and first-run onboarding
+  (3–5 steps) are not designed yet.
 - Antigravity usage: if `agy` does not report limits, its chip shows "Limits unavailable" and it is
   never suggested. Design for that state exists in `design-system.html`.
 - Per-message timestamps in the chat panel.
