@@ -78,6 +78,7 @@ export type ServerEvent =
   | { type: 'message.completed'; chatId: string; message: Message }
   | { type: 'tool.call'; chatId: string; toolCall: ToolCall }
   | { type: 'request.opened'; chatId: string; requestId: string; kind: 'permission' | 'question'; summary: string }
+  | { type: 'request.closed'; chatId: string; requestId: string }
   | { type: 'usage.updated'; reading: UsageReading }
   | { type: 'connection.updated'; health: ConnectionHealth }
   | { type: 'notification'; chatId: string; kind: 'permission' | 'question' | 'finished' | 'limit' | 'error' };

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ConnectionHealth, UsageReading } from '@agent-kanban/shared';
-import { applyEvent, applySnapshot, initialState, missingChats } from '../src/state/reducer.ts';
+import { applyEvent, applySnapshot, beginSync, endSync, initialState, isChatLoaded, mergeFetched, missingChats } from '../src/state/reducer.ts';
 import { chat, message } from './helpers.ts';
 
 const withChat = (over = {}) => applyEvent(initialState(), { type: 'chat.updated', chat: chat(over) });
@@ -97,12 +97,23 @@ describe('applySnapshot', () => {
     expect(next.requests.c).toHaveLength(1);
   });
 
-  it('does not overwrite a chat updated by an event newer than the snapshot, nor drop chats it lacks', () => {
-    let s = withChat({ id: 'a', title: 'newer', updatedAt: '2026-10-23T12:00:00.000Z' });
+  it('does not overwrite a chat an event updated during the fetch, nor drop one an event created (I3)', () => {
+    let s = withChat({ id: 'a', title: 'older', updatedAt: '2026-10-23T11:00:00.000Z' });
+    const b = beginSync(s);
+    s = applyEvent(b.state, { type: 'chat.updated', chat: chat({ id: 'a', title: 'newer', updatedAt: '2026-10-23T12:00:00.000Z' }) });
     s = applyEvent(s, { type: 'chat.updated', chat: chat({ id: 'b' }) });
-    const next = applySnapshot(s, snap([chat({ id: 'a', title: 'older', updatedAt: '2026-10-23T11:00:00.000Z' })]));
+    const next = applySnapshot(s, snap([chat({ id: 'a', title: 'older', updatedAt: '2026-10-23T11:00:00.000Z' })]), b.since);
     expect(next.chats.a!.title).toBe('newer');
     expect(next.chats.b).toBeDefined();
+  });
+
+  it('drops chats a full snapshot lacks (archived or removed elsewhere) with their cached data (I3)', () => {
+    let s = withChat({ id: 'gone' });
+    s = applyEvent(s, { type: 'chat.updated', chat: chat({ id: 'kept' }) });
+    s = applyEvent(s, { type: 'message.completed', chatId: 'gone', message: message({ chatId: 'gone' }) });
+    const next = applySnapshot(s, snap([chat({ id: 'kept' })]));
+    expect(Object.keys(next.chats)).toEqual(['kept']);
+    expect(next.messages.gone).toBeUndefined();
   });
 
   it('keeps streaming buffered for chats the snapshot does not know yet', () => {
@@ -119,5 +130,45 @@ describe('applySnapshot', () => {
     expect(next.suggested).toBe('codex');
     expect(next.usage.codex).toBeDefined();
     expect(next.history).toHaveLength(1);
+  });
+  it('a delta for a message already in messages extends it instead of splitting it (I1)', () => {
+    let s = withChat();
+    s = applyEvent(s, { type: 'message.completed', chatId: 'c1', message: message({ text: 'Hel' }) });
+    s = applyEvent(s, { type: 'message.delta', chatId: 'c1', messageId: 'm1', text: 'lo' });
+    expect(s.messages.c1![0]!.text).toBe('Hello');
+    expect(s.streaming.c1?.m1).toBeUndefined();
+  });
+});
+
+describe('request.closed, notifications, loaded chats', () => {
+  it('request.closed removes just that request, so an answer in one tab clears the other', () => {
+    let s = withChat({ column: 'needs_you', needsReason: 'permission' });
+    s = applyEvent(s, { type: 'request.opened', chatId: 'c1', requestId: 'r1', kind: 'permission', summary: 'a' });
+    s = applyEvent(s, { type: 'request.opened', chatId: 'c1', requestId: 'r2', kind: 'question', summary: 'b' });
+    s = applyEvent(s, { type: 'request.closed', chatId: 'c1', requestId: 'r1' });
+    expect(s.requests.c1!.map((r) => r.requestId)).toEqual(['r2']);
+  });
+
+  it('notification ids are unique and monotonic (M7)', () => {
+    let s = withChat();
+    const at = new Date('2026-10-23T11:00:00.000Z');
+    s = applyEvent(s, { type: 'notification', chatId: 'c1', kind: 'finished' }, at);
+    s = applyEvent(s, { type: 'notification', chatId: 'c1', kind: 'finished' }, at);
+    expect(new Set(s.notifications.map((n) => n.id)).size).toBe(2);
+  });
+
+  it('isChatLoaded is true only after a thread was merged, and reset by a full snapshot (M8)', () => {
+    let s = withChat();
+    expect(isChatLoaded(s, 'c1')).toBe(false);
+    s = mergeFetched(s, 'c1', { messages: [message()] }, 0);
+    expect(isChatLoaded(s, 'c1')).toBe(true);
+    s = applySnapshot(s, { chats: [chat()], usage: [], suggested: null, connections: [], history: [], projects: [] });
+    expect(isChatLoaded(s, 'c1')).toBe(false);
+  });
+
+  it('endSync forgets touched items once no fetch is in flight', () => {
+    const b = beginSync(withChat());
+    const s = endSync(applyEvent(b.state, { type: 'chat.updated', chat: chat() }));
+    expect(s.sync.touched).toEqual({});
   });
 });

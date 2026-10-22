@@ -35,20 +35,21 @@ export function App() {
         // Offline or restarting: the socket status already says so, and the next reconnect loads again.
       });
     };
-    const stopSync = store.subscribe(() => {
-      void syncMissing(store, api).catch(() => {});
-    });
     const conn = connectSocket({
       token,
-      onEvent: (e) => store.setState((s) => applyEvent(s, e)),
-      onStatus: (socket) => store.setState((s) => ({ ...s, socket })),
-      onReconnected: resync,
+      onEvent: (e) => {
+        store.setState((s) => applyEvent(s, e));
+        // Only events that name a chat can refer to one the store lacks.
+        if ('chatId' in e) void syncMissing(store, api).catch(() => {});
+      },
+      // Every open (the first too) loads everything, so events between the fetch and the subscribe cannot be lost.
+      onStatus: (socket) => {
+        store.setState((s) => ({ ...s, socket }));
+        if (socket === 'live') resync();
+      },
+      onReconnected: () => {},
     });
-    resync();
-    return () => {
-      stopSync();
-      conn.close();
-    };
+    return () => conn.close();
   }, [token, store]);
 
   return (

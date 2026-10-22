@@ -124,6 +124,7 @@ export class ChatService {
     }
     open.delete(requestId);
     this.store.setRequestStatus(chatId, requestId, 'answered');
+    this.broadcast({ type: 'request.closed', chatId, requestId });
     if (open.size === 0) this.transition(chatId, { type: 'user.answered' });
   }
 
@@ -223,6 +224,7 @@ export class ChatService {
   recoverAfterRestart(): void {
     this.live.clear();
     this.requests.clear();
+    for (const chat of this.store.listChats()) this.announceClosed(chat.id);
     this.store.closeOpenRequests();
     for (const chat of this.store.listChats()) this.transition(chat.id, { type: 'app.restarted' });
   }
@@ -478,7 +480,13 @@ export class ChatService {
   /** Open requests can no longer be answered (turn over, stopped, failed): drop them here and in the store. */
   private closeRequests(chatId: string): void {
     this.requests.delete(chatId);
+    this.announceClosed(chatId);
     this.store.closeOpenRequests(chatId);
+  }
+
+  /** Tells every open page that the chat's still-open requests are gone. */
+  private announceClosed(chatId: string): void {
+    for (const r of this.store.listOpenRequests(chatId)) this.broadcast({ type: 'request.closed', chatId, requestId: r.requestId });
   }
 
   private idsFor(chatId: string): Map<string, string> {

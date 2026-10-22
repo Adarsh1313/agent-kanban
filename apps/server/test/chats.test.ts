@@ -552,3 +552,23 @@ test('when the registry swaps a provider adapter, chats on it resume on the new 
   await svc.send(chat.id, 'more');
   assert.deepEqual(created[1]!.calls, ['resume:s1:/w', 'send:s1:more']);
 });
+
+test('request.closed is broadcast when a request is answered and when the rest close with the turn', async () => {
+  const { adapter, events, svc } = setup();
+  const chat = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+  adapter.emit({ type: 'request.opened', sessionRef: 's1', requestId: 'r1', kind: 'permission', summary: 'a' });
+  adapter.emit({ type: 'request.opened', sessionRef: 's1', requestId: 'r2', kind: 'question', summary: 'b' });
+  await svc.answer(chat.id, 'r1', 'allow');
+  const closed = () => events.filter((e) => e.type === 'request.closed').map((e) => (e as { requestId: string }).requestId);
+  assert.deepEqual(closed(), ['r1']);
+  adapter.emit({ type: 'stopped', sessionRef: 's1' });
+  assert.deepEqual(closed(), ['r1', 'r2']);
+});
+
+test('request.closed is broadcast for open requests when the app restarts', async () => {
+  const { adapter, events, svc } = setup();
+  await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+  adapter.emit({ type: 'request.opened', sessionRef: 's1', requestId: 'r1', kind: 'permission', summary: 'a' });
+  svc.recoverAfterRestart();
+  assert.ok(events.some((e) => e.type === 'request.closed' && e.requestId === 'r1'));
+});
