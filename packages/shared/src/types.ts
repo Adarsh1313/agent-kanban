@@ -28,3 +28,27 @@ export type UserAction =
   | { type: 'user.markDone' }
   | { type: 'user.dragOut' }
   | { type: 'app.restarted' };
+
+export interface Chat {
+  id: string;
+  provider: ProviderId;
+  sessionRef: string | null;
+  cwd: string;
+  title: string;
+  model: string | null;
+  column: Column | null;
+  needsReason: NeedsReason | null;
+  createdAt: string;
+  updatedAt: string;
+  doneAt: string | null;
+  archived: boolean;
+  pinned: boolean;
+  snoozedUntil: string | null;
+}
+
+export interface Message { id: string; chatId: string; role: 'user' | 'assistant'; text: string; createdAt: string }
+
+export interface ToolCall { id: string; chatId: string; name: string; summary: string; status: 'running' | 'done' | 'failed'; createdAt: string }
+
+export interface UsageWindow { kind: 'five_hour' | 'weekly' | 'model'; label: string; leftPct: number; resetsAt: string | null }
+export interface UsageReading { provider: ProviderId; status: 'ok' | 'unavailable' | 'signed_out' | 'error'; windows: UsageWindow[]; readAt: string; message?: string }

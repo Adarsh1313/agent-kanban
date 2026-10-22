@@ -4,7 +4,7 @@
   "type": "module",
   "workspaces": ["apps/*", "packages/*"],
   "scripts": {
-    "test": "node --test \"apps/*/test/**/*.test.ts\"",
+    "test": "node --disable-warning=ExperimentalWarning --test \"apps/*/test/**/*.test.ts\"",
     "typecheck": "tsc -p tsconfig.json"
   },
   "devDependencies": {
