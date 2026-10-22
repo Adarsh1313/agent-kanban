@@ -59,10 +59,12 @@ type Chat = {
   pending: Map<string, Pending>;
   onStarted?: { resolve: () => void; reject: (e: Error) => void };
   deferred: Array<() => void>; // request.opened emissions waiting for the session id
+  idleTimer: NodeJS.Timeout | null; // closes the query after a quiet spell; the next message resumes it
 };
 
 const SHUT_DOWN = 'Claude Code adapter is shut down.';
 const DIED = 'Claude Code stopped unexpectedly.';
+const IDLE_CLOSE_MS = 10 * 60_000;
 
 export class ClaudeAdapter implements ProviderAdapter {
   id = 'claude' as const;
@@ -79,9 +81,11 @@ export class ClaudeAdapter implements ProviderAdapter {
   private usageBusy = new Map<Query, number>(); // in-flight calls per shared query
   private retiring = new Set<Query>(); // replaced on purpose; closed once their in-flight calls finish
   private lastSignedIn: boolean | null = null;
+  private idleCloseMs: number;
 
-  constructor(opts: { claudePath: string; query?: typeof sdkQuery; usageTimeoutMs?: number }) {
+  constructor(opts: { claudePath: string; query?: typeof sdkQuery; usageTimeoutMs?: number; idleCloseMs?: number }) {
     this.usageTimeoutMs = opts.usageTimeoutMs ?? 15_000;
+    this.idleCloseMs = opts.idleCloseMs ?? IDLE_CLOSE_MS;
     // The SDK needs the real executable (an .exe, or a .js script it runs with node), never a .cmd shim.
     const target = resolveSpawnTarget(opts.claudePath);
     this.claudePath = target.args.length === 0 ? target.command : target.args[0]!;
@@ -104,7 +108,31 @@ export class ClaudeAdapter implements ProviderAdapter {
   }
 
   private newChat(cwd: string, model: string | undefined, sessionRef: string | null): Chat {
-    return { sessionRef, cwd, model, queue: new InputQueue(), query: null, turnRunning: false, turnAnnounced: false, stopping: false, pending: new Map(), deferred: [] };
+    return { sessionRef, cwd, model, queue: new InputQueue(), query: null, turnRunning: false, turnAnnounced: false, stopping: false, pending: new Map(), deferred: [], idleTimer: null };
+  }
+
+  private clearIdle(chat: Chat): void {
+    if (chat.idleTimer) { clearTimeout(chat.idleTimer); chat.idleTimer = null; }
+  }
+
+  /** After a turn ends: close the chat's Claude Code process once it has been quiet for a while (10 min). */
+  private scheduleIdleClose(chat: Chat): void {
+    this.clearIdle(chat);
+    const timer = setTimeout(() => { chat.idleTimer = null; this.closeIfIdle(chat); }, this.idleCloseMs);
+    timer.unref?.();
+    chat.idleTimer = timer;
+  }
+
+  /** Closes an idle chat's query without any event; sendMessage relaunches it with `resume`. */
+  private closeIfIdle(chat: Chat): void {
+    if (this.disposed || !chat.query || chat.turnRunning || chat.pending.size > 0 || chat.sessionRef === null) return;
+    const q = chat.query;
+    chat.query = null; // consume() sees the swap and stays quiet
+    this.live.delete(chat);
+    chat.queue.close();
+    chat.queue = new InputQueue();
+    chat.turnAnnounced = false; chat.stopping = false;
+    try { q.close(); } catch { /* already gone */ }
   }
 
   private launch(chat: Chat, resume?: string): void {
@@ -185,6 +213,7 @@ export class ClaudeAdapter implements ProviderAdapter {
     } else if (m.type === 'result') {
       const swallow = chat.stopping;
       chat.turnRunning = false; chat.turnAnnounced = false; chat.stopping = false;
+      this.scheduleIdleClose(chat);
       if (swallow) return;
       if (m.is_error) this.emit({ type: 'error', sessionRef, message: typeof m.result === 'string' && m.result ? m.result : 'Claude Code ran into a problem.' });
       else this.emit({ type: 'turn.completed', sessionRef });
@@ -220,6 +249,7 @@ export class ClaudeAdapter implements ProviderAdapter {
   async sendMessage(sessionRef: string, text: string): Promise<void> {
     this.assertOpen();
     const chat = this.chatFor(sessionRef);
+    this.clearIdle(chat);
     chat.turnRunning = true;
     chat.queue.push(text);
     if (!chat.query) this.launch(chat, sessionRef);
@@ -232,7 +262,7 @@ export class ClaudeAdapter implements ProviderAdapter {
       chat.pending.delete(requestId);
       if (decision === 'allow') p.resolve({ behavior: 'allow', updatedInput: p.input });
       else if (decision === 'deny') p.resolve({ behavior: 'deny', message: 'The user declined.' });
-      else if (p.toolName === 'AskUserQuestion') p.resolve({ behavior: 'allow', updatedInput: { ...p.input, answers: decision.reply } });
+      else if (p.toolName === 'AskUserQuestion') p.resolve({ behavior: 'allow', updatedInput: { ...p.input, answers: questionAnswers(p.input, decision.reply) } });
       else p.resolve({ behavior: 'deny', message: decision.reply });
       return;
     }
@@ -376,6 +406,7 @@ export class ClaudeAdapter implements ProviderAdapter {
     this.chats.clear();
     this.live.clear();
     await Promise.all([...all].map(async (chat) => {
+      this.clearIdle(chat);
       chat.onStarted?.reject(new Error(SHUT_DOWN));
       for (const p of chat.pending.values()) p.resolve({ behavior: 'deny', message: 'Claude Code stopped.' });
       chat.pending.clear();
@@ -400,6 +431,12 @@ function toolSummary(name: string, input: Record<string, unknown>): string {
   if (name === 'Read' && file) return `Reading ${file}`;
   if ((name === 'Bash' || name === 'PowerShell') && typeof input.command === 'string') return `Running ${input.command}`;
   return name;
+}
+
+/** AskUserQuestion takes answers keyed by each question's text (SDK sdk-tools.d.ts: `answers?: { [questionText]: string }`). */
+function questionAnswers(input: Record<string, unknown>, reply: string): Record<string, string> {
+  const questions = Array.isArray(input.questions) ? (input.questions as Array<{ question?: unknown }>) : [];
+  return Object.fromEntries(questions.filter((q) => typeof q?.question === 'string').map((q) => [q.question as string, reply]));
 }
 
 function requestSummary(name: string, input: Record<string, unknown>): string {

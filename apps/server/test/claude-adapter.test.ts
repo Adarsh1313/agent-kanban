@@ -134,7 +134,7 @@ test('allow returns the input; AskUserQuestion reply fills answers; reply on oth
   await a.respondToRequest(sessionRef, (await next()).requestId, { reply: 'no thanks' });
   await tick();
   assert.deepEqual(outcomes[0], { behavior: 'allow', updatedInput: { command: 'ls' } });
-  assert.deepEqual(outcomes[1], { behavior: 'allow', updatedInput: { questions: [{ question: 'Which db?' }], answers: 'postgres' } });
+  assert.deepEqual(outcomes[1], { behavior: 'allow', updatedInput: { questions: [{ question: 'Which db?' }], answers: { 'Which db?': 'postgres' } } });
   assert.deepEqual(outcomes[2], { behavior: 'deny', message: 'no thanks' });
   await a.dispose();
 });
@@ -552,4 +552,95 @@ test('a manual ping while readUsage is in flight does not break that read', asyn
   assert.equal((await reading).status, 'ok');
   assert.equal(f.calls[0]!.closed, 1);
   await a.dispose();
+});
+
+test('an AskUserQuestion reply answers every question, keyed by the question text', async () => {
+  let outcome: any;
+  const f = fake(async function* (o, input) {
+    await input.next(); yield init();
+    outcome = await o.canUseTool('AskUserQuestion', { questions: [{ question: 'Name?', header: 'n' }, { question: 'Size?' }] }, { signal: new AbortController().signal });
+    await never();
+  });
+  const a = new ClaudeAdapter({ claudePath: 'c', query: f.query });
+  const ev = collect(a);
+  const { sessionRef } = await a.startChat({ cwd: '.', prompt: 'go' });
+  await tick();
+  await a.respondToRequest(sessionRef, ev.find((e) => e.type === 'request.opened').requestId, { reply: 'a.txt' });
+  await tick();
+  assert.deepEqual(outcome.updatedInput.answers, { 'Name?': 'a.txt', 'Size?': 'a.txt' });
+  assert.deepEqual(outcome.updatedInput.questions, [{ question: 'Name?', header: 'n' }, { question: 'Size?' }]);
+  await a.dispose();
+});
+
+/** Each message on the prompt stream is one turn: init, a reply, then a result. */
+const turns = (seen: string[] = []) => fake(async function* (_o, input) {
+  for (;;) {
+    const m = await input.next();
+    if (m.done) return;
+    seen.push(m.value.message.content);
+    yield init('abc');
+    yield text(`re: ${m.value.message.content}`);
+    yield result();
+  }
+});
+const settle = async () => { for (let i = 0; i < 20; i++) await new Promise((r) => setImmediate(r)); };
+
+test('an idle chat query is closed after 10 minutes without any event; the next message resumes it', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const seen: string[] = [];
+  const f = turns(seen);
+  const a = new ClaudeAdapter({ claudePath: 'c', query: f.query, idleCloseMs: 600_000 });
+  const ev = collect(a);
+  const { sessionRef } = await a.startChat({ cwd: 'C:\\p', prompt: 'one' });
+  await settle();
+  assert.equal(ev.filter((e) => e.type === 'turn.completed').length, 1);
+  t.mock.timers.tick(599_999); await settle();
+  assert.equal(f.calls[0]!.closed, 0, 'not before 10 minutes');
+  const before = ev.length;
+  t.mock.timers.tick(1); await settle();
+  assert.equal(f.calls[0]!.closed, 1, 'closed after 10 idle minutes');
+  assert.equal(ev.length, before, 'closing an idle query emits nothing');
+  await a.sendMessage(sessionRef, 'two');
+  await settle();
+  assert.equal(f.calls.length, 2);
+  assert.equal(f.calls[1]!.options.resume, 'abc');
+  assert.deepEqual(seen, ['one', 'two']);
+  assert.equal(ev.filter((e) => e.type === 'turn.completed').length, 2);
+  await a.dispose();
+});
+
+test('a running turn or a pending request keeps an idle chat query open', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  // Turn 1 completes; a second message starts a turn that never finishes.
+  let n = 0;
+  const f = fake(async function* (_o, input) {
+    for (;;) {
+      const m = await input.next();
+      if (m.done) return;
+      n++;
+      yield init('abc');
+      if (n === 1) yield result();
+    }
+  });
+  const a = new ClaudeAdapter({ claudePath: 'c', query: f.query, idleCloseMs: 600_000 });
+  const { sessionRef } = await a.startChat({ cwd: '.', prompt: 'one' });
+  await settle();
+  await a.sendMessage(sessionRef, 'two');
+  await settle();
+  t.mock.timers.tick(30 * 60_000); await settle();
+  assert.equal(f.calls[0]!.closed, 0, 'a running turn is never closed');
+  await a.dispose();
+
+  // A request left open after the result also keeps it.
+  const g = fake(async function* (o, input) {
+    await input.next(); yield init('abc'); yield result();
+    void o.canUseTool('Bash', { command: 'ls' }, { signal: new AbortController().signal });
+    await never();
+  });
+  const b = new ClaudeAdapter({ claudePath: 'c', query: g.query, idleCloseMs: 600_000 });
+  await b.startChat({ cwd: '.', prompt: 'one' });
+  await settle();
+  t.mock.timers.tick(30 * 60_000); await settle();
+  assert.equal(g.calls[0]!.closed, 0, 'a pending request is never closed');
+  await b.dispose();
 });
