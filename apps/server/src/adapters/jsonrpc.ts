@@ -1,8 +1,15 @@
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { createInterface } from 'node:readline';
+import { resolveSpawnTarget } from './spawn-target.ts';
 
-type Pending = { resolve: (v: any) => void; reject: (e: Error) => void };
+type Pending = { resolve: (v: any) => void; reject: (e: Error) => void; timer: NodeJS.Timeout };
+
+const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+const CLOSE_CAP_MS = 5_000;
+const KILL_ESCALATE_MS = 3_000;
+const EXIT_GRACE_MS = 100;
+const STDERR_LINES = 20;
 
 /** Line-delimited JSON-RPC over a child process's stdio. Messages are sent without "jsonrpc"; both forms are accepted. */
 export class JsonRpcProcess {
@@ -15,20 +22,39 @@ export class JsonRpcProcess {
   private exitFns: Array<(code: number | null) => void> = [];
   private exited = false;
   private exitCode: number | null = null;
+  private stderrRing: string[] = [];
+  private defaultTimeoutMs: number;
 
-  constructor(command: string, args: string[], opts: { cwd?: string; env?: NodeJS.ProcessEnv } = {}) {
-    this.child = spawn(command, args, { cwd: opts.cwd, env: opts.env, stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true });
+  constructor(command: string, args: string[], opts: { cwd?: string; env?: NodeJS.ProcessEnv; requestTimeoutMs?: number } = {}) {
+    this.defaultTimeoutMs = opts.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+    const target = resolveSpawnTarget(command);
+    this.child = spawn(target.command, [...target.args, ...args], { cwd: opts.cwd, env: opts.env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
     createInterface({ input: this.child.stdout! }).on('line', (line) => this.onLine(line));
+    createInterface({ input: this.child.stderr! }).on('line', (line) => {
+      if (!line.trim()) return;
+      this.stderrRing.push(line);
+      if (this.stderrRing.length > STDERR_LINES) this.stderrRing.shift();
+    });
     this.child.stdin!.on('error', () => {});
     this.child.on('error', () => this.handleExit(null));
+    // 'exit' can fire before the last stdout lines are read; give 'close' a moment to arrive first.
+    // (If a grandchild keeps the pipes open, 'close' never comes and this timer finishes the job.)
+    this.child.on('exit', (code) => setTimeout(() => this.handleExit(code), EXIT_GRACE_MS));
     this.child.on('close', (code) => this.handleExit(code));
   }
 
-  request<T = unknown>(method: string, params: unknown): Promise<T> {
+  /** The last lines the process wrote to stderr (at most 20). */
+  get stderrTail(): string[] { return [...this.stderrRing]; }
+
+  request<T = unknown>(method: string, params: unknown, timeoutMs?: number): Promise<T> {
     if (this.exited) return Promise.reject(new Error('process exited'));
     const id = this.nextId++;
     return new Promise<T>((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new Error(`${method} timed out`));
+      }, timeoutMs ?? this.defaultTimeoutMs);
+      this.pending.set(id, { resolve, reject, timer });
       this.write({ id, method, params });
     });
   }
@@ -44,11 +70,34 @@ export class JsonRpcProcess {
     else this.exitFns.push(fn);
   }
 
+  /** Kills the process tree and resolves once it has exited, or after a 5 s cap. Never rejects. */
   async close(): Promise<void> {
     if (this.exited) return;
-    const done = new Promise<void>((r) => this.exitFns.push(() => r()));
-    this.child.kill();
+    let cap: NodeJS.Timeout | undefined;
+    let escalate: NodeJS.Timeout | undefined;
+    const done = new Promise<void>((resolve) => {
+      this.exitFns.push(() => resolve());
+      cap = setTimeout(resolve, CLOSE_CAP_MS);
+    });
+    this.killTree();
+    if (process.platform !== 'win32') {
+      escalate = setTimeout(() => { try { this.child.kill('SIGKILL'); } catch { /* already gone */ } }, KILL_ESCALATE_MS);
+    }
     await done;
+    clearTimeout(cap);
+    clearTimeout(escalate);
+  }
+
+  private killTree(): void {
+    const pid = this.child.pid;
+    if (process.platform === 'win32' && pid !== undefined) {
+      try {
+        const k = spawn('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
+        k.on('error', () => { try { this.child.kill(); } catch { /* already gone */ } });
+        return;
+      } catch { /* fall through */ }
+    }
+    try { this.child.kill('SIGTERM'); } catch { /* already gone */ }
   }
 
   private write(msg: unknown): void {
@@ -69,6 +118,7 @@ export class JsonRpcProcess {
     const p = this.pending.get(m.id);
     if (!p) return;
     this.pending.delete(m.id);
+    clearTimeout(p.timer);
     if (m.error) p.reject(new Error(m.error.message ?? 'request failed'));
     else p.resolve(m.result);
   }
@@ -87,7 +137,7 @@ export class JsonRpcProcess {
     if (this.exited) return;
     this.exited = true;
     this.exitCode = code;
-    for (const p of this.pending.values()) p.reject(new Error('process exited'));
+    for (const p of this.pending.values()) { clearTimeout(p.timer); p.reject(new Error('process exited')); }
     this.pending.clear();
     for (const fn of this.exitFns.splice(0)) fn(code);
   }
