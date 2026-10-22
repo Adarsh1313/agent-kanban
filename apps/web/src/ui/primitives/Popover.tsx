@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { focusInto } from './focus.ts';
 import { pushLayer } from './layers.ts';
@@ -24,9 +24,9 @@ export function Popover({ anchor, open, onClose, align = 'left', label, classNam
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
 
-  useLayoutEffect(() => {
+  const place = useCallback(() => {
     const pop = ref.current;
-    if (!open || !pop || !anchor) return;
+    if (!pop || !anchor) return;
     const r = anchor.getBoundingClientRect();
     const w = pop.offsetWidth || 300;
     const left = Math.max(8, Math.min(align === 'right' ? r.right - w : r.left, window.innerWidth - w - 8));
@@ -37,7 +37,19 @@ export function Popover({ anchor, open, onClose, align = 'left', label, classNam
     pop.style.top = `${above ? r.top - 6 - h : r.bottom + 6}px`;
     pop.style.left = `${left}px`;
     pop.style.setProperty('--origin', `${r.left + r.width / 2 - left}px ${above ? 'bottom' : 'top'}`);
-  }, [open, anchor, align]);
+  }, [anchor, align]);
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    place();
+    // Follow the anchor when the window is resized or anything scrolls.
+    window.addEventListener('resize', place);
+    document.addEventListener('scroll', place, true);
+    return () => {
+      window.removeEventListener('resize', place);
+      document.removeEventListener('scroll', place, true);
+    };
+  }, [open, place]);
 
   useEffect(() => {
     anchor?.setAttribute('aria-expanded', String(open));

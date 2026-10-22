@@ -1,5 +1,5 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { useState } from 'react';
+import { StrictMode, useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Popover } from '../src/ui/primitives/Popover.tsx';
 import { Tooltip } from '../src/ui/primitives/Tooltip.tsx';
@@ -24,7 +24,7 @@ function Pop({ label }: { label: string }) {
     <>
       <button ref={setAnchor} onClick={() => setOpen((o) => !o)}>{label}</button>
       <Popover anchor={anchor} open={open} onClose={() => setOpen(false)} label={`${label} popover`}>
-        <p>{label} content</p>
+        <p>{label} content</p><button>{label} inside</button>
       </Popover>
     </>
   );
@@ -227,6 +227,92 @@ describe('small primitives', () => {
     const mutate = vi.fn();
     await flip([el], mutate);
     expect(mutate).toHaveBeenCalledTimes(1);
+    el.remove();
+  });
+});
+
+describe('toast lifecycle', () => {
+  beforeEach(() => { vi.useFakeTimers(); });
+
+  it('auto-dismisses under StrictMode (effects run twice)', () => {
+    render(<StrictMode><Toasts /></StrictMode>);
+    act(() => { toast('Strict toast'); });
+    act(() => { vi.advanceTimersByTime(5200); });
+    expect(screen.queryByText('Strict toast')).toBeNull();
+  });
+
+  const setHidden = (hidden: boolean) => {
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => hidden });
+    document.dispatchEvent(new Event('visibilitychange'));
+  };
+  afterEach(() => { Reflect.deleteProperty(document, 'hidden'); });
+
+  it('pauses while the page is hidden and resumes with the time left', () => {
+    render(<Toasts />);
+    act(() => { toast('Hidden toast'); });
+    act(() => { vi.advanceTimersByTime(3000); });
+    act(() => { setHidden(true); });
+    act(() => { vi.advanceTimersByTime(60_000); });
+    expect(screen.getByText('Hidden toast')).toBeTruthy();
+    act(() => { setHidden(false); });
+    act(() => { vi.advanceTimersByTime(1900); });
+    expect(screen.getByText('Hidden toast')).toBeTruthy();
+    act(() => { vi.advanceTimersByTime(1000); });
+    expect(screen.queryByText('Hidden toast')).toBeNull();
+  });
+
+  it('becoming visible does not restart the timer while the toast is hovered', () => {
+    render(<Toasts />);
+    act(() => { toast('Held toast'); });
+    const el = screen.getByText('Held toast').closest('.toast')!;
+    fireEvent.mouseEnter(el);
+    act(() => { setHidden(true); });
+    act(() => { setHidden(false); });
+    act(() => { vi.advanceTimersByTime(60_000); });
+    expect(screen.getByText('Held toast')).toBeTruthy();
+  });
+});
+
+describe('focus, dialog and motion', () => {
+  it('returns focus to the anchor when a popover closes', () => {
+    render(<Pop label="One" />);
+    const trigger = screen.getByText('One');
+    trigger.focus();
+    fireEvent.click(trigger);
+    expect(document.activeElement).not.toBe(trigger);
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it('a dialog traps Tab and makes the rest of the page inert', () => {
+    const root = document.createElement('div');
+    document.body.append(root);
+    render(<Dialog open onClose={() => {}} title="Trap"><input aria-label="one" /></Dialog>, { container: root });
+    expect(root.inert).toBe(true);
+    const close = screen.getByRole('button', { name: 'Close', hidden: true });
+    const input = screen.getByLabelText('one');
+    input.focus();
+    fireEvent.keyDown(document, { key: 'Tab' });
+    expect(document.activeElement).toBe(close);
+    fireEvent.keyDown(document, { key: 'Tab', shiftKey: true });
+    expect(document.activeElement).toBe(input);
+    cleanup();
+    expect(root.inert).toBe(false);
+    root.remove();
+  });
+
+  it('flip does not animate under prefers-reduced-motion', async () => {
+    const mm = vi.fn().mockReturnValue({ matches: true });
+    vi.stubGlobal('matchMedia', mm);
+    const el = document.createElement('div');
+    const animate = vi.fn();
+    el.animate = animate as never;
+    document.body.append(el);
+    const mutate = vi.fn();
+    await flip([el], mutate);
+    expect(mutate).toHaveBeenCalled();
+    expect(animate).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
     el.remove();
   });
 });

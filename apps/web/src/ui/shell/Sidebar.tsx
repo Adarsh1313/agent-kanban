@@ -1,6 +1,6 @@
 import type { ProviderId } from '@agent-kanban/shared';
-import { useLayoutEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
-import { focusedProvider, pinned as pinnedChats, providerCounts, recentChatsByProject, type SidebarChat } from '../../state/selectors.ts';
+import { useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
+import { focusedProvider, isSnoozed, memoState, pinned as pinnedChats, providerCounts, recentChatsByProject, type SidebarChat } from '../../state/selectors.ts';
 import type { AppState } from '../../state/reducer.ts';
 import { useStore, useStoreInstance } from '../../state/store.ts';
 import { openHistoryChat, openNewChat, openRowMenu } from '../actions.ts';
@@ -19,7 +19,10 @@ const CHATS_SHOWN = 3;
 
 function onActivate(fn: () => void) {
   return (e: KeyboardEvent<HTMLElement>) => {
-    if (e.key === 'Enter' && e.target === e.currentTarget) fn();
+    if ((e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget) {
+      e.preventDefault();
+      fn();
+    }
   };
 }
 
@@ -91,7 +94,15 @@ function Providers() {
 function Recent() {
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   // One more project than shown tells us whether "All projects" is needed.
-  const groups = useStore((s) => recentChatsByProject(s, s.now, { projects: PROJECTS_SHOWN + 1, chats: CHATS_SHOWN }, expanded));
+  // Memoized on the parts it reads, so streaming deltas do not re-sort every history chat.
+  const select = useMemo(
+    () => memoState(
+      (s) => [s.chats, s.history, s.projects, s.ui.focusProvider, s.ui.filters.provider, s.now],
+      (s) => recentChatsByProject(s, s.now, { projects: PROJECTS_SHOWN + 1, chats: CHATS_SHOWN }, expanded),
+    ),
+    [expanded],
+  );
+  const groups = useStore(select);
   const openChatId = useStore((s) => s.ui.openChatId);
   const toggle = (id: string) =>
     setExpanded((cur) => {
@@ -146,7 +157,7 @@ function Pinned() {
 const counts = (s: AppState) => {
   const now = s.now;
   const board = Object.values(s.chats).filter(
-    (c) => c.column !== null && c.column !== 'done' && !c.archived && !(c.snoozedUntil !== null && Date.parse(c.snoozedUntil) > now),
+    (c) => c.column !== null && c.column !== 'done' && !c.archived && !isSnoozed(c, now),
   ).length;
   const connected = Object.values(s.connections).filter((c) => c?.status === 'connected' || c?.status === 'update_available').length;
   return { board, projects: s.projects.length, connections: connected };
@@ -163,17 +174,29 @@ export function Sidebar() {
 
   // The capsule slides to the active item (--duration-move); the first placement does not animate.
   useLayoutEffect(() => {
-    const cap = capRef.current;
-    const item = navRef.current?.querySelector<HTMLElement>('.navitem[aria-current]');
-    if (!cap || !item) return;
-    const first = !placed.current;
-    if (first) cap.style.transition = 'none';
-    cap.style.transform = `translateY(${item.offsetTop}px)`;
-    if (first) {
-      void cap.offsetWidth;
-      cap.style.transition = '';
-      placed.current = true;
-    }
+    const place = () => {
+      const cap = capRef.current;
+      const item = navRef.current?.querySelector<HTMLElement>('.navitem[aria-current]');
+      if (!cap || !item) return;
+      const instant = !placed.current || item.offsetParent === null;
+      if (instant) cap.style.transition = 'none';
+      cap.style.transform = `translateY(${item.offsetTop}px)`;
+      if (instant) {
+        void cap.offsetWidth;
+        cap.style.transition = '';
+      }
+      placed.current = item.offsetParent !== null;
+    };
+    place();
+    // The sidebar can be hidden (narrow window) and shown again, or reflow on resize: measure again then, without animating.
+    const nav = navRef.current;
+    const ro = typeof ResizeObserver === 'function' && nav ? new ResizeObserver(() => { placed.current = false; place(); }) : null;
+    if (nav) ro?.observe(nav);
+    window.addEventListener('resize', place);
+    return () => {
+      ro?.disconnect();
+      window.removeEventListener('resize', place);
+    };
   }, [view]);
 
   return (

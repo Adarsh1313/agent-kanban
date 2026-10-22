@@ -32,17 +32,20 @@ function ToastView({ item }: { item: ToastItem }) {
   const left = useRef(cssMs('--duration-toast', 5000));
   const started = useRef(0);
   const armed = useRef(false);
+  const hovered = useRef(false);
+  const leaving_ = useRef(false);
 
   const leave = useRef(() => {});
   leave.current = () => {
     clearTimeout(timer.current);
     armed.current = false;
+    leaving_.current = true;
     setLeaving(true);
     exit.current = setTimeout(() => dismiss(item.id), cssMs('--duration-exit', 150));
   };
   const arm = useRef(() => {});
   arm.current = () => {
-    if (armed.current) return;
+    if (armed.current || leaving_.current) return;
     armed.current = true;
     started.current = Date.now();
     timer.current = setTimeout(() => leave.current(), left.current);
@@ -56,18 +59,23 @@ function ToastView({ item }: { item: ToastItem }) {
   };
 
   useEffect(() => {
-    const onVisibility = () => (document.hidden ? pause.current() : arm.current());
+    const onVisibility = () => {
+      if (document.hidden) pause.current();
+      else if (!hovered.current) arm.current();
+    };
     document.addEventListener('visibilitychange', onVisibility);
-    if (!document.hidden) arm.current();
+    if (!document.hidden && !hovered.current) arm.current();
     return () => {
       document.removeEventListener('visibilitychange', onVisibility);
-      clearTimeout(timer.current);
+      // StrictMode runs this cleanup and then the effect again: keep the remaining budget and let arm() start fresh.
+      pause.current();
       clearTimeout(exit.current);
     };
   }, []);
 
   return (
-    <div className={`toast${leaving ? ' leaving' : ''}`} onMouseEnter={() => pause.current()} onMouseLeave={() => { if (!document.hidden) arm.current(); }}>
+    <div className={`toast${leaving ? ' leaving' : ''}`} onMouseEnter={() => { hovered.current = true; pause.current(); }}
+      onMouseLeave={() => { hovered.current = false; if (!document.hidden) arm.current(); }}>
       <span>{item.message}</span>
       {item.action && (
         <button className="btn" type="button" onClick={() => { item.action!.run(); leave.current(); }}>{item.action.label}</button>

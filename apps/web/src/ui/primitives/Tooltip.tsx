@@ -29,7 +29,7 @@ function show(target: HTMLElement, label: string) {
     tip.textContent = label;
     tip.classList.toggle('instant', warm);
     const r = target.getBoundingClientRect();
-    tip.style.left = `${Math.max(8, r.left + r.width / 2 - tip.offsetWidth / 2)}px`;
+    tip.style.left = `${Math.max(8, Math.min(r.left + r.width / 2 - tip.offsetWidth / 2, window.innerWidth - tip.offsetWidth - 8))}px`;
     const below = r.bottom + 6;
     const fits = below + (tip.offsetHeight || 0) <= window.innerHeight;
     tip.style.top = `${fits ? below : r.top - 6 - tip.offsetHeight}px`;

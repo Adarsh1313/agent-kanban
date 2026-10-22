@@ -27,7 +27,7 @@ export interface ProjectGroup {
   total: number;
 }
 
-const isSnoozed = (c: { snoozedUntil: string | null }, now: number) => c.snoozedUntil !== null && Date.parse(c.snoozedUntil) > now;
+export const isSnoozed = (c: { snoozedUntil: string | null }, now: number) => c.snoozedUntil !== null && Date.parse(c.snoozedUntil) > now;
 export const baseName = (p: string) => p.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || p;
 
 export function focusedProvider(s: AppState): ProviderId | null {
@@ -128,8 +128,20 @@ export function unreadCount(s: AppState): number {
   return s.notifications.filter((n) => n.unread).length;
 }
 
+/** Re-computes only when one of the referenced parts of the state changed (so streaming deltas do not re-sort the sidebar). */
+export function memoState<R>(deps: (s: AppState) => readonly unknown[], fn: (s: AppState) => R): (s: AppState) => R {
+  let last: { d: readonly unknown[]; r: R } | null = null;
+  return (s) => {
+    const d = deps(s);
+    if (last && last.d.length === d.length && last.d.every((x, i) => Object.is(x, d[i]))) return last.r;
+    const r = fn(s);
+    last = { d, r };
+    return r;
+  };
+}
+
 /** Chats per provider for the sidebar's Providers rows: board chats plus provider-history chats not on the board. */
-export function providerCounts(s: AppState): Record<ProviderId, number> {
+function countProviders(s: AppState): Record<ProviderId, number> {
   const counts: Record<ProviderId, number> = { claude: 0, codex: 0, antigravity: 0 };
   const known = new Set<string>();
   for (const c of Object.values(s.chats)) {
@@ -139,6 +151,8 @@ export function providerCounts(s: AppState): Record<ProviderId, number> {
   for (const h of s.history) if (!known.has(`${h.provider}\u0000${h.sessionRef}`)) counts[h.provider] += 1;
   return counts;
 }
+
+export const providerCounts = memoState((s) => [s.chats, s.history], countProviders);
 
 /** The name to show for a project folder: the server's project name when known, else the folder's last part. */
 export function projectLabel(s: AppState, projectId: string): string {

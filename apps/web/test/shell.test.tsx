@@ -113,6 +113,22 @@ describe('Sidebar: pinned and recent', () => {
     expect(screen.getByText('Codex one')).toBeTruthy();
   });
 
+  it('rows also activate with Space', () => {
+    const store = seeded([chat({ id: 'c9', title: 'Fix login' })]);
+    mount(store);
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Fix login' }), { key: ' ' });
+    expect(store.getState().ui.openChatId).toBe('c9');
+  });
+
+  it('streaming deltas do not recompute the recent list', () => {
+    const store = seeded([chat({ id: 'c1' })], hist(300));
+    mount(store);
+    const before = [...document.querySelectorAll('.proj .chat-row')];
+    act(() => { store.setState((s) => ({ ...s, streaming: { ...s.streaming, c1: { m1: 'x' } } })); });
+    const after = [...document.querySelectorAll('.proj .chat-row')];
+    expect(after).toEqual(before);
+  });
+
   it('the + on a project row opens New chat for that project', () => {
     const handler = vi.fn();
     setNewChatHandler(handler);
@@ -191,7 +207,7 @@ describe('Shell: routes', () => {
     const handler = vi.fn();
     setNewChatHandler(handler);
     mount(seeded(), <Shell />);
-    for (const b of screen.getAllByRole('button', { name: /^New chat N$/ })) fireEvent.click(b);
+    for (const b of screen.getAllByRole('button', { name: /^New chat( N)?$/ })) fireEvent.click(b);
     expect(handler).toHaveBeenCalledTimes(2);
     fireEvent.keyDown(document.body, { key: 'n' });
     expect(handler).toHaveBeenCalledTimes(3);

@@ -5,6 +5,8 @@ import { Icon } from './Icon.tsx';
 import { pushLayer } from './layers.ts';
 import { Tooltip } from './Tooltip.tsx';
 
+const TABBABLE = 'input, textarea, select, button:not([disabled]), [href], [tabindex]:not([tabindex="-1"])';
+
 export interface DialogProps {
   open: boolean;
   onClose: () => void;
@@ -26,8 +28,26 @@ export function Dialog({ open, onClose, title, children, footer }: DialogProps) 
     if (!open || !dlg) return;
     const before = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const release = pushLayer('dialog', () => onCloseRef.current());
+    // The rest of the app is inert while the dialog is open (popovers opened from it, the scrim and tips stay live).
+    const frozen = [...document.body.children].filter(
+      (n): n is HTMLElement => n instanceof HTMLElement && !n.matches('.dialog, .scrim, .popover, .tip, script') && !n.inert,
+    );
+    for (const n of frozen) n.inert = true;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Tab') return;
+      const items = [...dlg.querySelectorAll<HTMLElement>(TABBABLE)];
+      if (items.length === 0) return;
+      const first = items[0]!;
+      const last = items[items.length - 1]!;
+      const active = document.activeElement;
+      if (e.shiftKey && (active === first || !dlg.contains(active))) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && (active === last || !dlg.contains(active))) { e.preventDefault(); first.focus(); }
+    };
+    document.addEventListener('keydown', onKey);
     const restore = focusInto(dlg, before);
     return () => {
+      document.removeEventListener('keydown', onKey);
+      for (const n of frozen) n.inert = false;
       release();
       restore();
     };

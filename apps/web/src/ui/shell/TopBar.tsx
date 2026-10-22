@@ -29,16 +29,16 @@ export function TopBar() {
         {crumb && <span className="crumb"> › {crumb}</span>}
       </h1>
       {view === 'board' && (
-        <button className="chip-btn" type="button" aria-haspopup="menu" aria-expanded="false"><Icon name="filter" size="sm" />Filter</button>
+        <button className="chip-btn" type="button"><Icon name="filter" size="sm" />Filter</button>
       )}
       <span className="spacer" />
       <div className="usage-area" />
       <Tooltip label="Notifications">
-        <button className="btn icon-only ghost bell" type="button" aria-haspopup="dialog" aria-expanded="false" aria-label="Notifications">
+        <button className="btn icon-only ghost bell" type="button" aria-label={unread > 0 ? `Notifications, ${unread} unread` : 'Notifications'}>
           <Icon name="bell" /><span className="dot" data-n={unread} aria-hidden="true">{unread}</span>
         </button>
       </Tooltip>
-      <button className="btn primary" type="button" onClick={() => openNewChat()}>
+      <button className="btn primary" type="button" aria-label="New chat" onClick={() => openNewChat()}>
         <Icon name="plus" /><span className="new-label">New chat</span> <span className="kbd">N</span>
       </button>
     </header>
