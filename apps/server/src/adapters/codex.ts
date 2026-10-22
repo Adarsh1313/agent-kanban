@@ -87,18 +87,38 @@ export class CodexAdapter implements ProviderAdapter {
   /** Read-only: compare ~/.codex/config.toml's model with what the account can use. Any failure keeps Codex's own default. */
   private async pickModel(p: JsonRpcProcess): Promise<void> {
     this.fallbackModel.set(p, null);
+    this._modelNote = null;
     try {
       let configured: string | null = null;
-      try { configured = /^model\s*=\s*"([^"]+)"/m.exec(readFileSync(join(this.codexHome, 'config.toml'), 'utf8'))?.[1] ?? null; } catch { /* no config file */ }
-      if (!configured) { this._modelNote = null; return; }
-      const r = await p.request<{ data: { id: string; model: string; isDefault: boolean }[] }>('model/list', { includeHidden: false }, this.initializeTimeoutMs);
-      const list = r.data;
+      try {
+        // Only the top-level keys, i.e. the text before the first [table] header.
+        const text = readFileSync(join(this.codexHome, 'config.toml'), 'utf8');
+        const top = text.split(/^\s*\[/m)[0] ?? '';
+        configured = /^model\s*=\s*"([^"]+)"/m.exec(top)?.[1] ?? null;
+      } catch { /* no config file */ }
+      if (!configured) return;
+      type Model = { id: string; model: string; isDefault: boolean };
+      const list: Model[] = [];
+      let cursor: string | null = null;
+      for (let page = 0; page < 5; page++) {
+        const r: { data: Model[]; nextCursor?: string | null } = await p.request('model/list', { includeHidden: false, ...(cursor ? { cursor } : {}) }, this.initializeTimeoutMs);
+        list.push(...r.data);
+        if (list.some((m) => m.id === configured || m.model === configured)) return;
+        cursor = r.nextCursor ?? null;
+        if (!cursor) break;
+      }
       if (list.some((m) => m.id === configured || m.model === configured)) { this._modelNote = null; return; }
       const def = list.find((m) => m.isDefault);
       if (!def) return;
       this.fallbackModel.set(p, def.model);
       this._modelNote = `Your Codex settings use ${configured}, which your account can't use, so new chats use ${def.model}.`;
     } catch { /* keep current behavior */ }
+  }
+
+  /** The fallback model for threads started or resumed without an explicit one. */
+  private modelParam(p: JsonRpcProcess): { model?: string } {
+    const m = this.fallbackModel.get(p);
+    return m ? { model: m } : {};
   }
 
   private onProcessExit(p: JsonRpcProcess): void {
@@ -212,7 +232,7 @@ export class CodexAdapter implements ProviderAdapter {
     const known = this.loaded.get(p);
     if (known?.has(sessionRef)) return;
     const cwd = this.threadCwd.get(sessionRef);
-    await p.request('thread/resume', cwd ? { threadId: sessionRef, cwd } : { threadId: sessionRef });
+    await p.request('thread/resume', { threadId: sessionRef, ...(cwd ? { cwd } : {}), ...this.modelParam(p) });
     known?.add(sessionRef);
   }
 
@@ -253,7 +273,7 @@ export class CodexAdapter implements ProviderAdapter {
   async resume(sessionRef: string, cwd: string): Promise<void> {
     const p = await this.ensureProcess();
     this.threadCwd.set(sessionRef, cwd);
-    await p.request('thread/resume', { threadId: sessionRef, cwd });
+    await p.request('thread/resume', { threadId: sessionRef, cwd, ...this.modelParam(p) });
     this.loaded.get(p)?.add(sessionRef);
   }
 

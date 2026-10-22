@@ -433,3 +433,17 @@ test('R3: concurrent continueHistory calls for one sessionRef create one chat', 
   assert.equal(adapter.calls.filter((c) => c.startsWith('resume')).length, 1);
   assert.deepEqual(adapter.calls.filter((c) => c.startsWith('send')), ['send:hist1:one', 'send:hist1:two']);
 });
+
+test('C2: auth detection uses word boundaries', async () => {
+  const run = async (message: string) => {
+    const { store, adapter, svc } = setup();
+    const chat = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+    adapter.emit({ type: 'error', sessionRef: 's1', message });
+    return store.listMessages(chat.id).pop()!.text;
+  };
+  assert.equal(await run('design system failed'), "Codex couldn't continue: design system failed");
+  assert.equal(await run('Not signed in'), "Codex isn't signed in. Open Connections to sign in.");
+  assert.equal(await run('401 Unauthorized'), "Codex isn't signed in. Open Connections to sign in.");
+  const long = await run('x'.repeat(400));
+  assert.equal(long, "Codex couldn't continue: " + 'x'.repeat(300) + '…');
+});

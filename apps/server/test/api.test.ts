@@ -181,3 +181,15 @@ test('bad percent-escape is 404; non-string model is 400', async () => {
     assert.equal(r.status, 400);
   } finally { s.close(); }
 });
+
+test('a malformed upgrade target does not crash the server', async () => {
+  const s = await setup();
+  try {
+    const { connect } = await import('node:net');
+    const raw = connect(s.addr.port, '127.0.0.1');
+    await new Promise((r) => raw.on('connect', r));
+    raw.write('GET // HTTP/1.1\r\nHost: x\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n');
+    await new Promise((r) => { raw.on('close', r); raw.on('error', r); raw.resume(); });
+    assert.equal((await s.f('/api/chats')).status, 200);
+  } finally { s.close(); }
+});

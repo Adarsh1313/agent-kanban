@@ -16,12 +16,13 @@ const BUFFER_MAX_AGE_MS = 60_000;
 
 /** Provider errors sometimes arrive as a JSON body; show the human message inside it. */
 function readable(msg: string): string {
+  let out = msg;
   try {
     const j = JSON.parse(msg) as { error?: { message?: unknown }; message?: unknown };
     const inner = j?.error?.message ?? j?.message;
-    if (typeof inner === 'string' && inner) return inner;
+    if (typeof inner === 'string' && inner) out = inner;
   } catch { /* plain text */ }
-  return msg;
+  return out.length > 300 ? out.slice(0, 300) + '…' : out;
 }
 
 export class ActiveElsewhereError extends Error {
@@ -233,7 +234,7 @@ export class ChatService {
     const name = NAMES[provider];
     if (err === null) return `${name} isn't installed. Open Connections to install it.`;
     const msg = err instanceof Error ? err.message : String(err);
-    return /sign|auth|login/i.test(msg)
+    return /\b(sign(ed)?[ -]?in|log(ged)?[ -]?in|login|unauthori[sz]ed|authenticat\w*|not authenticated|401)\b/i.test(msg)
       ? `${name} isn't signed in. Open Connections to sign in.`
       : msg.startsWith(`${name} stopped unexpectedly`)
         ? `${name} stopped unexpectedly. Resume to try again.`

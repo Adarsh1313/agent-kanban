@@ -250,3 +250,17 @@ test('X1: configured model not listed -> default model id and a note', async () 
     assert.equal(c.adapter.modelNote, "Your Codex settings use gpt-zzz, which your account can't use, so new chats use gpt-a.");
   } finally { await c.adapter.dispose(); }
 });
+
+test('M1: only top-level model counts; M4: resume uses the fallback model; note resets', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'ak-home-'));
+  writeFileSync(join(home, 'config.toml'), 'model = "gpt-zzz"\n[profiles.x]\nmodel = "gpt-b"\n');
+  const log = join(home, 'calls.log');
+  writeFileSync(log, '');
+  const m = make('', { codexHome: home, env: { FAKE_LOG: log, FAKE_MODELS: JSON.stringify(catalog) } });
+  try {
+    await m.adapter.resume('thr_9', cwd);
+    const calls = readFileSync(log, 'utf8').trim().split(/\r?\n/).map((l) => JSON.parse(l));
+    assert.equal(calls.find((c) => c.method === 'thread/resume').params.model, 'gpt-a');
+    assert.match(m.adapter.modelNote ?? '', /gpt-zzz/);
+  } finally { await m.adapter.dispose(); }
+});

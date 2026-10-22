@@ -196,7 +196,12 @@ export function createApi(opts: {
   });
 
   server.on('upgrade', (req, socket, head) => {
-    const url = new URL(req.url ?? '/', 'http://127.0.0.1');
+    let url: URL;
+    try { url = new URL(req.url ?? '/', 'http://127.0.0.1'); } catch {
+      socket.write('HTTP/1.1 404 Not Found\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
+      socket.destroy();
+      return;
+    }
     if (url.pathname !== '/ws' || !tokenOk(url.searchParams.get('token'), token)) {
       const code = url.pathname === '/ws' ? '401 Unauthorized' : '404 Not Found';
       socket.write(`HTTP/1.1 ${code}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
