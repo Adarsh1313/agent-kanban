@@ -1,4 +1,4 @@
-import type { AdapterEvent, ProviderId, UsageReading } from '@agent-kanban/shared';
+import type { AdapterEvent, ModelOption, ProviderId, UsageReading } from '@agent-kanban/shared';
 
 export interface PingResult {
   ok: boolean;
@@ -17,6 +17,8 @@ export interface ProviderAdapter {
   resume(sessionRef: string, cwd: string): Promise<void>;
   onEvent(listener: (e: AdapterEvent) => void): () => void;
   readUsage(): Promise<UsageReading>;
+  /** The models the account can pick for a new chat. Rejects on failure. */
+  listModels(): Promise<ModelOption[]>;
   /**
    * Is the provider process alive and signed in? Never rejects. `manual: true` (a user-requested check) skips
    * any automatic-restart backoff; periodic pings leave it off.

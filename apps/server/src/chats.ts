@@ -160,6 +160,14 @@ export class ChatService {
     return chat;
   }
 
+  /** Rename, pin or snooze a chat. */
+  patch(chatId: string, patch: { title?: string; pinned?: boolean; snoozedUntil?: string | null }): Chat {
+    this.mustGet(chatId);
+    const chat = this.store.updateChat(chatId, patch);
+    this.broadcast({ type: 'chat.updated', chat });
+    return chat;
+  }
+
   async continueHistory(h: HistoryChat, text: string): Promise<Chat> {
     // Serialize per (provider, sessionRef) so concurrent calls reuse one chat.
     const key = `${h.provider}:${h.sessionRef}`;

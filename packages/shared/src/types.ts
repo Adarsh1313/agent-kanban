@@ -81,3 +81,23 @@ export type ServerEvent =
   | { type: 'usage.updated'; reading: UsageReading }
   | { type: 'connection.updated'; health: ConnectionHealth }
   | { type: 'notification'; chatId: string; kind: 'permission' | 'question' | 'finished' | 'limit' | 'error' };
+
+export interface Project {
+  /** The absolute folder, exactly as the chats store it. */
+  id: string;
+  name: string;
+  path: string;
+  providers: { provider: ProviderId; chats: number; lastUsedAt: string; lastModel: string | null }[];
+  columns: Record<Column, number>;
+  historyOnly: number;
+  lastActivityAt: string;
+}
+
+export interface ProjectInfo {
+  stack: string[];
+  git: { branch: string; lastCommit: string; lastCommitAt: string } | null;
+  instructionFiles: Record<ProviderId, boolean>;
+  topFolders: string[];
+}
+
+export interface ModelOption { id: string; label: string; isDefault: boolean }

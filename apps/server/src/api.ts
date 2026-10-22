@@ -1,9 +1,12 @@
 import http from 'node:http';
 import { statusPageHtml } from './status-page.ts';
+import { DEFAULT_DIST, readStatic, shellFile, staticFile } from './static.ts';
+import { buildProjects, projectInfo } from './projects.ts';
+import type { ProviderAdapter } from './adapters/adapter.ts';
 import { statSync } from 'node:fs';
 import { timingSafeEqual } from 'node:crypto';
 import { WebSocketServer, WebSocket } from 'ws';
-import type { ConnectionHealth, HistoryChat, ProviderId, ServerEvent } from '@agent-kanban/shared';
+import type { ConnectionHealth, HistoryChat, ModelOption, ProviderId, ServerEvent } from '@agent-kanban/shared';
 import { ActiveElsewhereError } from './chats.ts';
 import type { ChatService } from './chats.ts';
 import type { UsageService } from './usage/service.ts';
@@ -14,6 +17,7 @@ const MAX_BODY = 1_000_000;
 const MAX_DRAIN = 16_000_000; // past this, an oversized upload is cut off rather than read to the end
 const DRAIN_MS = 5_000;
 const PING_MS = 30_000;
+const MODELS_MS = 15_000;
 const MAX_BUFFERED = 4_000_000;
 
 class HttpError extends Error {
@@ -88,11 +92,15 @@ export function createApi(opts: {
   usage: UsageService;
   history: () => Promise<HistoryChat[]>;
   connections?: { latest: () => ConnectionHealth[]; check: (provider?: ProviderId) => Promise<ConnectionHealth[]> };
+  adapters?: { get(id: ProviderId): ProviderAdapter | undefined };
+  /** Folder holding the built web app (default apps/web/dist). */
+  webDist?: string;
   token: string;
   pingMs?: number;
 }): { server: http.Server; broadcast: (e: ServerEvent) => void; close: () => void } {
   const { chats, usage, history, token } = opts;
   const pingMs = opts.pingMs ?? PING_MS;
+  const dist = opts.webDist ?? DEFAULT_DIST;
   const wss = new WebSocketServer({ noServer: true });
   const alive = new WeakSet<WebSocket>();
 
@@ -116,6 +124,20 @@ export function createApi(opts: {
 
   const usageBody = (readings: ReturnType<UsageService['latest']>) => ({ readings, suggested: suggest(readings, PROVIDERS) });
 
+  async function models(): Promise<Record<ProviderId, ModelOption[]>> {
+    const one = async (id: ProviderId): Promise<ModelOption[]> => {
+      const a = opts.adapters?.get(id);
+      if (!a) return [];
+      let timer: NodeJS.Timeout | undefined;
+      try {
+        const timeout = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('timeout')), MODELS_MS); });
+        return await Promise.race([a.listModels(), timeout]);
+      } catch { return []; } finally { clearTimeout(timer); }
+    };
+    const [claude, codex, antigravity] = await Promise.all(PROVIDERS.map(one));
+    return { claude: claude!, codex: codex!, antigravity: antigravity! };
+  }
+
   async function route(req: http.IncomingMessage, url: URL): Promise<{ status: number; body?: unknown }> {
     const method = req.method ?? 'GET';
     const match = (m: string, pattern: string): string[] | null => {
@@ -129,6 +151,31 @@ export function createApi(opts: {
     if ((m = match('GET', '/api/chats/:id/messages'))) return { status: 200, body: chats.listMessages(m[0]!) };
     if ((m = match('GET', '/api/chats/:id/requests'))) return { status: 200, body: chats.listOpenRequests(m[0]!) };
     if ((m = match('GET', '/api/chats/:id/tool-calls'))) return { status: 200, body: chats.listToolCalls(m[0]!) };
+    if ((m = match('PATCH', '/api/chats/:id'))) {
+      const b = await readJson(req);
+      const patch: { title?: string; pinned?: boolean; snoozedUntil?: string | null } = {};
+      for (const [k, v] of Object.entries(b)) {
+        if (k === 'title') {
+          if (typeof v !== 'string' || v.trim() === '' || v.length > 200) throw new HttpError(400, 'Title must be 1 to 200 characters.');
+          patch.title = v.trim();
+        } else if (k === 'pinned') {
+          if (typeof v !== 'boolean') throw new HttpError(400, 'Pinned must be true or false.');
+          patch.pinned = v;
+        } else if (k === 'snoozedUntil') {
+          if (v !== null && (typeof v !== 'string' || Number.isNaN(Date.parse(v)))) throw new HttpError(400, 'Snoozed until must be a date or null.');
+          patch.snoozedUntil = v as string | null;
+        } else throw new HttpError(400, `You can't change "${k}".`);
+      }
+      return { status: 200, body: chats.patch(m[0]!, patch) };
+    }
+    if (match('GET', '/api/projects')) return { status: 200, body: buildProjects(chats.listChats(), await history()) };
+    if (match('GET', '/api/projects/info')) {
+      const path = url.searchParams.get('path');
+      const known = path ? buildProjects(chats.listChats(), await history()).find((p) => p.id === path) : undefined;
+      if (!known) throw new HttpError(404, 'Not found.');
+      return { status: 200, body: await projectInfo(known.path) };
+    }
+    if (match('GET', '/api/models')) return { status: 200, body: await models() };
     if (match('POST', '/api/chats')) {
       const b = await readJson(req);
       const input: { provider: ProviderId; cwd: string; prompt: string; model?: string } = {
@@ -188,7 +235,7 @@ export function createApi(opts: {
       res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Vary', 'Origin');
       res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
-      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, OPTIONS');
     }
     const send = (status: number, body?: unknown) => {
       if (body === undefined) { res.writeHead(status); res.end(); return; }
@@ -217,15 +264,28 @@ export function createApi(opts: {
     if (req.method === 'OPTIONS') return send(204);
     let url: URL;
     try { url = new URL(req.url ?? '/', 'http://127.0.0.1'); } catch { return send(404, { error: 'Not found.' }); }
+    const wantsHtml = (req.headers.accept ?? '').includes('text/html');
+    const sendFile = (file: string, cache: string) => {
+      const { body, type } = readStatic(file);
+      res.writeHead(200, { 'Content-Type': type, 'Cache-Control': cache, 'Content-Length': body.length });
+      res.end(req.method === 'HEAD' ? undefined : body);
+    };
+    const apiPath = url.pathname === '/ws' || url.pathname === '/api' || url.pathname.startsWith('/api/');
+    // The built web app and its files carry no data, so they need no token.
+    if ((req.method === 'GET' || req.method === 'HEAD') && !apiPath && url.pathname !== '/console') {
+      const shell = shellFile(dist);
+      const file = url.pathname === '/' ? null : staticFile(dist, url.pathname);
+      if (file) return sendFile(file, url.pathname.startsWith('/assets/') ? 'public, max-age=31536000, immutable' : 'no-cache');
+      if (shell && wantsHtml) return sendFile(shell, 'no-store');
+    }
     const auth = req.headers.authorization;
     let given = auth?.startsWith('Bearer ') ? auth.slice(7) : null;
-    // ?token= is accepted only for the landing page the server prints (and the WebSocket upgrade).
-    const landing = req.method === 'GET' && url.pathname === '/';
+    // ?token= is accepted only for the landing pages the server prints (and the WebSocket upgrade).
+    const landing = req.method === 'GET' && (url.pathname === '/' || url.pathname === '/console');
     if (!given && landing) given = url.searchParams.get('token');
     if (!tokenOk(given, token)) return send(401, { error: 'Missing or wrong token.' });
     if (landing) {
       // Browsers get the live console; scripts asking for text still get the plain line.
-      const wantsHtml = (req.headers.accept ?? '').includes('text/html');
       res.writeHead(200, { 'Content-Type': wantsHtml ? 'text/html; charset=utf-8' : 'text/plain; charset=utf-8', 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' });
       res.end(wantsHtml ? statusPageHtml() : 'Agent Kanban server is running.');
       return;

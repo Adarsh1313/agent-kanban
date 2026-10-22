@@ -59,7 +59,7 @@ const connections = new ConnectionMonitor({
   getVersion, getLatest, adapters,
   onUpdate: (health) => broadcast({ type: 'connection.updated', health }),
 });
-const api = createApi({ chats, usage, history: () => readAllHistory(home), token, connections });
+const api = createApi({ chats, usage, history: () => readAllHistory(home), token, connections, adapters });
 broadcast = api.broadcast;
 
 chats.recoverAfterRestart();

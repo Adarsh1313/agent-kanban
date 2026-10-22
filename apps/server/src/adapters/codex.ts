@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import type { AdapterEvent, UsageReading } from '@agent-kanban/shared';
+import type { AdapterEvent, ModelOption, UsageReading } from '@agent-kanban/shared';
 import type { PingResult, ProviderAdapter } from './adapter.ts';
 import { JsonRpcProcess } from './jsonrpc.ts';
 import { codexLimitsToReading } from '../usage/parse.ts';
@@ -322,6 +322,20 @@ export class CodexAdapter implements ProviderAdapter {
     this.threadCwd.set(sessionRef, cwd);
     await p.request('thread/resume', { threadId: sessionRef, cwd, ...this.modelParam(p), ...AUTO_MODE });
     this.loaded.get(p)?.add(sessionRef);
+  }
+
+  async listModels(): Promise<ModelOption[]> {
+    const p = await this.ensureProcess();
+    type Model = { id: string; model?: string; displayName?: string; isDefault?: boolean; hidden?: boolean };
+    const out: ModelOption[] = [];
+    let cursor: string | null = null;
+    for (let page = 0; page < 5; page++) {
+      const r: { data: Model[]; nextCursor?: string | null } = await p.request('model/list', { includeHidden: false, ...(cursor ? { cursor } : {}) }, this.initializeTimeoutMs);
+      for (const m of r.data) if (!m.hidden) out.push({ id: m.model || m.id, label: m.displayName || m.model || m.id, isDefault: m.isDefault === true });
+      cursor = r.nextCursor ?? null;
+      if (!cursor) break;
+    }
+    return out;
   }
 
   async readUsage(): Promise<UsageReading> {

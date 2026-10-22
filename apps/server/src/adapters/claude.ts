@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { query as sdkQuery } from '@anthropic-ai/claude-agent-sdk';
 import type { CanUseTool, PermissionResult, Query, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
-import type { AdapterEvent, UsageReading } from '@agent-kanban/shared';
+import type { AdapterEvent, ModelOption, UsageReading } from '@agent-kanban/shared';
 import type { PingResult, ProviderAdapter } from './adapter.ts';
 import { resolveSpawnTarget } from './spawn-target.ts';
 import { claudeUsageToReading } from '../usage/parse.ts';
@@ -335,6 +335,12 @@ export class ClaudeAdapter implements ProviderAdapter {
         }
       }
     }
+  }
+
+  async listModels(): Promise<ModelOption[]> {
+    this.assertOpen();
+    const models = await this.withUsageQuery((q) => q.supportedModels(), true);
+    return models.map((m) => ({ id: m.value, label: m.displayName || m.value, isDefault: m.value === 'default' }));
   }
 
   async readUsage(): Promise<UsageReading> {

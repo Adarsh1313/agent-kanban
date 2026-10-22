@@ -276,3 +276,55 @@ test('GET /api/chats/:id/requests and /tool-calls read back open requests and to
     assert.equal((await s.f('/api/chats/zz/tool-calls')).status, 404);
   } finally { s.close(); }
 });
+
+test('PATCH /api/chats/:id round-trips pin, title and snooze, and broadcasts', async () => {
+  const stored: any = chat();
+  const events: ServerEvent[] = [];
+  const s = await setup({
+    patch: (id: string, p: object) => {
+      if (id !== 'c1') throw new Error('Chat not found.');
+      Object.assign(stored, p);
+      events.push({ type: 'chat.updated', chat: { ...stored } });
+      return { ...stored };
+    },
+  });
+  const patch = (body: unknown, id = 'c1') => s.f(`/api/chats/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
+  try {
+    let r = await patch({ pinned: true });
+    assert.equal(r.status, 200);
+    assert.equal(((await r.json()) as Chat).pinned, true);
+    r = await patch({ title: '  New name  ', snoozedUntil: '2026-02-01T00:00:00Z' });
+    const c = (await r.json()) as Chat;
+    assert.equal(c.title, 'New name');
+    assert.equal(c.snoozedUntil, '2026-02-01T00:00:00Z');
+    assert.equal(((await (await patch({ snoozedUntil: null })).json()) as Chat).snoozedUntil, null);
+    assert.equal(events.length, 3);
+    assert.equal((await patch({ title: 'x' }, 'nope')).status, 404);
+  } finally { s.close(); }
+});
+
+test('PATCH /api/chats/:id rejects bad bodies with 400', async () => {
+  const s = await setup({ patch: () => { throw new Error('should not be called'); } });
+  const patch = (body: unknown) => s.f('/api/chats/c1', { method: 'PATCH', body: JSON.stringify(body) });
+  try {
+    for (const b of [{ title: '   ' }, { title: 5 }, { title: 'x'.repeat(201) }, { pinned: 'yes' }, { snoozedUntil: 5 }, { snoozedUntil: 'tomorrow' }, { column: 'done' }, { title: 'ok', cwd: '/' }]) {
+      const r = await patch(b);
+      assert.equal(r.status, 400, JSON.stringify(b));
+      assert.match(((await r.json()) as { error: string }).error, /\w/);
+    }
+    assert.equal((await s.f('/api/chats/c1', { method: 'PATCH', body: JSON.stringify({ pinned: true }) }, null)).status, 401);
+  } finally { s.close(); }
+});
+
+test('GET /api/models lists each provider, empty for a missing adapter or a failure', async () => {
+  const adapters = {
+    get: (id: string) => id === 'claude' ? { listModels: async () => [{ id: 'default', label: 'Default', isDefault: true }] }
+      : id === 'codex' ? { listModels: async () => { throw new Error('boom'); } } : undefined,
+  };
+  const s = await setup({}, undefined, { adapters });
+  try {
+    const r = await s.f('/api/models');
+    assert.equal(r.status, 200);
+    assert.deepEqual(await r.json(), { claude: [{ id: 'default', label: 'Default', isDefault: true }], codex: [], antigravity: [] });
+  } finally { s.close(); }
+});
