@@ -379,6 +379,45 @@ SDK usage: one streaming-input `query({ prompt: asyncIterableOfUserMessages, opt
 
 ---
 
+### Task 10: Connection health and version checks
+
+Added after plan review: "keep no loose ends with connections; keep checking that the latest version is installed and the connection is strong."
+
+**Files:**
+- Create: `apps/server/src/health.ts`
+- Modify: `apps/server/src/adapters/adapter.ts` (add `ping()`), `codex.ts`, `claude.ts`, `apps/server/src/api.ts` (route + event), `apps/server/src/main.ts` (start the monitor)
+- Test: `apps/server/test/health.test.ts`
+
+**Interfaces:**
+- Consumes: `findBinary` (9), `ProviderAdapter` (6), `ServerEvent` (8).
+- Produces:
+  - `ProviderAdapter.ping(): Promise<{ ok: boolean; signedIn: boolean | null; message?: string }>` — Codex: `account/read` on the running app-server (starting it if needed) → `{ account: Account | null }`; `signedIn = account !== null`. Claude: `query(...).accountInfo()` on a short-lived query → `AccountInfo`; `signedIn = !!info.tokenSource && info.tokenSource !== 'none'` (same rule T3 Code uses).
+  - (type in shared) `interface ConnectionHealth { provider: ProviderId; installed: boolean; path: string | null; version: string | null; latestVersion: string | null; updateAvailable: boolean; signedIn: boolean | null; processOk: boolean; status: 'connected' | 'update_available' | 'signed_out' | 'not_installed' | 'degraded'; message: string | null; checkedAt: string }`
+  - `class ConnectionMonitor` with `constructor(opts: { providers: ProviderId[]; findBinary; getVersion: (id, path) => Promise<string | null>; getLatest: (id) => Promise<string | null>; adapters; onUpdate: (h: ConnectionHealth) => void; now?; healthMs?: number /* 60_000 */; versionMs?: number /* 6 h */ })`, `start()`, `stop()`, `check(provider?): Promise<ConnectionHealth[]>`, `latest(): ConnectionHealth[]`.
+  - `getVersion`: runs `<path> --version` and takes the first `\d+\.\d+\.\d+` (`2.1.308 (Claude Code)` → `2.1.308`, `codex-cli 0.163.0` → `0.163.0`).
+  - `getLatest`: `GET https://registry.npmjs.org/<pkg>/latest` → `.version`, where `pkg` is `@anthropic-ai/claude-code` or `@openai/codex`; network failure → `null` (never an error state on its own).
+  - `ServerEvent` gains `{ type: 'connection.updated'; health: ConnectionHealth }`; API gains `GET /api/connections` and `POST /api/connections/check`.
+  - Status precedence: `not_installed` > `signed_out` > `degraded` (ping failed, binary present) > `update_available` > `connected`. Messages: "Codex isn't installed.", "Codex isn't signed in.", "Codex didn't respond. Restarting it…", "Codex 0.164.0 is available (you have 0.163.0)."
+  - Codex app-server keep-alive: `CodexAdapter` restarts a process that exits unexpectedly on the next ping or action, with backoff 1 s, 2 s, 4 s … capped at 60 s; after 3 failures in a row the status stays `degraded` until a manual check succeeds.
+
+- [ ] **Step 1: Write the failing tests** (fake `findBinary`, `getVersion`, `getLatest`, adapters):
+  - Installed 0.163.0, latest 0.163.0, ping ok + signed in → `status: 'connected'`, `updateAvailable: false`.
+  - Latest 0.164.0 → `update_available` with the message above.
+  - `getLatest` rejects (offline) → `latestVersion: null`, status still `connected`.
+  - `findBinary` → `null` → `not_installed`; ping is not called.
+  - Ping `{ ok: true, signedIn: false }` → `signed_out`.
+  - Ping rejects → `degraded`, `processOk: false`; `onUpdate` called once per change, not on every identical check.
+  - With `mock.timers`: health checks every 60 000 ms; the registry is queried at start and then every 6 h, not every minute.
+  - Codex adapter: the fake app-server in `crash` scenario exits; three consecutive pings respawn after 1 s, 2 s, 4 s (count spawns with mocked timers).
+  - `getVersion` parses both real formats above.
+- [ ] **Step 2: Run to verify they fail.**
+- [ ] **Step 3: Implement `ping()` in both adapters, the Codex backoff, and `ConnectionMonitor`; wire route, event and `start()` in `main.ts`.**
+- [ ] **Step 4: Run tests — all pass; `npm run typecheck`.**
+- [ ] **Step 5: Real check.** Start the server; `GET /api/connections` → Claude `2.1.308` and Codex `0.163.0`, both `connected`, `updateAvailable: false` (as of 2026-10-22). Kill the Codex app-server process from Task Manager → within 60 s a `connection.updated` with `degraded`, then `connected` after the respawn.
+- [ ] **Step 6: Commit.** `git commit -am "feat(server): connection health and version monitor"`
+
+---
+
 ## Spec coverage (Plan 1 vs spec)
 
 | Spec section | Covered by |
@@ -391,3 +430,4 @@ SDK usage: one streaming-input `query({ prompt: asyncIterableOfUserMessages, opt
 | 8 Errors | Tasks 4, 6, 8 |
 | 10 Testing: unit, adapter contract tests with fake processes, manual e2e | Every task; Tasks 6, 7, 9 manual checks |
 | 11 History, same-chat resume, project → providers | Tasks 5, 8, 9 (project grouping and filters are UI → Plan 2) |
+| Connection health and latest-version checks (added at plan review) | Task 10 |
