@@ -39,6 +39,7 @@ const api = async (method: string, path: string, body?: unknown) => {
 const chatState = new Map<string, { column: string | null; reason: string | null }>();
 const lastText = new Map<string, string>();
 const opened = new Set<string>();
+const questions: { chatId: string; summary: string; openBeforeAnswer: number; status: number }[] = [];
 const ws = new WebSocket(`ws://${base.replace('http://', '')}/ws?token=${token}`);
 await new Promise((r, j) => { ws.on('open', r); ws.on('error', j); });
 const t0 = Date.now();
@@ -52,8 +53,18 @@ ws.on('message', (d) => {
     log(`${at}s request.opened ${e.kind}`);
     if (!opened.has(e.requestId)) {
       opened.add(e.requestId);
-      api('POST', `/api/chats/${e.chatId}/requests/${e.requestId}`, { decision: 'allow' })
-        .then((r) => log(`${at}s   answered allow -> ${r.status}`));
+      if (e.kind === 'question') {
+        // Read the open request back over the API (as a reloaded page would), then answer it with text.
+        void (async () => {
+          const open = await api('GET', `/api/chats/${e.chatId}/requests`);
+          const r = await api('POST', `/api/chats/${e.chatId}/requests/${e.requestId}`, { decision: { reply: 'a.txt' } });
+          questions.push({ chatId: e.chatId, summary: e.summary, openBeforeAnswer: (open.json as unknown[]).length, status: r.status });
+          log(`${at}s   question "${e.summary}" (open via API: ${(open.json as unknown[]).length}) answered "a.txt" -> ${r.status}`);
+        })();
+      } else {
+        api('POST', `/api/chats/${e.chatId}/requests/${e.requestId}`, { decision: 'allow' })
+          .then((r) => log(`${at}s   answered allow -> ${r.status}`));
+      }
     }
   } else if (e.type === 'tool.call') {
     log(`${at}s tool.call ${e.toolCall.name} ${e.toolCall.status}`);
@@ -127,6 +138,26 @@ await step('d) usage and history', async () => {
   const parts = (u.json.readings as any[]).map((x) => `${x.provider}:${x.status}[${x.windows.map((w: any) => `${w.kind} ${w.leftPct}% left`).join('; ')}]`);
   const h = await api('GET', '/api/history');
   return `usage ${parts.join(' | ')} suggested=${u.json.suggested}; history count=${(h.json as unknown[]).length}`;
+});
+
+await step('e) claude question round-trip', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ak-claude-q-'));
+  const r = await api('POST', '/api/chats', {
+    provider: 'claude', cwd: dir,
+    prompt: 'Use the AskUserQuestion tool to ask me whether to name the file a.txt or b.txt, then create that file containing the word hi. Do not ask in plain text.',
+  });
+  if (r.status !== 201) throw new Error(`POST /api/chats -> ${r.status} ${JSON.stringify(r.json)}`);
+  const id = r.json.id as string;
+  const s = await waitFor(id, (x) => x.column === 'review' || (x.column === 'needs_you' && x.reason !== 'permission' && x.reason !== 'question'));
+  const q = questions.find((x) => x.chatId === id);
+  const a = existsSync(join(dir, 'a.txt')); const b = existsSync(join(dir, 'b.txt'));
+  const tools = await api('GET', `/api/chats/${id}/tool-calls`);
+  const left = await api('GET', `/api/chats/${id}/requests`);
+  const summary = `question ${q ? `asked ("${q.summary}", open via API ${q.openBeforeAnswer}, answer -> ${q.status})` : 'NOT triggered'}; `
+    + `ended ${s.column}/${s.reason}; a.txt=${a} b.txt=${b}; tool calls ${(tools.json as unknown[]).length}; open requests after ${(left.json as unknown[]).length}; `
+    + `last message: ${(lastText.get(id) ?? '').slice(0, 160).replace(/\s+/g, ' ')}`;
+  if (s.column !== 'review') throw new Error(summary);
+  return summary;
 });
 
 log('\n=== SUMMARY');
