@@ -4,8 +4,15 @@
     {
       "name": "design",
       "runtimeExecutable": "python",
-      "runtimeArgs": ["-m", "http.server", "5178", "--bind", "127.0.0.1", "--directory", "design"],
-      "port": 5178
+      "runtimeArgs": ["-m", "http.server", "3005", "--bind", "127.0.0.1", "--directory", "design"],
+      "port": 3005
+    },
+    {
+      "name": "api",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["--disable-warning=ExperimentalWarning", "apps/server/src/main.ts"],
+      "env": { "AGENT_KANBAN_PORT": "3006" },
+      "port": 3006
     }
   ]
 }
