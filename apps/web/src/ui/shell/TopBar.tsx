@@ -2,6 +2,7 @@ import { focusedProvider, projectLabel, unreadCount } from '../../state/selector
 import { useStore } from '../../state/store.ts';
 import { openNewChat } from '../actions.ts';
 import { Icon, Tooltip, providerName, type IconName } from '../primitives/index.ts';
+import { UsageChips } from '../usage/UsageChips.tsx';
 
 const VIEW_META: Record<'board' | 'projects' | 'connections', { icon: IconName; title: string }> = {
   board: { icon: 'board', title: 'Board' },
@@ -32,7 +33,7 @@ export function TopBar() {
         <button className="chip-btn" type="button"><Icon name="filter" size="sm" />Filter</button>
       )}
       <span className="spacer" />
-      <div className="usage-area" />
+      <div className="usage-area"><UsageChips /></div>
       <Tooltip label="Notifications">
         <button className="btn icon-only ghost bell" type="button" aria-label={unread > 0 ? `Notifications, ${unread} unread` : 'Notifications'}>
           <Icon name="bell" /><span className="dot" data-n={unread} aria-hidden="true">{unread}</span>

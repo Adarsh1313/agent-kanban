@@ -86,5 +86,20 @@ html, body { overflow: hidden; }
   .dialog-body textarea.invalid { outline: 1px solid var(--color-needs-text); outline-offset: var(--space-1); border-radius: var(--radius-control); }
 }
 
+/* Usage (design/board.html keeps .refresh .spinning inline) */
+.refresh .icon.spinning { animation: spin 700ms var(--ease-out) infinite; }
+.btn.refresh:disabled { opacity: 1; cursor: progress; }
+.usage-chip[data-dim], .usage-focus[data-dim] .m, .prov-block[data-status="error"] .meter, .prov-block[data-status="error"] .model-toggle { opacity: .55; }
+.prov-block[data-status="error"] .unavailable { color: var(--color-needs-text); }
+.usage-chip .pct, .usage-focus .m, .usage-area .link-btn { white-space: nowrap; }
+button.usage-focus { color: inherit; transition: background-color var(--duration-hover) var(--ease-colour); }
+@media (hover: hover) and (pointer: fine) { button.usage-focus:hover { background: var(--color-control-hover); } }
+.usage-focus .m i { flex: none; }
+/* Meter fills change by transform (scaleX); with reduced motion the new value just appears. */
+@media (prefers-reduced-motion: reduce) {
+  .refresh .icon.spinning { animation: none; }
+  .meter .fill, .minimeter i::after, .usage-focus .m i::after { transition: none; }
+}
+
 @media (max-width: 900px) { .sidebar { display: none; } }
-@media (max-width: 640px) { .usage-area .pct, .topbar .new-label { display: none; } }
+@media (max-width: 640px) { .usage-area .pct, .topbar .new-label, .usage-focus .m span { display: none; } }

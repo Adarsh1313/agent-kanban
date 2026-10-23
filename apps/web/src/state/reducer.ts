@@ -204,6 +204,26 @@ export function endSync(s: AppState): AppState {
 /** True when an event wrote this item after the fetch that started at `since`. */
 export const touchedSince = (s: AppState, key: string, since: number): boolean => (s.sync.touched[key] ?? 0) > since;
 
+/**
+ * Merges usage readings. A reading older than the one held is ignored (a refresh answered after a newer
+ * usage.updated event). A failed read normally carries the last good windows (the server keeps them); when it
+ * carries none, the windows already held here are kept, so the numbers stay and only the message changes.
+ */
+export function mergeReadings(cur: AppState['usage'], readings: UsageReading[]): AppState['usage'] {
+  const next = { ...cur };
+  for (const r of readings) {
+    const prev = next[r.provider];
+    if (prev && Date.parse(prev.readAt) > Date.parse(r.readAt)) continue;
+    next[r.provider] = r.status === 'error' && r.windows.length === 0 && prev && prev.windows.length > 0 ? { ...r, windows: prev.windows } : r;
+  }
+  return next;
+}
+
+/** The answer to a usage refresh: every reading plus the provider with the most room. */
+export function applyUsage(s: AppState, res: { readings: UsageReading[]; suggested: ProviderId | null }): AppState {
+  return { ...s, usage: mergeReadings(s.usage, res.readings), suggested: res.suggested };
+}
+
 export function applyEvent(s: AppState, e: ServerEvent, now: Date = new Date()): AppState {
   const mk = (keys: string[], patch: Partial<AppState>): AppState => ({ ...s, ...patch, sync: bump(s, keys) });
   switch (e.type) {
@@ -263,7 +283,7 @@ export function applyEvent(s: AppState, e: ServerEvent, now: Date = new Date()):
       });
     }
     case 'usage.updated':
-      return mk([], { usage: { ...s.usage, [e.reading.provider]: e.reading } });
+      return mk([], { usage: mergeReadings(s.usage, [e.reading]) });
     case 'connection.updated':
       return mk([], { connections: { ...s.connections, [e.health.provider]: e.health } });
     case 'notification': {
@@ -313,8 +333,7 @@ export function applySnapshot(s: AppState, snap: Snapshot, since: number = s.syn
     if (!chat || chat.column === 'needs_you') requests[id] = list;
   }
 
-  const usage = { ...s.usage };
-  for (const r of snap.usage) usage[r.provider] = r;
+  const usage = mergeReadings(s.usage, snap.usage);
   const connections = { ...s.connections };
   for (const h of snap.connections) connections[h.provider] = h;
 
