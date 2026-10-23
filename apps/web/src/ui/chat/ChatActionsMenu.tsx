@@ -85,12 +85,12 @@ function sendArchive(store: Store, id: string, keepalive: boolean): void {
 }
 
 /** The page is going away: archives still in their Undo window are sent now (keepalive) instead of being lost. */
-function onPagehide(e: PageTransitionEvent): void {
+function onPagehide(): void {
   for (const [id, p] of [...pendingArchives]) {
     pendingArchives.delete(id);
     sendArchive(p.store, id, true);
-    // Restored from the back/forward cache: the archive has been sent, so its Undo must not show any more.
-    if (e.persisted) dismissToast(p.toastId);
+    // The archive has been sent: if the page lives on (back/forward cache, or a pagehide that did not unload), its Undo would be dead.
+    dismissToast(p.toastId);
   }
 }
 

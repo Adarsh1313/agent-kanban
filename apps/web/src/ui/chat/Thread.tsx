@@ -121,7 +121,7 @@ export function Thread({ chat }: { chat: Chat }) {
     } else if (stick.current) {
       el.scrollTop = el.scrollHeight;
     }
-  }, [messages, streaming, limit, requests]);
+  }, [messages, streaming, calls, loaded, limit, requests]);
 
   // Screen readers hear each agent reply once it is complete, not every streamed piece of it.
   const lastReply = lastAssistant(messages);

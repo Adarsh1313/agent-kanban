@@ -137,6 +137,39 @@ describe('Chat panel: opening and loading', () => {
     expect(store.getState().ui.openChatId).toBe('c1');
   });
 
+  it('a new tool call keeps a thread that is at the bottom scrolled to the bottom', async () => {
+    thread([message({ id: 'u1', role: 'user', text: 'Go' })], [], [tool({ id: 't1', status: 'running' })]);
+    const store = seeded([chat({ title: 'Follow' })]);
+    mount(store);
+    fireEvent.click(card('Follow'));
+    await waitFor(() => expect(within(panel()).getByText('Working · 1 step')).toBeTruthy());
+    const el = panel().querySelector<HTMLElement>('.thread')!;
+    let height = 1000;
+    let top = 0;
+    Object.defineProperty(el, 'scrollHeight', { configurable: true, get: () => height });
+    Object.defineProperty(el, 'clientHeight', { configurable: true, get: () => 300 });
+    Object.defineProperty(el, 'scrollTop', { configurable: true, get: () => top, set: (v: number) => { top = v; } });
+    top = 700;
+    fireEvent.scroll(el);
+    height = 1400;
+    act(() => store.setState((s) => applyEvent(s, { type: 'tool.call', chatId: 'c1', toolCall: tool({ id: 't2', summary: 'Reading a file', status: 'running', createdAt: '2026-10-23T11:30:00.000Z' }) })));
+    expect(within(panel()).getByText('Working · 2 steps')).toBeTruthy();
+    expect(top).toBe(1400);
+  });
+
+  it('the panel is named by the chat title outside rename mode, and by the title field while renaming', async () => {
+    mount(seeded([chat({ title: 'Named chat', column: 'review' })]));
+    fireEvent.click(card('Named chat'));
+    expect(screen.getByRole('complementary', { name: 'Named chat' })).toBe(panel());
+    expect(document.querySelectorAll('#panel-title')).toHaveLength(1);
+    fireEvent.click(within(panel()).getByRole('button', { name: 'More actions' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Rename' }));
+    expect(document.querySelectorAll('#panel-title')).toHaveLength(1);
+    expect(document.getElementById('panel-title')!.tagName).toBe('INPUT');
+    fireEvent.keyDown(within(panel()).getByRole('textbox', { name: 'Chat title' }), { key: 'Escape' });
+    expect(document.getElementById('panel-title')!.textContent).toBe('Named chat');
+  });
+
   it('renders the latest 200 of 2 000 messages until Show earlier', async () => {
     const many = Array.from({ length: 2000 }, (_, i) => message({
       id: `m${i}`, role: i % 2 === 0 ? 'user' : 'assistant', text: `Message ${i}`,
@@ -315,6 +348,8 @@ describe('Chat panel: actions menu', () => {
     act(() => { pagehide(false); });
     expect(mocked.archive).toHaveBeenCalledTimes(1);
     expect(mocked.archive).toHaveBeenCalledWith('c1', { keepalive: true });
+    // If the page survives anyway, its Undo is already dead: the toast is gone.
+    expect(screen.queryByText('Chat archived')).toBeNull();
     act(() => { pagehide(false); });
     act(() => { vi.advanceTimersByTime(10_000); });
     expect(mocked.archive).toHaveBeenCalledTimes(1);
