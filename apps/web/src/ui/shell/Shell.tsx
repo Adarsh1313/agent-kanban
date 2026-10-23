@@ -4,6 +4,7 @@ import { useStore, useStoreInstance, type Store } from '../../state/store.ts';
 import { openNewChat } from '../actions.ts';
 import { Board } from '../board/Board.tsx';
 import { ChatPanel } from '../chat/ChatPanel.tsx';
+import { NewChatDialog } from '../newchat/NewChatDialog.tsx';
 import { hasOpenLayer } from '../primitives/layers.ts';
 import { Toasts } from '../primitives/index.ts';
 import { Sidebar } from './Sidebar.tsx';
@@ -88,6 +89,7 @@ export function Shell() {
         </div>
       </div>
       <ChatPanel />
+      <NewChatDialog />
       <Toasts />
     </>
   );

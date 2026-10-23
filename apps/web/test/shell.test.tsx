@@ -237,8 +237,9 @@ describe('Shell: routes', () => {
 
   it('New chat buttons and the N key call the New chat action', () => {
     const handler = vi.fn();
-    setNewChatHandler(handler);
     mount(seeded(), <Shell />);
+    // Replaces the handler the shell's New chat dialog registered (newchat.test.tsx covers the dialog itself).
+    setNewChatHandler(handler);
     // Sidebar, top bar and the board's Running column "+".
     for (const b of screen.getAllByRole('button', { name: /^New chat( N)?$/ })) fireEvent.click(b);
     expect(handler).toHaveBeenCalledTimes(3);

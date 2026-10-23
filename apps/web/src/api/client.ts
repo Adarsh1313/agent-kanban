@@ -99,5 +99,6 @@ export const api = {
   checkConnections: (provider?: ProviderId) => post<ConnectionHealth[]>('/api/connections/check', provider ? { provider } : {}),
   projects: () => get<Project[]>('/api/projects'),
   projectInfo: (path: string) => get<ProjectInfo>(`/api/projects/info?path=${enc(path)}`),
-  models: () => get<ModelOption[]>('/api/models'),
+  /** Every provider's models (an empty list when a provider's CLI could not be asked). */
+  models: () => get<Record<ProviderId, ModelOption[]>>('/api/models'),
 };

@@ -120,7 +120,7 @@ export function recentChatsByProject(
 }
 
 /** The provider to preselect in New chat: the server's suggestion if allowed, else the first allowed one. */
-export function suggestFor(s: AppState, allowed: ProviderId[]): { provider: ProviderId; suggested: boolean } | null {
+export function suggestFor(s: Pick<AppState, 'suggested'>, allowed: ProviderId[]): { provider: ProviderId; suggested: boolean } | null {
   if (s.suggested && allowed.includes(s.suggested)) return { provider: s.suggested, suggested: true };
   const first = allowed[0];
   return first ? { provider: first, suggested: false } : null;

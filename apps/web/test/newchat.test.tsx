@@ -1,0 +1,331 @@
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import type { ConnectionHealth, Project, ProviderId, UsageReading } from '@agent-kanban/shared';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ApiError, api } from '../src/api/client.ts';
+import { applySnapshot, initialState, type AppState } from '../src/state/reducer.ts';
+import { createStore, StoreProvider, type Store } from '../src/state/store.ts';
+import { openNewChat } from '../src/ui/actions.ts';
+import { allowedProviders, NewChatDialog, resetModelsCache } from '../src/ui/newchat/NewChatDialog.tsx';
+import { Toasts } from '../src/ui/primitives/toast.tsx';
+import { Shell } from '../src/ui/shell/Shell.tsx';
+import { chat } from './helpers.ts';
+
+vi.mock('../src/api/client.ts', async (orig) => {
+  const m = await orig<typeof import('../src/api/client.ts')>();
+  return { ...m, api: { ...m.api, startChat: vi.fn(), models: vi.fn() } };
+});
+
+const mocked = api as unknown as { startChat: ReturnType<typeof vi.fn>; models: ReturnType<typeof vi.fn> };
+const NOW = Date.parse('2026-10-23T12:00:00.000Z');
+
+const conn = (provider: ProviderId, status: ConnectionHealth['status'] = 'connected'): ConnectionHealth => ({
+  provider, installed: status !== 'not_installed', path: null, version: '1.0.0', latestVersion: null, updateAvailable: status === 'update_available',
+  signedIn: status !== 'signed_out', processOk: true, status, message: null, checkedAt: '2026-10-23T11:00:00.000Z',
+});
+const project = (id: string, providers: ProviderId[], lastActivityAt = '2026-10-23T10:00:00.000Z'): Project => ({
+  id, name: id.split('/').pop()!, path: id,
+  providers: providers.map((provider) => ({ provider, chats: 1, lastUsedAt: lastActivityAt, lastModel: null })),
+  columns: { running: 0, needs_you: 0, review: 0, done: 0 }, historyOnly: 0, lastActivityAt,
+});
+const reading = (provider: ProviderId, five: number, week: number): UsageReading => ({
+  provider, status: 'ok', readAt: '2026-10-23T11:00:00.000Z',
+  windows: [{ kind: 'five_hour', label: '5-hour', leftPct: five, resetsAt: null }, { kind: 'weekly', label: 'Weekly', leftPct: week, resetsAt: null }],
+});
+
+const PROJECTS = [project('/work/alpha', ['claude'], '2026-10-23T11:00:00.000Z'), project('/work/beta', ['claude', 'codex'])];
+
+function seeded(over: { connections?: ConnectionHealth[]; projects?: Project[]; suggested?: ProviderId | null; usage?: UsageReading[] } = {}, extra: Partial<AppState> = {}): Store {
+  const s = applySnapshot(initialState(), {
+    chats: [],
+    usage: over.usage ?? [reading('claude', 82, 64)],
+    suggested: over.suggested ?? null,
+    connections: over.connections ?? [conn('claude'), conn('codex'), conn('antigravity', 'signed_out')],
+    history: [],
+    projects: over.projects ?? PROJECTS,
+  });
+  return createStore({ ...s, now: NOW, ...extra });
+}
+const mount = (store: Store) => render(<StoreProvider store={store}><NewChatDialog /><Toasts /></StoreProvider>);
+const dialog = () => document.querySelector<HTMLElement>('.dialog')!;
+const promptBox = () => screen.getByRole('textbox', { name: 'Prompt' }) as HTMLTextAreaElement;
+const chip = (name: RegExp) => within(dialog()).getByRole('button', { name });
+const listbox = (label: string) => document.querySelector<HTMLElement>(`.popover[aria-label="${label}"]`)!;
+const start = () => within(dialog()).getByRole('button', { name: /Start chat/ });
+const flush = () => act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+beforeEach(() => {
+  mocked.startChat.mockReset();
+  mocked.models.mockReset();
+  mocked.models.mockResolvedValue({ claude: [{ id: 'opus', label: 'Opus', isDefault: true }, { id: 'sonnet', label: 'Sonnet', isDefault: false }], codex: [{ id: 'gpt-5', label: 'GPT-5', isDefault: true }], antigravity: [] });
+  resetModelsCache();
+});
+afterEach(() => cleanup());
+
+describe('allowedProviders', () => {
+  it('a known project allows the connected providers that worked in it', () => {
+    const s = seeded().getState();
+    expect(allowedProviders(s, PROJECTS[0])).toEqual(['claude']);
+    expect(allowedProviders(s, PROJECTS[1])).toEqual(['claude', 'codex']);
+  });
+  it('a new folder allows any connected provider; update_available counts as connected', () => {
+    const s = seeded({ connections: [conn('claude', 'update_available'), conn('codex', 'degraded'), conn('antigravity')] }).getState();
+    expect(allowedProviders(s, undefined)).toEqual(['claude', 'antigravity']);
+  });
+});
+
+describe('New chat dialog', () => {
+  it('opens on the latest project; the provider picker disables providers that have not worked there or are not connected', async () => {
+    mount(seeded());
+    act(() => openNewChat());
+    expect(dialog().dataset.state).toBe('open');
+    expect(chip(/^Project: alpha$/)).toBeTruthy();
+    fireEvent.click(chip(/^Provider:/));
+    const pop = listbox('Provider');
+    const row = (name: string) => within(pop).getByRole('option', { name: new RegExp(name) });
+    expect(row('Claude Code').getAttribute('aria-disabled')).toBeNull();
+    expect(row('Claude Code').getAttribute('aria-selected')).toBe('true');
+    expect(within(row('Claude Code')).getByText('5-hour 82% left · Weekly 64% left')).toBeTruthy();
+    expect(row('Codex').getAttribute('aria-disabled')).toBe('true');
+    expect(within(row('Codex')).getByText("Hasn't worked on alpha yet")).toBeTruthy();
+    expect(row('Antigravity').getAttribute('aria-disabled')).toBe('true');
+    expect(within(row('Antigravity')).getByText('Not signed in')).toBeTruthy();
+    // A disabled row does nothing.
+    fireEvent.click(row('Codex'));
+    expect(chip(/^Provider: Claude Code$/)).toBeTruthy();
+    expect(within(dialog()).getByText(/alpha has been worked on with Claude Code/)).toBeTruthy();
+  });
+
+  it('openNewChat({ cwd }) preselects that folder and allows its providers; usage with no reading shows —', () => {
+    mount(seeded({ suggested: 'codex' }));
+    act(() => openNewChat({ cwd: '/work/beta' }));
+    expect(chip(/^Project: beta$/)).toBeTruthy();
+    expect(chip(/^Provider: Codex/).textContent).toContain('Suggested');
+    expect(within(dialog()).getByText('Codex: 5-hour — · Weekly —')).toBeTruthy();
+    fireEvent.click(chip(/^Provider:/));
+    const codex = within(listbox('Provider')).getByRole('option', { name: /Codex/ });
+    expect(codex.getAttribute('aria-disabled')).toBeNull();
+  });
+
+  it('falls back to the first allowed provider when the server suggestion is null or not allowed', () => {
+    mount(seeded({ suggested: 'codex' }));
+    act(() => openNewChat({ cwd: '/work/alpha' }));
+    expect(chip(/^Provider: Claude Code$/)).toBeTruthy();
+    expect(chip(/^Provider:/).textContent).not.toContain('Suggested');
+    cleanup();
+    mount(seeded({ suggested: null }));
+    act(() => openNewChat({ cwd: '/work/beta' }));
+    expect(chip(/^Provider: Claude Code$/)).toBeTruthy();
+  });
+
+  it('switching project keeps an allowed provider and drops one that is not', () => {
+    mount(seeded());
+    act(() => openNewChat({ cwd: '/work/beta' }));
+    fireEvent.click(chip(/^Provider:/));
+    fireEvent.click(within(listbox('Provider')).getByRole('option', { name: /Codex/ }));
+    expect(chip(/^Provider: Codex/)).toBeTruthy();
+    fireEvent.click(chip(/^Project:/));
+    fireEvent.click(within(listbox('Project')).getByRole('option', { name: /alpha/ }));
+    expect(chip(/^Project: alpha$/)).toBeTruthy();
+    expect(chip(/^Provider: Claude Code$/)).toBeTruthy();
+  });
+
+  it('start sends { provider, cwd, prompt } with Default omitted, and closes on success', async () => {
+    mocked.startChat.mockResolvedValue(chat());
+    const store = seeded();
+    mount(store);
+    act(() => openNewChat());
+    fireEvent.change(promptBox(), { target: { value: '  Fix the build  ' } });
+    fireEvent.click(start());
+    await flush();
+    expect(mocked.startChat).toHaveBeenCalledWith({ provider: 'claude', cwd: '/work/alpha', prompt: 'Fix the build' });
+    expect(dialog().dataset.state).toBe('closed');
+    expect(store.getState().ui.openChatId).toBeNull();
+  });
+
+  it('a picked model is sent; changing provider resets it to Default', async () => {
+    mocked.startChat.mockResolvedValue(chat());
+    mount(seeded());
+    act(() => openNewChat({ cwd: '/work/beta' }));
+    await flush();
+    fireEvent.click(chip(/^Model: Default$/));
+    const pop = listbox('Model');
+    const options = within(pop).getAllByRole('option');
+    expect(options.map((o) => o.querySelector('b')!.textContent)).toEqual(['Default', 'Opus', 'Sonnet']);
+    fireEvent.click(within(pop).getByRole('option', { name: /^Sonnet/ }));
+    expect(chip(/^Model: Sonnet$/)).toBeTruthy();
+    fireEvent.click(chip(/^Provider:/));
+    fireEvent.click(within(listbox('Provider')).getByRole('option', { name: /Codex/ }));
+    expect(chip(/^Model: Default$/)).toBeTruthy();
+    fireEvent.click(chip(/^Provider:/));
+    fireEvent.click(within(listbox('Provider')).getByRole('option', { name: /Claude Code/ }));
+    // Back on Claude Code the earlier pick does not come back.
+    expect(chip(/^Model: Default$/)).toBeTruthy();
+    fireEvent.click(chip(/^Model:/));
+    fireEvent.click(within(listbox('Model')).getByRole('option', { name: /^Opus/ }));
+    fireEvent.change(promptBox(), { target: { value: 'Go' } });
+    fireEvent.keyDown(promptBox(), { key: 'Enter', ctrlKey: true });
+    await flush();
+    expect(mocked.startChat).toHaveBeenCalledWith({ provider: 'claude', cwd: '/work/beta', prompt: 'Go', model: 'opus' });
+  });
+
+  it('Ctrl+Enter during IME composition does not start', async () => {
+    mount(seeded());
+    act(() => openNewChat());
+    fireEvent.change(promptBox(), { target: { value: 'Go' } });
+    fireEvent.keyDown(promptBox(), { key: 'Enter', ctrlKey: true, isComposing: true });
+    await flush();
+    expect(mocked.startChat).not.toHaveBeenCalled();
+    fireEvent.keyDown(promptBox(), { key: 'Enter', metaKey: true });
+    await flush();
+    expect(mocked.startChat).toHaveBeenCalledTimes(1);
+  });
+
+  it('an empty prompt does not start: it marks the field and keeps focus there', async () => {
+    mount(seeded());
+    act(() => openNewChat());
+    fireEvent.click(start());
+    await flush();
+    expect(mocked.startChat).not.toHaveBeenCalled();
+    expect(promptBox().getAttribute('aria-invalid')).toBe('true');
+    expect(document.activeElement).toBe(promptBox());
+    expect(within(dialog()).getByText('Write what the agent should do first.')).toBeTruthy();
+  });
+
+  it('the empty-prompt shake is skipped with prefers-reduced-motion', async () => {
+    const animate = vi.fn();
+    (HTMLElement.prototype as unknown as { animate: unknown }).animate = animate;
+    try {
+      mount(seeded());
+      act(() => openNewChat());
+      fireEvent.click(start());
+      expect(animate).toHaveBeenCalledTimes(1);
+      vi.stubGlobal('matchMedia', (q: string) => ({ matches: q.includes('reduce'), media: q, addEventListener() {}, removeEventListener() {} }));
+      fireEvent.click(start());
+      expect(animate).toHaveBeenCalledTimes(1);
+      expect(promptBox().className).toBe('invalid');
+    } finally {
+      delete (HTMLElement.prototype as unknown as { animate?: unknown }).animate;
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('Start is disabled while the request is in flight (no double submit)', async () => {
+    let resolve!: (c: unknown) => void;
+    mocked.startChat.mockReturnValue(new Promise((r) => { resolve = r; }));
+    mount(seeded());
+    act(() => openNewChat());
+    fireEvent.change(promptBox(), { target: { value: 'Go' } });
+    fireEvent.click(start());
+    await flush();
+    expect((start() as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.keyDown(promptBox(), { key: 'Enter', ctrlKey: true });
+    expect(mocked.startChat).toHaveBeenCalledTimes(1);
+    await act(async () => { resolve(chat()); });
+    expect(dialog().dataset.state).toBe('closed');
+  });
+
+  it("Choose another folder…: the server's 400 shows inline under the path field and nothing else changes", async () => {
+    mocked.startChat.mockRejectedValue(new ApiError("That folder doesn't exist.", 400));
+    mount(seeded({ connections: [conn('claude'), conn('codex'), conn('antigravity', 'not_installed')] }));
+    act(() => openNewChat());
+    fireEvent.click(chip(/^Project:/));
+    fireEvent.click(within(listbox('Project')).getByRole('option', { name: /Choose another folder/ }));
+    const input = screen.getByRole('textbox', { name: 'Folder path' }) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: '/nope/new-thing' } });
+    // A new folder allows any connected provider.
+    fireEvent.click(chip(/^Provider:/));
+    const pop = listbox('Provider');
+    expect(within(pop).getByRole('option', { name: /Codex/ }).getAttribute('aria-disabled')).toBeNull();
+    expect(within(within(pop).getByRole('option', { name: /Antigravity/ })).getByText('Not installed')).toBeTruthy();
+    fireEvent.click(within(pop).getByRole('option', { name: /Codex/ }));
+    fireEvent.change(promptBox(), { target: { value: 'Hello' } });
+    fireEvent.click(start());
+    await flush();
+    expect(mocked.startChat).toHaveBeenCalledWith({ provider: 'codex', cwd: '/nope/new-thing', prompt: 'Hello' });
+    expect(screen.getByRole('alert').textContent).toBe("That folder doesn't exist.");
+    expect(input.getAttribute('aria-invalid')).toBe('true');
+    expect(dialog().dataset.state).toBe('open');
+    expect(promptBox().value).toBe('Hello');
+    expect(document.querySelector('.toast')).toBeNull();
+    // Typing clears it.
+    fireEvent.change(input, { target: { value: '/nope/other' } });
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('a cwd that is not a known project opens the path field prefilled', () => {
+    mount(seeded());
+    act(() => openNewChat({ cwd: '/elsewhere/gamma' }));
+    expect((screen.getByRole('textbox', { name: 'Folder path' }) as HTMLInputElement).value).toBe('/elsewhere/gamma');
+    expect(chip(/^Project: gamma$/)).toBeTruthy();
+  });
+
+  it('any other error toasts the server text and keeps the dialog and the prompt', async () => {
+    mocked.startChat.mockRejectedValue(new ApiError("Antigravity chats aren't supported yet.", 400));
+    mount(seeded());
+    act(() => openNewChat());
+    fireEvent.change(promptBox(), { target: { value: 'Keep me' } });
+    fireEvent.click(start());
+    await waitFor(() => expect(document.querySelector('.toast')?.textContent).toContain("Antigravity chats aren't supported yet."));
+    expect(dialog().dataset.state).toBe('open');
+    expect(promptBox().value).toBe('Keep me');
+    expect((start() as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('with no connected provider, Start is disabled and the note says why', () => {
+    mount(seeded({ connections: [conn('claude', 'signed_out')] }));
+    act(() => openNewChat());
+    expect((start() as HTMLButtonElement).disabled).toBe(true);
+    expect(within(dialog()).getByText(/None of your connected providers has worked on alpha yet/)).toBeTruthy();
+  });
+});
+
+describe('New chat: keyboard', () => {
+  it('N opens the dialog; Escape closes a picker first, then the dialog', () => {
+    render(<StoreProvider store={seeded()}><Shell /></StoreProvider>);
+    expect(dialog().dataset.state).toBe('closed');
+    fireEvent.keyDown(document.body, { key: 'n' });
+    expect(dialog().dataset.state).toBe('open');
+    expect(document.activeElement).toBe(promptBox());
+    // Typing N in the prompt does not reopen or anything else.
+    fireEvent.keyDown(promptBox(), { key: 'n' });
+    fireEvent.click(chip(/^Provider:/));
+    expect(listbox('Provider').dataset.state).toBe('open');
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(listbox('Provider').dataset.state).toBe('closed');
+    expect(dialog().dataset.state).toBe('open');
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(dialog().dataset.state).toBe('closed');
+  });
+});
+
+describe('New chat: loading and odd data', () => {
+  it('opened before the projects load, it picks the latest project when they arrive', () => {
+    const store = seeded({ projects: [] });
+    mount(store);
+    act(() => openNewChat());
+    expect(screen.getByRole('textbox', { name: 'Folder path' })).toBeTruthy();
+    act(() => store.setState((s) => ({ ...s, projects: PROJECTS })));
+    expect(chip(/^Project: alpha$/)).toBeTruthy();
+    expect(screen.queryByRole('textbox', { name: 'Folder path' })).toBeNull();
+  });
+
+  it('a project with no folder is never offered or matched by an empty path', () => {
+    mount(seeded({ projects: [project('', ['codex'], '2026-10-23T11:59:00.000Z')] }));
+    act(() => openNewChat());
+    expect(screen.getByRole('textbox', { name: 'Folder path' })).toBeTruthy();
+    expect(within(dialog()).queryByText(/has been worked on/)).toBeNull();
+    fireEvent.click(chip(/^Project:/));
+    expect(within(listbox('Project')).getAllByRole('option').length).toBe(1);
+  });
+
+  it('the model the server calls "default" is not listed twice', async () => {
+    mocked.models.mockResolvedValue({ claude: [{ id: 'default', label: 'Default (recommended)', isDefault: true }, { id: 'opus', label: 'Opus', isDefault: false }], codex: [], antigravity: [] });
+    mount(seeded());
+    act(() => openNewChat());
+    await flush();
+    fireEvent.click(chip(/^Model:/));
+    const names = within(listbox('Model')).getAllByRole('option').map((o) => o.querySelector('b')!.textContent);
+    expect(names).toEqual(['Default', 'Opus']);
+    expect(within(listbox('Model')).getByText("Uses Claude Code's own default")).toBeTruthy();
+  });
+});
