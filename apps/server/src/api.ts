@@ -10,7 +10,8 @@ import type { ConnectionHealth, HistoryChat, ModelOption, ProviderId, ServerEven
 import { ActiveElsewhereError } from './chats.ts';
 import type { ChatService } from './chats.ts';
 import type { UsageService } from './usage/service.ts';
-import { suggest } from './usage/parse.ts';
+// suggest() lives in shared so the web app can recompute "Most room" from usage.updated events.
+import { suggest } from '@agent-kanban/shared';
 
 const PROVIDERS: ProviderId[] = ['claude', 'codex', 'antigravity'];
 const MAX_BODY = 1_000_000;

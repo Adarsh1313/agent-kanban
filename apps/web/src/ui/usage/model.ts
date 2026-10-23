@@ -56,7 +56,7 @@ export function resetText(w: UsageWindow, now: number): string | null {
   if (!w.resetsAt) return null;
   const at = Date.parse(w.resetsAt);
   if (!Number.isFinite(at)) return null;
-  if (at - now >= 6 * 24 * 60 * 60_000) return `Resets ${new Date(at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
+  if (at - now >= 7 * 24 * 60 * 60_000) return `Resets ${new Date(at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
   return `Resets ${clockTime(w.resetsAt, now)}`;
 }
 

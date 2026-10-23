@@ -12,6 +12,10 @@ import type {
   ToolCall,
   UsageReading,
 } from '@agent-kanban/shared';
+import { suggest } from '@agent-kanban/shared';
+
+/** The provider list (and order) the server passes to suggest(). */
+const USAGE_PROVIDERS: ProviderId[] = ['claude', 'codex', 'antigravity'];
 
 export type AppNotification = {
   id: string;
@@ -282,8 +286,11 @@ export function applyEvent(s: AppState, e: ServerEvent, now: Date = new Date()):
         requests: { ...s.requests, [e.chatId]: cur.filter((r) => r.requestId !== e.requestId) },
       });
     }
-    case 'usage.updated':
-      return mk([], { usage: mergeReadings(s.usage, [e.reading]) });
+    case 'usage.updated': {
+      // The event carries no suggestion: recompute "Most room" the way the server does.
+      const usage = mergeReadings(s.usage, [e.reading]);
+      return mk([], { usage, suggested: suggest(Object.values(usage).filter((r): r is UsageReading => !!r), USAGE_PROVIDERS) });
+    }
     case 'connection.updated':
       return mk([], { connections: { ...s.connections, [e.health.provider]: e.health } });
     case 'notification': {

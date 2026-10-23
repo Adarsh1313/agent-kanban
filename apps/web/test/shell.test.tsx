@@ -182,6 +182,9 @@ describe('Sidebar: pinned and recent', () => {
 
   it('renders 1 000 history chats in under 200 ms', () => {
     const store = seeded([], hist(1000));
+    // Warm-up mount first, so the timing measures rendering rather than first-run JIT and module setup.
+    mount(store);
+    cleanup();
     const t0 = performance.now();
     mount(store);
     const took = performance.now() - t0;

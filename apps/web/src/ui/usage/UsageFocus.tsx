@@ -5,17 +5,24 @@ import { Icon, ProviderLogo, providerName } from '../primitives/index.ts';
 import { chipLabel, chipNote, levelOf, pct, resetText, windowOf } from './model.ts';
 import { UsagePopover } from './UsagePopover.tsx';
 
+/** Decorative: the button's aria-label carries the numbers and reset times (AT doesn't read inside a button). */
 function FocusMeter({ name, w, now }: { name: string; w: UsageWindow; now: number }) {
   const left = Math.max(0, Math.min(100, w.leftPct));
-  const reset = resetText(w, now);
   return (
-    <span className="m" data-level={levelOf(w.leftPct)} title={reset ?? undefined}>
+    <span className="m" data-level={levelOf(w.leftPct)} title={resetText(w, now) ?? undefined} aria-hidden="true">
       <span>{name}</span>
-      <i role="meter" aria-label={`${name} left`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(left)}
-        aria-valuetext={`${pct(w.leftPct)} left${reset ? `. ${reset}` : ''}`} style={{ ['--left' as string]: left / 100 }} />
+      <i style={{ ['--left' as string]: left / 100 }} />
       <b>{pct(w.leftPct)}</b>
     </span>
   );
+}
+
+/** "Claude Code: 82% of 5-hour left, 64% of weekly left. 5-hour resets 2:40 pm, weekly resets Thu 9:00 am. Show details" */
+function focusLabel(base: string, five: UsageWindow | undefined, week: UsageWindow | undefined, now: number): string {
+  const resets = ([['5-hour', five], ['weekly', week]] as const)
+    .map(([n, w]) => { const t = w && resetText(w, now); return t ? `${n} ${t.charAt(0).toLowerCase()}${t.slice(1)}` : null; })
+    .filter(Boolean);
+  return `${base}.${resets.length ? ` ${resets.join(', ')}.` : ''} Show details`;
 }
 
 /**
@@ -44,7 +51,7 @@ export function UsageFocus({ provider }: { provider: ProviderId }) {
   return (
     <>
       <button className="usage-focus" type="button" data-dim={dim || undefined} aria-haspopup="dialog" aria-expanded="false"
-        aria-label={`${chipLabel(provider, reading, installed)}. Show details`}
+        aria-label={focusLabel(chipLabel(provider, reading, installed), five, week, now)}
         onClick={(e) => { setAnchor(e.currentTarget); setOpen(!open); }}>
         <ProviderLogo id={provider} size="sm" />
         {five && <FocusMeter name="5-hour" w={five} now={now} />}

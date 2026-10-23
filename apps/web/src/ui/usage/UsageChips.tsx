@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { ProviderId, UsageReading } from '@agent-kanban/shared';
 import { focusedProvider } from '../../state/selectors.ts';
 import { useStore } from '../../state/store.ts';
@@ -17,7 +17,7 @@ export function MiniMeter({ reading }: { reading: UsageReading | undefined }) {
   return <span className="minimeter" aria-hidden="true">{bar('five_hour')}{bar('weekly')}</span>;
 }
 
-function Chip({ id, onOpen }: { id: ProviderId; onOpen: (el: HTMLElement) => void }) {
+function Chip({ id, onOpen }: { id: ProviderId; onOpen: (id: ProviderId, el: HTMLElement) => void }) {
   const reading = useStore((s) => s.usage[id]);
   const note = chipNote(reading);
   const left = chipPercent(reading);
@@ -31,7 +31,7 @@ function Chip({ id, onOpen }: { id: ProviderId; onOpen: (el: HTMLElement) => voi
       aria-haspopup="dialog"
       aria-expanded="false"
       aria-label={chipLabel(id, reading)}
-      onClick={(e) => onOpen(e.currentTarget)}
+      onClick={(e) => onOpen(id, e.currentTarget)}
     >
       <ProviderLogo id={id} size="sm" />
       {left !== null && <MiniMeter reading={reading} />}
@@ -47,22 +47,29 @@ function Chip({ id, onOpen }: { id: ProviderId; onOpen: (el: HTMLElement) => voi
 export function UsageChips() {
   const ids = useStore(shownProviders);
   const focus = useStore(focusedProvider);
-  const [anchor, setAnchor] = useState<HTMLElement | null>(null);
+  const [anchor, setAnchor] = useState<{ id: ProviderId; el: HTMLElement } | null>(null);
   const [open, setOpen] = useState(false);
 
-  const toggle = (el: HTMLElement) => {
-    const same = anchor === el && open;
-    // The popover marks only its current anchor as expanded; the chip it leaves is reset here.
-    if (anchor && anchor !== el) anchor.setAttribute('aria-expanded', 'false');
-    setAnchor(el);
+  const toggle = (id: ProviderId, el: HTMLElement) => {
+    const same = anchor?.el === el && open;
+    setAnchor({ id, el });
     setOpen(!same);
   };
+
+  // The chip it hangs from went away (provider uninstalled) or the bar switched to one provider: close it.
+  const gone = !!focus || (anchor !== null && !ids.includes(anchor.id));
+  useEffect(() => {
+    if (gone) {
+      setOpen(false);
+      setAnchor(null);
+    }
+  }, [gone]);
 
   if (focus) return <UsageFocus provider={focus} />;
   return (
     <>
       {ids.map((id) => <Chip key={id} id={id} onOpen={toggle} />)}
-      {ids.length > 0 && <UsagePopover anchor={anchor} open={open} onClose={() => setOpen(false)} providers={ids} label="Usage for all providers" />}
+      {ids.length > 0 && <UsagePopover anchor={anchor?.el ?? null} open={open && !gone} onClose={() => setOpen(false)} providers={ids} label="Usage for all providers" />}
     </>
   );
 }

@@ -57,6 +57,18 @@ describe('applyEvent', () => {
     expect(s.toolCalls.c1![0]!.status).toBe('done');
   });
 
+  it('usage.updated recomputes "Most room": the suggested provider failing moves it to the other one', () => {
+    const rd = (provider: 'claude' | 'codex', leftPct: number, status: UsageReading['status'] = 'ok'): UsageReading => ({
+      provider, status, readAt: '2026-10-23T11:00:00.000Z',
+      windows: [{ kind: 'five_hour', label: '5-hour', leftPct, resetsAt: null }, { kind: 'weekly', label: 'Weekly', leftPct, resetsAt: null }],
+    });
+    let s = applySnapshot(initialState(), { chats: [], usage: [rd('claude', 80), rd('codex', 40)], suggested: 'claude', connections: [], history: [], projects: [] });
+    s = applyEvent(s, { type: 'usage.updated', reading: rd('codex', 50) });
+    expect(s.suggested).toBe('claude');
+    s = applyEvent(s, { type: 'usage.updated', reading: { ...rd('claude', 80, 'error'), readAt: '2026-10-23T11:05:00.000Z', message: "Couldn't read" } });
+    expect(s.suggested).toBe('codex');
+  });
+
   it('notification adds an unread item', () => {
     const s = applyEvent(withChat(), { type: 'notification', chatId: 'c1', kind: 'finished' }, new Date('2026-10-23T11:00:00.000Z'));
     expect(s.notifications).toHaveLength(1);

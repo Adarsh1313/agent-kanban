@@ -52,7 +52,10 @@ export function Popover({ anchor, open, onClose, align = 'left', label, classNam
   }, [open, place]);
 
   useEffect(() => {
-    anchor?.setAttribute('aria-expanded', String(open));
+    if (!anchor) return;
+    anchor.setAttribute('aria-expanded', String(open));
+    // When the popover moves to another anchor (or unmounts), the one it leaves is collapsed again.
+    return () => anchor.setAttribute('aria-expanded', 'false');
   }, [open, anchor]);
 
   useEffect(() => {

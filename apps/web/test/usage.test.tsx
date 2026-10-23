@@ -59,6 +59,9 @@ describe('usage helpers', () => {
   it('reset times: clock today, weekday within the week, date further out', () => {
     expect(resetText(win('weekly', 50, iso(2026, 9, 23, 14, 40)), NOW)).toBe('Resets 2:40 pm');
     expect(resetText(win('weekly', 50, iso(2026, 9, 26, 9, 0)), NOW)).toBe('Resets Mon 9:00 am');
+    // 6.5 days away is still a weekday and time; 7 days or more is a date.
+    expect(resetText(win('weekly', 50, iso(2026, 9, 30, 0, 0)), NOW)).toBe('Resets Fri 12:00 am');
+    expect(resetText(win('weekly', 50, iso(2026, 9, 30, 12, 0)), NOW)).toBe('Resets Oct 30');
     expect(resetText(win('weekly', 50, iso(2026, 10, 21, 9, 0)), NOW)).toBe('Resets Nov 21');
     expect(resetText(win('weekly', 50, null), NOW)).toBeNull();
   });
@@ -184,6 +187,16 @@ describe('usage popover', () => {
     expect(within(pop()).getByText('Updated 10 min ago')).toBeTruthy();
   });
 
+  it("closes when its chip's provider disappears", () => {
+    const store = seeded([reading('claude', 82, 64), reading('codex', 30, 18)], { connections: [conn('claude'), conn('codex')] });
+    mount(store);
+    fireEvent.click(chips()[1]!);
+    expect(pop().dataset.state).toBe('open');
+    act(() => store.setState((s) => ({ ...s, connections: { ...s.connections, codex: conn('codex', false) } })));
+    expect(chips().map((c) => c.dataset.prov)).toEqual(['claude']);
+    expect(pop().dataset.state).toBe('closed');
+  });
+
   it('a refresh answered after a newer usage event does not overwrite it', () => {
     const store = seeded([reading('claude', 82, 64, { readAt: new Date(NOW).toISOString() })]);
     const older = applyEvent(store.getState(), { type: 'usage.updated', reading: reading('claude', 10, 10) });
@@ -203,16 +216,23 @@ describe('usage focus', () => {
     const store = focusedOn({ focusProvider: 'codex' });
     expect(chips()).toHaveLength(0);
     const focus = area().querySelector<HTMLElement>('.usage-focus')!;
-    expect(focus.getAttribute('aria-label')).toBe('Codex: 30% of 5-hour left, 18% of weekly left. Show details');
-    const meters = within(focus).getAllByRole('meter');
-    expect(meters.map((m) => [m.getAttribute('aria-label'), m.getAttribute('aria-valuenow')])).toEqual([['5-hour left', '30'], ['Weekly left', '18']]);
-    expect(meters[1]!.closest('.m')!.getAttribute('data-level')).toBe('low');
-    expect(meters[0]!.getAttribute('aria-valuetext')).toBe('30% left. Resets 2:40 pm');
+    // AT doesn't read inside a button: the label carries the numbers and the reset times; the meters are decorative.
+    expect(focus.getAttribute('aria-label')).toBe('Codex: 30% of 5-hour left, 18% of weekly left. 5-hour resets 2:40 pm, weekly resets Thu 9:00 am. Show details');
+    const meters = [...focus.querySelectorAll<HTMLElement>('.m')];
+    expect(meters.every((m) => m.getAttribute('aria-hidden') === 'true')).toBe(true);
+    expect(meters.map((m) => m.querySelector('b')!.textContent)).toEqual(['30%', '18%']);
+    expect(meters[1]!.getAttribute('data-level')).toBe('low');
+    expect(meters[0]!.querySelector<HTMLElement>('i')!.style.getPropertyValue('--left')).toBe('0.3');
     // The meters open this provider's detail.
     fireEvent.click(focus);
     expect(pop().getAttribute('aria-label')).toBe('Codex usage');
+    expect(pop().dataset.state).toBe('open');
+    expect(focus.getAttribute('aria-expanded')).toBe('true');
     expect(pop().querySelectorAll('.prov-block')).toHaveLength(1);
     fireEvent.keyDown(document, { key: 'Escape' });
+    expect(pop().dataset.state).toBe('closed');
+    expect(focus.getAttribute('aria-expanded')).toBe('false');
+    expect(document.activeElement).toBe(focus);
     fireEvent.click(screen.getByRole('button', { name: 'Usage for all providers' }));
     expect(store.getState().ui.focusProvider).toBeNull();
     expect(chips()).toHaveLength(2);

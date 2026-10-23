@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import type { Chat, HistoryChat, UsageReading, ServerEvent } from '@agent-kanban/shared';
 import { createApi } from '../src/api.ts';
 import { ActiveElsewhereError } from '../src/chats.ts';
-import { suggest } from '../src/usage/parse.ts';
+import { suggest } from '@agent-kanban/shared';
 
 const chat = (id = 'c1'): Chat => ({
   id, provider: 'codex', cwd: '/x', title: 't', model: null, sessionRef: null, column: 'in_progress',
