@@ -67,9 +67,9 @@ describe('allowedProviders', () => {
     expect(allowedProviders(s, PROJECTS[0])).toEqual(['claude']);
     expect(allowedProviders(s, PROJECTS[1])).toEqual(['claude', 'codex']);
   });
-  it('a new folder allows any connected provider; update_available counts as connected', () => {
+  it('a new folder allows any connected, supported provider; update_available counts as connected', () => {
     const s = seeded({ connections: [conn('claude', 'update_available'), conn('codex', 'degraded'), conn('antigravity')] }).getState();
-    expect(allowedProviders(s, undefined)).toEqual(['claude', 'antigravity']);
+    expect(allowedProviders(s, undefined)).toEqual(['claude']);
   });
 });
 
@@ -84,11 +84,11 @@ describe('New chat dialog', () => {
     const row = (name: string) => within(pop).getByRole('option', { name: new RegExp(name) });
     expect(row('Claude Code').getAttribute('aria-disabled')).toBeNull();
     expect(row('Claude Code').getAttribute('aria-selected')).toBe('true');
-    expect(within(row('Claude Code')).getByText('5-hour 82% left · Weekly 64% left')).toBeTruthy();
+    expect(within(row('Claude Code')).getByText('82% of 5-hour · 64% of weekly left')).toBeTruthy();
     expect(row('Codex').getAttribute('aria-disabled')).toBe('true');
-    expect(within(row('Codex')).getByText("Hasn't worked on alpha yet")).toBeTruthy();
+    expect(within(row('Codex')).getByText('Hasn’t worked on alpha yet')).toBeTruthy();
     expect(row('Antigravity').getAttribute('aria-disabled')).toBe('true');
-    expect(within(row('Antigravity')).getByText('Not signed in')).toBeTruthy();
+    expect(within(row('Antigravity')).getByText("Antigravity chats aren't supported yet.")).toBeTruthy();
     // A disabled row does nothing.
     fireEvent.click(row('Codex'));
     expect(chip(/^Provider: Claude Code$/)).toBeTruthy();
@@ -100,7 +100,7 @@ describe('New chat dialog', () => {
     act(() => openNewChat({ cwd: '/work/beta' }));
     expect(chip(/^Project: beta$/)).toBeTruthy();
     expect(chip(/^Provider: Codex/).textContent).toContain('Suggested');
-    expect(within(dialog()).getByText('Codex: 5-hour — · Weekly —')).toBeTruthy();
+    expect(within(dialog()).getByText('Codex: — of 5-hour · — of weekly left')).toBeTruthy();
     fireEvent.click(chip(/^Provider:/));
     const codex = within(listbox('Provider')).getByRole('option', { name: /Codex/ });
     expect(codex.getAttribute('aria-disabled')).toBeNull();
@@ -217,7 +217,7 @@ describe('New chat dialog', () => {
     fireEvent.change(promptBox(), { target: { value: 'Go' } });
     fireEvent.click(start());
     await flush();
-    expect((start() as HTMLButtonElement).disabled).toBe(true);
+    expect((within(dialog()).getByRole('button', { name: 'Starting…' }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.keyDown(promptBox(), { key: 'Enter', ctrlKey: true });
     expect(mocked.startChat).toHaveBeenCalledTimes(1);
     await act(async () => { resolve(chat()); });
@@ -236,7 +236,7 @@ describe('New chat dialog', () => {
     fireEvent.click(chip(/^Provider:/));
     const pop = listbox('Provider');
     expect(within(pop).getByRole('option', { name: /Codex/ }).getAttribute('aria-disabled')).toBeNull();
-    expect(within(within(pop).getByRole('option', { name: /Antigravity/ })).getByText('Not installed')).toBeTruthy();
+    expect(within(within(pop).getByRole('option', { name: /Antigravity/ })).getByText("Antigravity chats aren't supported yet.")).toBeTruthy();
     fireEvent.click(within(pop).getByRole('option', { name: /Codex/ }));
     fireEvent.change(promptBox(), { target: { value: 'Hello' } });
     fireEvent.click(start());
@@ -327,5 +327,127 @@ describe('New chat: loading and odd data', () => {
     const names = within(listbox('Model')).getAllByRole('option').map((o) => o.querySelector('b')!.textContent);
     expect(names).toEqual(['Default', 'Opus']);
     expect(within(listbox('Model')).getByText("Uses Claude Code's own default")).toBeTruthy();
+  });
+});
+
+describe('New chat: fix round 1', () => {
+  it('a connected Antigravity is disabled with its reason; status text shows for providers that are not connected', () => {
+    mount(seeded({ connections: [conn('claude'), conn('codex', 'not_installed'), conn('antigravity')] }));
+    act(() => openNewChat({ cwd: '/elsewhere/new' }));
+    fireEvent.click(chip(/^Provider:/));
+    const pop = listbox('Provider');
+    const ag = within(pop).getByRole('option', { name: /Antigravity/ });
+    expect(ag.getAttribute('aria-disabled')).toBe('true');
+    expect(within(ag).getByText("Antigravity chats aren't supported yet.")).toBeTruthy();
+    expect(within(within(pop).getByRole('option', { name: /Codex/ })).getByText('Not installed')).toBeTruthy();
+  });
+
+  it('when only Antigravity is connected the note says to connect Claude Code or Codex; Ctrl+Enter focuses the provider chip and shows it', () => {
+    mount(seeded({ connections: [conn('antigravity')] }));
+    act(() => openNewChat());
+    const text = "Antigravity chats aren't supported yet. Connect Claude Code or Codex on the Connections page.";
+    expect(within(dialog()).getByText(text)).toBeTruthy();
+    expect((start() as HTMLButtonElement).disabled).toBe(true);
+    expect(start().getAttribute('aria-describedby')).toBe('dlg-note');
+    fireEvent.change(promptBox(), { target: { value: 'Go' } });
+    fireEvent.keyDown(promptBox(), { key: 'Enter', ctrlKey: true });
+    expect(document.activeElement).toBe(chip(/^Provider:/));
+    expect(document.querySelector('.dlg-hint')!.textContent).toBe(text);
+    expect(mocked.startChat).not.toHaveBeenCalled();
+  });
+
+  it("a known project's missing folder switches to the path field, prefilled, with the error inline and the prompt kept", async () => {
+    mocked.startChat.mockRejectedValue(new ApiError("That folder doesn't exist.", 400));
+    mount(seeded());
+    act(() => openNewChat({ cwd: '/work/alpha' }));
+    fireEvent.change(promptBox(), { target: { value: 'Keep' } });
+    fireEvent.click(start());
+    await flush();
+    const input = screen.getByRole('textbox', { name: 'Folder path' }) as HTMLInputElement;
+    expect(input.value).toBe('/work/alpha');
+    expect(screen.getByRole('alert').textContent).toBe("That folder doesn't exist.");
+    expect(document.activeElement).toBe(input);
+    expect(promptBox().value).toBe('Keep');
+    expect(document.querySelector('.toasts')?.textContent ?? '').not.toContain("That folder doesn't exist.");
+  });
+
+  it('while starting the button reads Starting… with aria-busy; text typed meanwhile survives the late success', async () => {
+    let resolve!: (c: unknown) => void;
+    mocked.startChat.mockReturnValue(new Promise((r) => { resolve = r; }));
+    mount(seeded());
+    act(() => openNewChat());
+    fireEvent.change(promptBox(), { target: { value: 'First' } });
+    fireEvent.click(start());
+    await flush();
+    const btn = within(dialog()).getByRole('button', { name: 'Starting…' }) as HTMLButtonElement;
+    expect(btn.disabled).toBe(true);
+    expect(btn.getAttribute('aria-busy')).toBe('true');
+    fireEvent.change(promptBox(), { target: { value: 'Second thought' } });
+    await act(async () => { resolve(chat()); });
+    expect(dialog().dataset.state).toBe('closed');
+    expect(promptBox().value).toBe('Second thought');
+  });
+
+  it('a late success after the dialog was closed and opened again does not close or clear the new one', async () => {
+    let resolve!: (c: unknown) => void;
+    mocked.startChat.mockReturnValue(new Promise((r) => { resolve = r; }));
+    mount(seeded());
+    act(() => openNewChat());
+    fireEvent.change(promptBox(), { target: { value: 'First' } });
+    fireEvent.click(start());
+    await flush();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    act(() => openNewChat());
+    await act(async () => { resolve(chat()); });
+    expect(dialog().dataset.state).toBe('open');
+  });
+
+  it('pickers focus the selected option; arrows skip disabled rows, Home/End jump; labels are presentation', () => {
+    mount(seeded({ connections: [conn('claude'), conn('codex'), conn('antigravity')] }));
+    act(() => openNewChat({ cwd: '/elsewhere/new' }));
+    fireEvent.click(chip(/^Provider:/));
+    const pop = listbox('Provider');
+    const opt = (n: RegExp) => within(pop).getByRole('option', { name: n });
+    expect(document.activeElement).toBe(opt(/Claude Code/));
+    expect(pop.querySelector('.menu-label')!.getAttribute('role')).toBe('presentation');
+    fireEvent.keyDown(document.activeElement!, { key: 'ArrowDown' });
+    expect(document.activeElement).toBe(opt(/Codex/));
+    fireEvent.keyDown(document.activeElement!, { key: 'ArrowDown' });
+    expect(document.activeElement).toBe(opt(/Claude Code/)); // Antigravity is skipped; wraps
+    fireEvent.keyDown(document.activeElement!, { key: 'End' });
+    expect(document.activeElement).toBe(opt(/Codex/));
+    fireEvent.keyDown(document.activeElement!, { key: 'Home' });
+    expect(document.activeElement).toBe(opt(/Claude Code/));
+    fireEvent.keyDown(document.activeElement!, { key: 'ArrowUp' });
+    expect(document.activeElement).toBe(opt(/Codex/));
+    fireEvent.keyDown(document, { key: 'Escape' });
+    fireEvent.click(chip(/^Project:/));
+    expect(within(listbox('Project')).getByRole('option', { name: /Choose another folder/ })).toBe(document.activeElement);
+    expect(listbox('Project').querySelector('.menu-sep')!.getAttribute('role')).toBe('presentation');
+  });
+
+  it('models are fetched again when the connections change or the chosen provider had none', async () => {
+    mocked.models.mockResolvedValue({ claude: [], codex: [], antigravity: [] });
+    const store = seeded();
+    mount(store);
+    act(() => openNewChat());
+    await flush();
+    // Claude's list came back empty, so the next opening asks again.
+    fireEvent.keyDown(document, { key: 'Escape' });
+    act(() => openNewChat());
+    await flush();
+    expect(mocked.models).toHaveBeenCalledTimes(2);
+    mocked.models.mockResolvedValue({ claude: [{ id: 'opus', label: 'Opus', isDefault: false }], codex: [], antigravity: [] });
+    act(() => store.setState((s) => ({ ...s, connections: { ...s.connections, codex: conn('codex', 'signed_out') } })));
+    await flush();
+    expect(mocked.models).toHaveBeenCalledTimes(3);
+    fireEvent.click(chip(/^Model:/));
+    expect(within(listbox('Model')).getByRole('option', { name: /^Opus/ })).toBeTruthy();
+    // A provider with models is not refetched on the next opening.
+    fireEvent.keyDown(document, { key: 'Escape' });
+    fireEvent.keyDown(document, { key: 'Escape' });
+    act(() => openNewChat());
+    await flush();
+    expect(mocked.models).toHaveBeenCalledTimes(3);
   });
 });

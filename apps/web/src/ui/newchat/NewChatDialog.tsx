@@ -12,16 +12,24 @@ export const FOLDER_MISSING = "That folder doesn't exist.";
 
 type ModelList = Record<ProviderId, ModelOption[]>;
 
-/** /api/models asks every provider's CLI, so it is fetched once and shared; a failure is retried on the next open. */
-let modelsCache: Promise<ModelList> | null = null;
-function loadModels(): Promise<ModelList> {
-  if (!modelsCache) {
-    modelsCache = api.models().catch((e: unknown) => {
-      modelsCache = null;
-      throw e;
-    });
+/**
+ * /api/models asks every provider's CLI, so the list is shared between openings. It is fetched again when the
+ * connections change (a provider signed in or was installed), when asked to (the chosen provider's list was empty),
+ * and after a failure.
+ */
+let modelsCache: { key: string; list: Promise<ModelList> } | null = null;
+function loadModels(key: string, force = false): Promise<ModelList> {
+  if (!modelsCache || modelsCache.key !== key || force) {
+    const entry = {
+      key,
+      list: api.models().catch((e: unknown) => {
+        if (modelsCache === entry) modelsCache = null;
+        throw e;
+      }),
+    };
+    modelsCache = entry;
   }
-  return modelsCache;
+  return modelsCache.list;
 }
 /** Tests start each case without a cached model list. */
 export const resetModelsCache = () => { modelsCache = null; };
@@ -64,9 +72,15 @@ function defaultHint(list: ModelOption[], provider: ProviderId | null): string {
   return d ? `Uses ${d.label}` : `Uses ${provider ? providerName(provider) : 'the provider'}'s own default`;
 }
 
-/** Providers New chat can start on for a folder: connected ones that have worked in it (any connected one for a new folder). */
+/** Providers the server can't start chats on yet (Antigravity until Plan 3), with the reason shown on their row. */
+export const UNSUPPORTED: Partial<Record<ProviderId, string>> = { antigravity: "Antigravity chats aren't supported yet." };
+
+/**
+ * Providers New chat can start on for a folder: connected, supported ones that have worked in it (any connected,
+ * supported one for a new folder).
+ */
 export function allowedProviders(s: Pick<AppState, 'connections'>, project: Project | undefined): ProviderId[] {
-  const connected = PROVIDER_IDS.filter((id) => isConnected(s.connections[id]));
+  const connected = PROVIDER_IDS.filter((id) => !UNSUPPORTED[id] && isConnected(s.connections[id]));
   if (!project) return connected;
   const worked = new Set(project.providers.map((p) => p.provider));
   return connected.filter((id) => worked.has(id));
@@ -76,11 +90,21 @@ const levelOf = (left: number) => (left < 5 ? 'out' : left < 25 ? 'low' : 'ok');
 const windowOf = (r: UsageReading | undefined, kind: 'five_hour' | 'weekly') => r?.windows.find((w) => w.kind === kind);
 const pct = (left: number | undefined) => (left === undefined ? '—' : `${Math.round(left)}%`);
 
-/** "5-hour 82% left · Weekly 64% left", or "—" for a window with no reading. */
+/** "82% of 5-hour · 64% of weekly left" (the design's wording), with "—" for a window with no reading. */
 export function usageText(r: UsageReading | undefined): string {
-  const five = windowOf(r, 'five_hour')?.leftPct;
-  const week = windowOf(r, 'weekly')?.leftPct;
-  return `5-hour ${pct(five)}${five === undefined ? '' : ' left'} · Weekly ${pct(week)}${week === undefined ? '' : ' left'}`;
+  return `${pct(windowOf(r, 'five_hour')?.leftPct)} of 5-hour · ${pct(windowOf(r, 'weekly')?.leftPct)} of weekly left`;
+}
+
+/** Up/Down move between a picker's options (skipping disabled ones), Home/End jump to the ends. */
+function onListKey(e: KeyboardEvent<HTMLElement>) {
+  if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) return;
+  const items = [...e.currentTarget.querySelectorAll<HTMLElement>('[role="option"]:not([aria-disabled="true"])')];
+  if (items.length === 0) return;
+  e.preventDefault();
+  const i = items.indexOf(document.activeElement as HTMLElement);
+  const next = e.key === 'Home' ? 0 : e.key === 'End' ? items.length - 1
+    : e.key === 'ArrowDown' ? (i + 1) % items.length : (i <= 0 ? items.length - 1 : i - 1);
+  items[next]!.focus();
 }
 
 function MiniMeter({ reading }: { reading: UsageReading | undefined }) {
@@ -116,13 +140,29 @@ export function NewChatDialog() {
   const [model, setModel] = useState<{ provider: ProviderId; id: string } | null>(null);
   const [prompt, setPrompt] = useState('');
   const [emptyHint, setEmptyHint] = useState(false);
+  /** Ctrl+Enter with no provider: the footer says why (the same reason the note gives). */
+  const [noProviderHint, setNoProviderHint] = useState(false);
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
+  /** Bumped on every opening, so a late response from an earlier opening never closes or clears a newer one. */
+  const session = useRef(0);
   const [picker, setPicker] = useState<Picker>(null);
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const [models, setModels] = useState<ModelList | null>(null);
   const promptRef = useRef<HTMLTextAreaElement>(null);
   const pathRef = useRef<HTMLInputElement>(null);
+  const providerChipRef = useRef<HTMLButtonElement>(null);
+  /** A field to focus once it is rendered (the path field appears only after a re-render). */
+  const focusNext = useRef<'path' | 'prompt' | null>(null);
+  useEffect(() => {
+    const want = focusNext.current;
+    if (!want) return;
+    const el = want === 'path' ? pathRef.current : promptRef.current;
+    if (!el) return;
+    focusNext.current = null;
+    el.focus({ preventScroll: true });
+    if (el instanceof HTMLInputElement) el.select();
+  });
   const stRef = useRef(st);
   stRef.current = st;
   const autoPick = useRef(false);
@@ -133,9 +173,8 @@ export function NewChatDialog() {
     if (!target) return;
     autoPick.current = false;
     // The path field goes away: its focus moves to the prompt.
-    const hadFocus = document.activeElement === pathRef.current;
+    if (document.activeElement === pathRef.current) focusNext.current = 'prompt';
     setWhere({ kind: 'project', id: target.id });
-    if (hadFocus) requestAnimationFrame(() => promptRef.current?.focus({ preventScroll: true }));
   }, [open, st.projects, st.focus]);
 
   useEffect(() => {
@@ -155,7 +194,9 @@ export function NewChatDialog() {
       setModel(null);
       setPathError(null);
       setEmptyHint(false);
+      setNoProviderHint(false);
       setPicker(null);
+      session.current += 1;
       setOpen(true);
     });
     return () => setNewChatHandler(null);
@@ -166,9 +207,6 @@ export function NewChatDialog() {
     // After the dialog moved focus in (child effects run first): the prompt, or the path field when a folder is needed.
     if (where.kind === 'path' && !path) pathRef.current?.focus({ preventScroll: true });
     else promptRef.current?.focus({ preventScroll: true });
-    let live = true;
-    loadModels().then((m) => { if (live) setModels(m); }, () => { /* only Default is offered */ });
-    return () => { live = false; };
   }, [open]);
 
   const project = where.kind === 'project' ? st.projects.find((p) => p.id === where.id) : findProject(st.projects, path);
@@ -179,12 +217,33 @@ export function NewChatDialog() {
   // Any provider change (picked, or forced by a project switch) goes back to Default for good.
   useEffect(() => { setModel((m) => (m && m.provider !== provider ? null : m)); }, [provider]);
   const allModels = provider && models ? models[provider] ?? [] : [];
+  const connKey = PROVIDER_IDS.map((id) => st.connections[id]?.status ?? '-').join(',');
+  const listEmpty = models !== null && provider !== null && allModels.length === 0;
+  useEffect(() => {
+    if (!open) return;
+    let live = true;
+    // An empty list for the chosen provider (its CLI did not answer in time) is asked for again. listEmpty is read
+    // only when the opening, the provider or the connections change, so a still-empty answer is not refetched in a loop.
+    loadModels(connKey, listEmpty).then((m) => { if (live) setModels(m); }, () => { /* only Default is offered */ });
+    return () => { live = false; };
+  }, [open, connKey, provider]);
   const providerModels = listedModels(allModels);
   const modelLabel = modelId ? allModels.find((m) => m.id === modelId)?.label ?? modelId : 'Default';
   const projectName = where.kind === 'project' ? project?.name ?? baseName(where.id) : project?.name ?? (path.trim() ? baseName(path.trim()) : 'Another folder');
   const showSuggested = (id: ProviderId) => suggestion?.suggested === true && suggestion.provider === id && allowed.length > 1;
 
+  const openRef = useRef(open);
+  openRef.current = open;
   const close = () => { autoPick.current = false; setOpen(false); setPicker(null); };
+
+  // An opened picker focuses its selected option (else the first one it can pick); runs after the popover moved focus in.
+  useEffect(() => {
+    if (!picker) return;
+    const pop = document.querySelector<HTMLElement>(`.dlg-pop-${picker}`);
+    const target = pop?.querySelector<HTMLElement>('[role="option"][aria-selected="true"]:not([aria-disabled="true"])')
+      ?? pop?.querySelector<HTMLElement>('[role="option"]:not([aria-disabled="true"])');
+    target?.focus({ preventScroll: true });
+  }, [picker]);
   const openPicker = (kind: Exclude<Picker, null>, el: HTMLElement) => {
     if (picker === kind) { setPicker(null); return; }
     setAnchor(el);
@@ -205,24 +264,36 @@ export function NewChatDialog() {
 
   const start = async () => {
     if (busyRef.current) return;
+    if (!provider) {
+      setNoProviderHint(true);
+      providerChipRef.current?.focus();
+      return;
+    }
     const text = prompt.trim();
     if (!text) { nudge(); return; }
     const cwd = where.kind === 'project' ? project?.path ?? where.id : path.trim();
     if (!cwd) { setPathError('Enter the folder to work in.'); pathRef.current?.focus(); return; }
-    if (!provider) return;
+    const mine = session.current;
     busyRef.current = true;
     setBusy(true);
     try {
       await api.startChat({ provider, cwd, prompt: text, ...(modelId ? { model: modelId } : {}) });
-      // The card arrives in Running through the server's chat.updated event.
-      setPrompt('');
-      setPathError(null);
-      close();
+      // The card arrives in Running through the server's chat.updated event. Text typed while starting is kept.
+      setPrompt((p) => (p.trim() === text ? '' : p));
+      if (session.current === mine && openRef.current) {
+        setPathError(null);
+        close();
+      }
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      if (where.kind === 'path' && e instanceof ApiError && e.status === 400 && message === FOLDER_MISSING) {
+      if (e instanceof ApiError && e.status === 400 && message === FOLDER_MISSING && session.current === mine) {
+        // A known project's folder may have been moved or deleted: show its path so it can be corrected.
+        if (where.kind === 'project') {
+          setPath(cwd);
+          setWhere({ kind: 'path' });
+        }
         setPathError(message);
-        pathRef.current?.focus();
+        focusNext.current = 'path';
       } else toast(message);
     } finally {
       busyRef.current = false;
@@ -240,9 +311,13 @@ export function NewChatDialog() {
   let note: string | null = null;
   if (!st.loaded) note = null; // connections and projects are still loading
   else if (allowed.length === 0) {
-    note = project
-      ? `None of your connected providers has worked on ${projectName} yet. Choose another folder to start fresh.`
-      : 'No provider is connected yet. Connect one on the Connections page.';
+    const connectedIds = PROVIDER_IDS.filter((id) => isConnected(st.connections[id]));
+    const onlyUnsupported = connectedIds.length > 0 && connectedIds.every((id) => UNSUPPORTED[id]);
+    note = onlyUnsupported
+      ? "Antigravity chats aren't supported yet. Connect Claude Code or Codex on the Connections page."
+      : project
+        ? `None of your connected providers has worked on ${projectName} yet. Choose another folder to start fresh.`
+        : 'No provider is connected yet. Connect one on the Connections page.';
   } else if (project && allowed.length < PROVIDER_IDS.length) {
     const worked = PROVIDER_IDS.filter((id) => project.providers.some((p) => p.provider === id));
     if (worked.length < PROVIDER_IDS.length) {
@@ -250,7 +325,7 @@ export function NewChatDialog() {
     }
   }
 
-  const hint = emptyHint ? 'Write what the agent should do first.' : provider ? `${providerName(provider)}: ${usageText(st.usage[provider])}` : '';
+  const hint = emptyHint ? 'Write what the agent should do first.' : !provider && noProviderHint && note ? note : provider ? `${providerName(provider)}: ${usageText(st.usage[provider])}` : '';
 
   return (
     <>
@@ -259,10 +334,11 @@ export function NewChatDialog() {
         onClose={close}
         title="New chat"
         footer={<>
-          <span className={`grow dlg-hint${emptyHint ? ' warn' : ''}`} aria-live="polite">{hint}</span>
+          <span className={`grow dlg-hint${emptyHint || (!provider && noProviderHint) ? ' warn' : ''}`} aria-live="polite">{hint}</span>
           <button className="btn ghost" type="button" onClick={close}>Cancel</button>
-          <button className="btn primary" type="button" disabled={busy || !provider} onClick={() => void start()}>
-            Start chat <span className="kbd">Ctrl ↵</span>
+          <button className="btn primary" type="button" disabled={busy || !provider} aria-busy={busy || undefined}
+            aria-describedby={!provider && note ? 'dlg-note' : undefined} onClick={() => void start()}>
+            {busy ? 'Starting…' : <>Start chat <span className="kbd">Ctrl ↵</span></>}
           </button>
         </>}
       >
@@ -302,7 +378,7 @@ export function NewChatDialog() {
           <button className="chip-btn" type="button" aria-haspopup="listbox" aria-expanded={picker === 'project'} aria-label={`Project: ${projectName}`} onClick={(e) => openPicker('project', e.currentTarget)}>
             <Icon name="folder" size="sm" />{projectName}<Icon name="chevron-down" size="sm" />
           </button>
-          <button className="chip-btn" type="button" aria-haspopup="listbox" aria-expanded={picker === 'provider'} aria-label={`Provider: ${provider ? providerName(provider) : 'none'}`} onClick={(e) => openPicker('provider', e.currentTarget)}>
+          <button ref={providerChipRef} className="chip-btn" type="button" aria-haspopup="listbox" aria-expanded={picker === 'provider'} aria-label={`Provider: ${provider ? providerName(provider) : 'none'}`} onClick={(e) => openPicker('provider', e.currentTarget)}>
             {provider ? <><ProviderLogo id={provider} size="sm" />{providerName(provider)}{showSuggested(provider) && <span className="suggested">Suggested</span>}</> : 'No provider'}
             <Icon name="chevron-down" size="sm" />
           </button>
@@ -310,14 +386,14 @@ export function NewChatDialog() {
             {modelLabel}<Icon name="chevron-down" size="sm" />
           </button>
         </div>
-        {note && <div className="dlg-note"><Icon name="projects" size="sm" />{note}</div>}
+        {note && <div className="dlg-note" id="dlg-note"><Icon name="projects" size="sm" />{note}</div>}
       </Dialog>
 
-      <Popover anchor={anchor} open={open && picker === 'project'} onClose={() => setPicker(null)} label="Project" className="menu dlg-pop" role="listbox">
-        <div className="pane">
-          <div className="menu-label">Projects found on this computer</div>
-          {usable(st.projects).length === 0 && <div className="menu-label">None yet</div>}
-          <div className="dlg-scroll">
+      <Popover anchor={anchor} open={open && picker === 'project'} onClose={() => setPicker(null)} label="Project" className="menu dlg-pop dlg-pop-project" role="listbox">
+        <div className="pane" onKeyDown={onListKey}>
+          <div className="menu-label" role="presentation">Projects found on this computer</div>
+          {usable(st.projects).length === 0 && <div className="menu-label" role="presentation">None yet</div>}
+          <div className="dlg-scroll" role="presentation">
             {usable(st.projects).map((p) => {
               const selected = where.kind === 'project' && where.id === p.id;
               return (
@@ -333,26 +409,26 @@ export function NewChatDialog() {
               );
             })}
           </div>
-          <div className="menu-sep" />
+          <div className="menu-sep" role="presentation" />
           <button className="menu-item" type="button" role="option" aria-selected={where.kind === 'path'}
             onClick={() => {
               if (where.kind === 'project' && project) setPath(project.path);
               setWhere({ kind: 'path' });
               setPicker(null);
-              requestAnimationFrame(() => { pathRef.current?.focus(); pathRef.current?.select(); });
+              focusNext.current = 'path';
             }}>
             <Icon name="folder" />Choose another folder…
           </button>
         </div>
       </Popover>
 
-      <Popover anchor={anchor} open={open && picker === 'provider'} onClose={() => setPicker(null)} label="Provider" className="menu dlg-pop" role="listbox">
-        <div className="pane">
-          <div className="menu-label">Start on</div>
+      <Popover anchor={anchor} open={open && picker === 'provider'} onClose={() => setPicker(null)} label="Provider" className="menu dlg-pop dlg-pop-provider" role="listbox">
+        <div className="pane" onKeyDown={onListKey}>
+          <div className="menu-label" role="presentation">Start on</div>
           {PROVIDER_IDS.map((id) => {
             const conn = st.connections[id];
             const ok = allowed.includes(id);
-            const reason = !isConnected(conn) ? (conn ? STATUS_TEXT[conn.status] : 'Not connected') : `Hasn't worked on ${projectName} yet`;
+            const reason = UNSUPPORTED[id] ?? (!isConnected(conn) ? (conn ? STATUS_TEXT[conn.status] : 'Not connected') : `Hasn’t worked on ${projectName} yet`);
             return (
               <button key={id} className="pick-row" type="button" role="option" aria-selected={provider === id} aria-disabled={ok ? undefined : true}
                 onClick={() => { if (!ok) return; setChosen(id); setPicker(null); promptRef.current?.focus(); }}>
@@ -369,9 +445,9 @@ export function NewChatDialog() {
         </div>
       </Popover>
 
-      <Popover anchor={anchor} open={open && picker === 'model' && provider !== null} onClose={() => setPicker(null)} label="Model" className="menu dlg-pop" role="listbox">
-        <div className="pane">
-          <div className="menu-label">{provider ? `${providerName(provider)} models` : 'Models'}</div>
+      <Popover anchor={anchor} open={open && picker === 'model' && provider !== null} onClose={() => setPicker(null)} label="Model" className="menu dlg-pop dlg-pop-model" role="listbox">
+        <div className="pane" onKeyDown={onListKey}>
+          <div className="menu-label" role="presentation">{provider ? `${providerName(provider)} models` : 'Models'}</div>
           <button className="pick-row" type="button" role="option" aria-selected={modelId === null}
             onClick={() => { setModel(null); setPicker(null); promptRef.current?.focus(); }}>
             <span className="t"><b>Default</b><small>{defaultHint(allModels, provider)}</small></span>
