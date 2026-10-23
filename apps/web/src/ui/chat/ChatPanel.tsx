@@ -49,7 +49,7 @@ function TitleEdit({ chat, onDone }: { chat: Chat; onDone: () => void }) {
     }
   };
   return (
-    <input className="title-edit" aria-label="Chat title" defaultValue={chat.title} autoFocus maxLength={200}
+    <input id="panel-title" className="title-edit" aria-label="Chat title" defaultValue={chat.title} autoFocus maxLength={200}
       onFocus={(e) => e.currentTarget.select()} onKeyDown={onKey} onBlur={(e) => save(e.currentTarget.value)} />
   );
 }
@@ -113,6 +113,14 @@ export function ChatPanel() {
   const [renaming, setRenaming] = useState<string | null>(null);
   const [menu, setMenu] = useState<{ target: ChatActionsTarget; anchor: HTMLElement; open: boolean } | null>(null);
   const loading = useRef(new Set<string>());
+  /** Set when continuing a history chat swaps the composer for the new chat's: focus follows into it. */
+  const refocus = useRef(false);
+  useEffect(() => {
+    if (!refocus.current) return;
+    refocus.current = false;
+    const active = document.activeElement;
+    if (!active || active === document.body) composerRef.current?.focus({ preventScroll: true });
+  });
 
   const close = () => store.setState(closePanelIn);
 
@@ -145,7 +153,7 @@ export function ChatPanel() {
   const boardTwin = useStore((s) => {
     const h = s.ui.openHistory;
     if (!h) return null;
-    return Object.values(s.chats).find((c) => c.provider === h.provider && c.sessionRef === h.sessionRef && !c.archived)?.id ?? null;
+    return Object.values(s.chats).find((c) => c.provider === h.provider && c.sessionRef === h.sessionRef && !isArchived(s, c))?.id ?? null;
   });
   useEffect(() => {
     if (boardTwin) store.setState((s) => openChatIn(s, boardTwin));
@@ -186,6 +194,7 @@ export function ChatPanel() {
   const continueHistory = (ref: HistoryRef) => async (text: string) => {
     try {
       const created = await api.continueHistory({ provider: ref.provider, sessionRef: ref.sessionRef, text });
+      refocus.current = true;
       store.setState((s) => openChatIn(mergeChats(s, [created]), created.id));
       return true;
     } catch (err) {
@@ -245,7 +254,7 @@ export function ChatPanel() {
 
   return (
     <>
-      <aside ref={panelRef} className="panel" data-state={open ? 'open' : 'closed'} aria-label={view ? `Chat: ${view.shown.kind === 'chat' ? view.shown.chat.title : view.shown.ref.title}` : 'Chat'}
+      <aside ref={panelRef} className="panel" data-state={open ? 'open' : 'closed'} aria-labelledby={view ? 'panel-title' : undefined} aria-label={view ? undefined : 'Chat'}
         inert={!open} tabIndex={-1}>
         {body}
       </aside>

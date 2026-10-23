@@ -20,9 +20,17 @@ const subscribe = (l: () => void) => {
 const snapshot = () => items;
 
 /** Shows a message (plain words; for a failed action, the server's own error text) with an optional action such as Undo. */
-export function toast(message: string, action?: ToastAction, opts: ToastOptions = {}): void {
-  items = [...items, { id: ++seq, message, action, onExpire: opts.onExpire }];
+/** Returns the toast's id (for `dismissToast`). */
+export function toast(message: string, action?: ToastAction, opts: ToastOptions = {}): number {
+  const id = ++seq;
+  items = [...items, { id, message, action, onExpire: opts.onExpire }];
   emit();
+  return id;
+}
+
+/** Removes a toast at once, without running its action or `onExpire`. */
+export function dismissToast(id: number): void {
+  dismiss(id);
 }
 
 function dismiss(id: number) {

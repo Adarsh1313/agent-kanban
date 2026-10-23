@@ -22,7 +22,7 @@ export const Composer = forwardRef<HTMLTextAreaElement, ComposerProps>(function 
     if (ok) setText((cur) => (cur.trim() === value ? '' : cur));
   };
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && e.nativeEvent.keyCode !== 229) {
       e.preventDefault();
       void send();
     }

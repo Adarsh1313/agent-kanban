@@ -9,7 +9,8 @@ const stack: Layer[] = [];
 let listening = false;
 
 function onKey(e: KeyboardEvent) {
-  if (e.key !== 'Escape') return;
+  // Escape while an IME is composing cancels the composition, not the layer.
+  if (e.key !== 'Escape' || e.isComposing) return;
   stack[stack.length - 1]?.close();
 }
 

@@ -44,6 +44,18 @@ describe('api', () => {
     expect(new Headers(init.headers).get('authorization')).toBe('Bearer tok');
   });
 
+  it('archive can be sent with keepalive, still with the bearer header and no token in the URL', async () => {
+    sessionStorage.setItem('agent-kanban.token', 'tok');
+    const f = mockFetch(Response.json({ id: 'c1' }));
+    await api.archive('c1', { keepalive: true });
+    const [url, init] = f.mock.calls[0]!;
+    expect(url).toBe('/api/chats/c1/archive');
+    expect(init.keepalive).toBe(true);
+    expect(new Headers(init.headers).get('authorization')).toBe('Bearer tok');
+    await api.archive('c1');
+    expect(f.mock.calls[1]![1].keepalive).toBeUndefined();
+  });
+
   it('posts JSON bodies', async () => {
     sessionStorage.setItem('agent-kanban.token', 'tok');
     const f = mockFetch(Response.json({ id: 'c1' }, { status: 201 }));

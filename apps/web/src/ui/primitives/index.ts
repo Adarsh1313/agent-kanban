@@ -6,5 +6,5 @@ export { Popover } from './Popover.tsx';
 export { PROVIDER_IDS, PROVIDERS, ProviderLogo, providerName } from './ProviderLogo.tsx';
 export { StatusIcon, type StatusState } from './StatusIcon.tsx';
 export { Switch } from './Switch.tsx';
-export { toast, Toasts, type ToastAction, type ToastOptions } from './toast.tsx';
+export { dismissToast, toast, Toasts, type ToastAction, type ToastOptions } from './toast.tsx';
 export { Tooltip } from './Tooltip.tsx';

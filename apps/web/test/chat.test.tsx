@@ -10,6 +10,7 @@ import { ChatPanel } from '../src/ui/chat/ChatPanel.tsx';
 import { resumeCommand, snoozeOptions } from '../src/ui/chat/ChatActionsMenu.tsx';
 import { buildTurns } from '../src/ui/chat/Thread.tsx';
 import { Toasts } from '../src/ui/primitives/toast.tsx';
+import { Dialog } from '../src/ui/primitives/Dialog.tsx';
 import { chat, message } from './helpers.ts';
 
 const FNS = ['listMessages', 'listRequests', 'listToolCalls', 'send', 'answer', 'stop', 'done', 'archive', 'patchChat', 'continueHistory'] as const;
@@ -31,6 +32,11 @@ function seeded(chats: Chat[], extra: Partial<AppState> = {}, history: HistoryCh
 const mount = (store: Store) => render(<StoreProvider store={store}><Board /><ChatPanel /><Toasts /></StoreProvider>);
 const card = (title: string) => screen.getByRole('article', { name: title });
 const panel = () => document.querySelector<HTMLElement>('aside.panel')!;
+/** jsdom keeps `inert` as a plain property (no attribute), so walk up checking both. */
+const inertUp = (el: Element | null): boolean => {
+  for (let n = el; n; n = n.parentElement) if ((n as HTMLElement).inert || n.hasAttribute('inert')) return true;
+  return false;
+};
 const flush = () => act(async () => { await Promise.resolve(); await Promise.resolve(); });
 const req = (over: Partial<OpenRequest> = {}): OpenRequest => ({ requestId: 'r1', kind: 'permission', summary: 'npm run build', createdAt: '2026-10-23T11:00:00.000Z', ...over });
 const tool = (over: Partial<ToolCall>): ToolCall => ({ id: 't', chatId: 'c1', name: 'Bash', summary: 'Running npm test', status: 'done', createdAt: '2026-10-23T11:00:00.000Z', ...over });
@@ -86,8 +92,49 @@ describe('Chat panel: opening and loading', () => {
     act(() => store.setState((s) => applyEvent(s, { type: 'message.delta', chatId: 'c1', messageId: 'a1', text: 'lo there', offset: 3 })));
     expect(within(panel()).getByText('Hello there')).toBeTruthy();
     act(() => store.setState((s) => applyEvent(s, { type: 'message.completed', chatId: 'c1', message: message({ id: 'a1', text: 'Hello there!', createdAt: '2026-10-23T11:59:00.000Z' }) })));
-    expect(within(panel()).getByText('Hello there!')).toBeTruthy();
-    expect(within(panel()).queryByText('Hello there')).toBeNull();
+    expect(within(panel()).getByText('Hello there!', { selector: '.msg-text' })).toBeTruthy();
+    expect(within(panel()).queryByText('Hello there', { selector: '.msg-text' })).toBeNull();
+  });
+
+  it('announces a completed reply once, not each streamed piece', async () => {
+    thread([message({ id: 'a0', text: 'Earlier reply' })]);
+    const store = seeded([chat({ title: 'Speak' })]);
+    mount(store);
+    fireEvent.click(card('Speak'));
+    await waitFor(() => expect(within(panel()).getByText('Earlier reply')).toBeTruthy());
+    const live = panel().querySelector('.sr-only[aria-live="polite"]')!;
+    expect(live.textContent).toBe('');
+    expect(panel().querySelector('.thread')!.getAttribute('role')).toBe('log');
+    act(() => store.setState((s) => applyEvent(s, { type: 'message.delta', chatId: 'c1', messageId: 'a1', text: 'Hi ', offset: 0 })));
+    expect(live.textContent).toBe('');
+    act(() => store.setState((s) => applyEvent(s, { type: 'message.completed', chatId: 'c1', message: message({ id: 'a1', text: 'Hi there', createdAt: '2026-10-23T11:59:00.000Z' }) })));
+    expect(live.textContent).toBe('Hi there');
+  });
+
+  it('a dialog opened over the panel makes the panel inert and takes the first Escape', () => {
+    const store = seeded([chat({ title: 'Under' })]);
+    const onClose = vi.fn();
+    const ui = (open: boolean) => (
+      <StoreProvider store={store}><Board /><ChatPanel /><Toasts /><Dialog open={open} onClose={onClose} title="New chat">body</Dialog></StoreProvider>
+    );
+    const view = render(ui(false));
+    fireEvent.click(card('Under'));
+    expect(inertUp(panel())).toBe(false);
+    view.rerender(ui(true));
+    expect(inertUp(panel())).toBe(true);
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(store.getState().ui.openChatId).toBe('c1');
+    view.rerender(ui(false));
+    expect(inertUp(panel())).toBe(false);
+  });
+
+  it('Escape while an IME is composing does not close the panel', () => {
+    const store = seeded([chat({ title: 'Ime' })]);
+    mount(store);
+    fireEvent.click(card('Ime'));
+    fireEvent.keyDown(document, { key: 'Escape', isComposing: true });
+    expect(store.getState().ui.openChatId).toBe('c1');
   });
 
   it('renders the latest 200 of 2 000 messages until Show earlier', async () => {
@@ -151,6 +198,19 @@ describe('Chat panel: requests and composer', () => {
     expect(mocked.answer).toHaveBeenCalledWith('c1', 'q1', { reply: '3005' });
   });
 
+  it('request.closed while the chat stays in Needs you removes the card and keeps the panel open', async () => {
+    thread([], [req(), req({ requestId: 'r2', summary: 'rm -rf build' })]);
+    const store = seeded([chat({ title: 'Two asks', column: 'needs_you', needsReason: 'permission' })]);
+    mount(store);
+    fireEvent.click(card('Two asks'));
+    await waitFor(() => expect(within(panel()).getByText('npm run build')).toBeTruthy());
+    act(() => store.setState((s) => applyEvent(s, { type: 'request.closed', chatId: 'c1', requestId: 'r1' })));
+    expect(within(panel()).queryByText('npm run build')).toBeNull();
+    expect(within(panel()).getByText('rm -rf build')).toBeTruthy();
+    expect(panel().dataset.state).toBe('open');
+    expect(store.getState().ui.openChatId).toBe('c1');
+  });
+
   it('a failed answer shows the server text and keeps the request', async () => {
     thread([], [req()]);
     mocked.answer.mockRejectedValue(new ApiError('That request was already answered.', 409));
@@ -169,6 +229,7 @@ describe('Chat panel: requests and composer', () => {
     const box = within(panel()).getByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement;
     fireEvent.change(box, { target: { value: 'say hi' } });
     fireEvent.keyDown(box, { key: 'Enter', shiftKey: true });
+    fireEvent.keyDown(box, { key: 'Enter', keyCode: 229 });
     expect(mocked.send).not.toHaveBeenCalled();
     fireEvent.keyDown(box, { key: 'Enter' });
     expect(mocked.send).toHaveBeenCalledWith('c1', 'say hi');
@@ -231,12 +292,54 @@ describe('Chat panel: actions menu', () => {
     fireEvent.click(screen.getByRole('menuitem', { name: 'Archive chat' }));
     act(() => { vi.advanceTimersByTime(5000); });
     expect(mocked.archive).toHaveBeenCalledTimes(1);
-    expect(mocked.archive).toHaveBeenCalledWith('c1');
+    expect(mocked.archive).toHaveBeenCalledWith('c1', {});
     await act(async () => { await Promise.resolve(); });
     expect(store.getState().chats.c1!.archived).toBe(true);
     expect(store.getState().ui.archiving).toEqual({});
     act(() => { vi.advanceTimersByTime(1000); });
     expect(screen.queryByText('Chat archived')).toBeNull();
+  });
+
+  const pagehide = (persisted: boolean) => window.dispatchEvent(Object.assign(new Event('pagehide'), { persisted }));
+  const archiveFromMenu = (title: string) => {
+    act(() => openRowMenu({ chatId: 'c1', history: null }, within(card(title)).getByRole('button', { name: 'More actions' })));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Archive chat' }));
+  };
+
+  it('closing the page during the Undo window sends the archive once, with keepalive', async () => {
+    vi.useFakeTimers();
+    mocked.archive.mockResolvedValue(chat({ title: 'Bye', column: 'review', archived: true, updatedAt: '2026-10-23T12:01:00.000Z' }));
+    mount(seeded([chat({ title: 'Bye', column: 'review' })]));
+    archiveFromMenu('Bye');
+    act(() => { vi.advanceTimersByTime(1000); });
+    act(() => { pagehide(false); });
+    expect(mocked.archive).toHaveBeenCalledTimes(1);
+    expect(mocked.archive).toHaveBeenCalledWith('c1', { keepalive: true });
+    act(() => { pagehide(false); });
+    act(() => { vi.advanceTimersByTime(10_000); });
+    expect(mocked.archive).toHaveBeenCalledTimes(1);
+    await act(async () => { await Promise.resolve(); });
+  });
+
+  it('a page kept in the back/forward cache drops the Undo toast of an archive it sent', () => {
+    vi.useFakeTimers();
+    mocked.archive.mockResolvedValue(chat({ title: 'Cached', column: 'review', archived: true }));
+    mount(seeded([chat({ title: 'Cached', column: 'review' })]));
+    archiveFromMenu('Cached');
+    act(() => { pagehide(true); });
+    expect(mocked.archive).toHaveBeenCalledWith('c1', { keepalive: true });
+    expect(screen.queryByText('Chat archived')).toBeNull();
+  });
+
+  it('Undo, then closing the page, sends nothing', () => {
+    vi.useFakeTimers();
+    mount(seeded([chat({ title: 'Stay', column: 'review' })]));
+    archiveFromMenu('Stay');
+    fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+    act(() => { pagehide(false); });
+    act(() => { vi.advanceTimersByTime(10_000); });
+    expect(mocked.archive).not.toHaveBeenCalled();
+    expect(card('Stay')).toBeTruthy();
   });
 
   it('a failed archive brings the card back with the server text', async () => {
@@ -345,6 +448,8 @@ describe('Chat panel: history-only chats', () => {
     fireEvent.keyDown(box, { key: 'Enter' });
     await waitFor(() => expect(store.getState().ui.openChatId).toBe('new'));
     expect(store.getState().ui.openHistory).toBeNull();
+    // The composer was swapped for the new chat's; focus follows into it.
+    expect(document.activeElement).toBe(within(panel()).getByRole('textbox', { name: 'Message' }));
     expect(mocked.listMessages).toHaveBeenCalledWith('new');
   });
 

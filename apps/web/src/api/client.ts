@@ -40,7 +40,12 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+interface RequestOptions {
+  /** Lets the request outlive the page (used when the page is closing). */
+  keepalive?: boolean;
+}
+
+async function request<T>(method: string, path: string, body?: unknown, opts: RequestOptions = {}): Promise<T> {
   const headers = new Headers();
   const token = readToken();
   if (token) headers.set('authorization', `Bearer ${token}`);
@@ -49,7 +54,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     headers.set('content-type', 'application/json');
     payload = JSON.stringify(body);
   }
-  const res = await fetch(path, { method, headers, body: payload });
+  const res = await fetch(path, { method, headers, body: payload, ...(opts.keepalive ? { keepalive: true } : {}) });
   if (!res.ok) {
     let message = `Request failed (${res.status}).`;
     try {
@@ -84,7 +89,7 @@ export const api = {
   stop: (id: string) => post<Chat>(`/api/chats/${enc(id)}/stop`),
   done: (id: string) => post<Chat>(`/api/chats/${enc(id)}/done`),
   undone: (id: string) => post<Chat>(`/api/chats/${enc(id)}/undone`),
-  archive: (id: string) => post<Chat>(`/api/chats/${enc(id)}/archive`),
+  archive: (id: string, opts: RequestOptions = {}) => request<Chat>('POST', `/api/chats/${enc(id)}/archive`, undefined, opts),
   patchChat: (id: string, patch: ChatPatch) => request<Chat>('PATCH', `/api/chats/${enc(id)}`, patch),
   history: () => get<HistoryChat[]>('/api/history'),
   continueHistory: (body: { provider: ProviderId; sessionRef: string; text: string }) => post<Chat>('/api/history/continue', body),

@@ -39,6 +39,7 @@ html, body { overflow: hidden; }
 .no-results p { margin: 0 0 var(--space-3); font-size: var(--text-body); }
 
 /* Chat panel (design/board.html keeps these inline) */
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 .panel:focus { outline: none; }
 .panel-head .t small .icon { flex: none; }
 .panel-head .panel-proj { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }

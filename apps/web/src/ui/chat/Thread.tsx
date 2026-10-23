@@ -1,5 +1,5 @@
 import type { Chat, Message, OpenRequest, ToolCall } from '@agent-kanban/shared';
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { AppState } from '../../state/reducer.ts';
 import { useStore } from '../../state/store.ts';
 import { clockTime, toolIcon } from '../board/format.ts';
@@ -93,6 +93,11 @@ const selectThread = (id: string) => (s: AppState) => ({
   now: s.now,
 });
 
+function lastAssistant(messages: Message[]): Message | null {
+  for (let i = messages.length - 1; i >= 0; i--) if (messages[i]!.role === 'assistant') return messages[i]!;
+  return null;
+}
+
 /** One board chat's thread: the latest messages, a "Worked · N steps" group per turn, streaming text and open requests. */
 export function Thread({ chat }: { chat: Chat }) {
   const { messages, calls, requests, streaming, loaded, now } = useStore(selectThread(chat.id));
@@ -106,6 +111,7 @@ export function Thread({ chat }: { chat: Chat }) {
   const turns = buildTurns(shown, calls, streaming, hidden === 0);
   const running = chat.column === 'running';
 
+  // Only when the content changes, so other renders don't force a layout.
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
@@ -115,7 +121,23 @@ export function Thread({ chat }: { chat: Chat }) {
     } else if (stick.current) {
       el.scrollTop = el.scrollHeight;
     }
-  });
+  }, [messages, streaming, limit, requests]);
+
+  // Screen readers hear each agent reply once it is complete, not every streamed piece of it.
+  const lastReply = lastAssistant(messages);
+  const seen = useRef<string | null | undefined>(undefined);
+  const [announce, setAnnounce] = useState('');
+  useEffect(() => {
+    if (!loaded) return;
+    const id = lastReply?.id ?? null;
+    if (seen.current === undefined) {
+      seen.current = id; // what was already there when the chat opened is not announced
+      return;
+    }
+    if (id === seen.current || !lastReply) return;
+    seen.current = id;
+    setAnnounce(lastReply.text);
+  }, [loaded, lastReply]);
 
   const showEarlier = () => {
     const el = ref.current;
@@ -125,8 +147,9 @@ export function Thread({ chat }: { chat: Chat }) {
 
   const app = providerName(chat.provider);
   return (
-    <div className="thread" ref={ref} aria-busy={!loaded}
+    <div className="thread" ref={ref} role="log" aria-live="off" aria-label="Messages" aria-busy={!loaded}
       onScroll={(e) => { const el = e.currentTarget; stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < STICK_PX; }}>
+      <div className="sr-only" role="status" aria-live="polite">{announce}</div>
       {hidden > 0 && (
         <button className="link-btn show-earlier" type="button" onClick={showEarlier}>
           Show earlier ({hidden} more)

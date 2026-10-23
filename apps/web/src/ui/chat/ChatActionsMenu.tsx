@@ -4,7 +4,7 @@ import { closePanelIn, mergeChats, openHistoryIn, type AppState, type HistoryRef
 import { useStore, useStoreInstance, type Store } from '../../state/store.ts';
 import { errorText } from '../board/Card.tsx';
 import { clockTime } from '../board/format.ts';
-import { Icon, Menu, MenuItem, MenuLabel, MenuSep, Tooltip, toast, type MenuNav } from '../primitives/index.ts';
+import { dismissToast, Icon, Menu, MenuItem, MenuLabel, MenuSep, Tooltip, toast, type MenuNav } from '../primitives/index.ts';
 
 const HOUR = 3_600_000;
 const EVENING_HOUR = 18;
@@ -68,29 +68,58 @@ const withoutArchiving = (s: AppState, id: string): AppState => {
   return { ...s, ui: { ...s.ui, archiving: rest } };
 };
 
+interface PendingArchive { store: Store; toastId: number }
+
+/** Archives waiting for their Undo toast to run out, by chat id. An entry is removed by Undo or when it is sent, so it is sent once. */
+const pendingArchives = new Map<string, PendingArchive>();
+let pagehideBound = false;
+
+function sendArchive(store: Store, id: string, keepalive: boolean): void {
+  api.archive(id, keepalive ? { keepalive: true } : {}).then(
+    (chat) => store.setState((s) => withoutArchiving(mergeChats(s, [chat]), id)),
+    (err: unknown) => {
+      store.setState((s) => withoutArchiving(s, id));
+      toast(errorText(err));
+    },
+  );
+}
+
+/** The page is going away: archives still in their Undo window are sent now (keepalive) instead of being lost. */
+function onPagehide(e: PageTransitionEvent): void {
+  for (const [id, p] of [...pendingArchives]) {
+    pendingArchives.delete(id);
+    sendArchive(p.store, id, true);
+    // Restored from the back/forward cache: the archive has been sent, so its Undo must not show any more.
+    if (e.persisted) dismissToast(p.toastId);
+  }
+}
+
 /**
  * Archive is final on the server, so the card collapses at once (client-only) and the server is only
- * asked when the Undo toast runs out. Undo restores the card without any request; a failed archive
- * brings the card back and shows the server's text.
+ * asked when the Undo toast runs out, or when the page closes first. Undo restores the card without
+ * any request; a failed archive brings the card back and shows the server's text.
  */
 export function archiveChat(store: Store, id: string): void {
+  if (!pagehideBound) {
+    window.addEventListener('pagehide', onPagehide);
+    pagehideBound = true;
+  }
   store.setState((s) => {
     const next = { ...s, ui: { ...s.ui, archiving: { ...s.ui.archiving, [id]: true as const } } };
     return s.ui.openChatId === id ? closePanelIn(next) : next;
   });
-  let undone = false;
-  toast('Chat archived', { label: 'Undo', run: () => { undone = true; store.setState((s) => withoutArchiving(s, id)); } }, {
+  const toastId = toast('Chat archived', {
+    label: 'Undo',
+    run: () => {
+      if (!pendingArchives.delete(id)) return;
+      store.setState((s) => withoutArchiving(s, id));
+    },
+  }, {
     onExpire: () => {
-      if (undone) return;
-      api.archive(id).then(
-        (chat) => store.setState((s) => withoutArchiving(mergeChats(s, [chat]), id)),
-        (err: unknown) => {
-          store.setState((s) => withoutArchiving(s, id));
-          toast(errorText(err));
-        },
-      );
+      if (pendingArchives.delete(id)) sendArchive(store, id, false);
     },
   });
+  pendingArchives.set(id, { store, toastId });
 }
 
 export async function snoozeChat(store: Store, id: string, opt: SnoozeOption): Promise<void> {
