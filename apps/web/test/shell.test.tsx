@@ -40,19 +40,29 @@ const hist = (n: number): HistoryChat[] =>
   }));
 
 describe('Sidebar: providers', () => {
-  it('rows toggle ui.focusProvider, one at a time, and a second click clears it', () => {
+  it('rows set the provider filter to that one provider, one at a time, and a second click clears it', () => {
     const store = seeded([chat({ id: 'a', provider: 'claude' }), chat({ id: 'b', provider: 'codex', sessionRef: 's2' })]);
     mount(store);
     const claude = screen.getByRole('button', { name: /Claude Code/ });
     const codex = screen.getByRole('button', { name: /Codex/ });
     fireEvent.click(claude);
-    expect(store.getState().ui.focusProvider).toBe('claude');
+    expect(store.getState().ui.filters.provider).toEqual(['claude']);
+    expect(store.getState().ui.focusProvider).toBeNull();
     expect(claude.getAttribute('aria-pressed')).toBe('true');
     fireEvent.click(codex);
-    expect(store.getState().ui.focusProvider).toBe('codex');
+    expect(store.getState().ui.filters.provider).toEqual(['codex']);
     expect(claude.getAttribute('aria-pressed')).toBe('false');
     fireEvent.click(codex);
+    expect(store.getState().ui.filters.provider).toBeNull();
+  });
+
+  it('a row clears an older ui.focusProvider and a multi-provider filter', () => {
+    const base = seeded([chat({ id: 'a', provider: 'claude' })]);
+    const store = createStore({ ...base.getState(), ui: { ...base.getState().ui, focusProvider: 'codex', filters: { ...base.getState().ui.filters, provider: ['claude', 'codex'] } } });
+    mount(store);
+    fireEvent.click(screen.getByRole('button', { name: /Antigravity/ }));
     expect(store.getState().ui.focusProvider).toBeNull();
+    expect(store.getState().ui.filters.provider).toEqual(['antigravity']);
   });
 
   it('shows the number of chats each provider has', () => {

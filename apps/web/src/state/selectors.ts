@@ -90,14 +90,15 @@ function sidebarChats(s: AppState, now: number): SidebarChat[] {
   const focus = focusedProvider(s);
   const known = new Set<string>();
   for (const c of Object.values(s.chats)) if (c.sessionRef) known.add(`${c.provider}\u0000${c.sessionRef}`);
-  const fromBoard = Object.values(s.chats).filter((c) => !isArchived(s, c) && !c.pinned && !isSnoozed(c, now)).map(toSidebar);
+  const f = s.ui.filters;
+  const fromBoard = Object.values(s.chats).filter((c) => !isArchived(s, c) && !c.pinned && !isSnoozed(c, now) && passes(c, f, now)).map(toSidebar);
   const fromHistory: SidebarChat[] = s.history
-    .filter((h) => !known.has(`${h.provider}\u0000${h.sessionRef}`))
+    .filter((h) => !known.has(`${h.provider}\u0000${h.sessionRef}`) && passes({ ...h, column: null, model: null, needsReason: null }, f, now))
     .map((h) => ({ key: `h:${h.provider}:${h.sessionRef}`, chatId: null, provider: h.provider, sessionRef: h.sessionRef, title: h.title, cwd: h.cwd, updatedAt: h.updatedAt, column: null, pinned: false }));
   return [...fromBoard, ...fromHistory].filter((c) => !focus || c.provider === focus);
 }
 
-/** Sidebar "Recent chats": the most recently active projects, each with its latest chats (design: 4 x 3). */
+/** Sidebar "Recent chats": the most recently active projects, each with its latest chats (design: 4 x 3); the Filter applies here too. */
 export function recentChatsByProject(
   s: AppState,
   now: number = Date.now(),

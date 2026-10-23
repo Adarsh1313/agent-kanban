@@ -1,9 +1,10 @@
 import { useEffect, useLayoutEffect, useRef } from 'react';
 import type { AppState } from '../../state/reducer.ts';
 import { useStore, useStoreInstance, type Store } from '../../state/store.ts';
-import { openNewChat } from '../actions.ts';
+import { openFilter, openNewChat } from '../actions.ts';
 import { Board } from '../board/Board.tsx';
 import { ChatPanel } from '../chat/ChatPanel.tsx';
+import { FilterBar } from '../filters/FilterBar.tsx';
 import { NewChatDialog } from '../newchat/NewChatDialog.tsx';
 import { hasOpenLayer } from '../primitives/layers.ts';
 import { Toasts } from '../primitives/index.ts';
@@ -48,6 +49,9 @@ function useShortcuts() {
       if (e.key === 'n' || e.key === 'N') {
         e.preventDefault();
         openNewChat();
+      } else if (e.key === 'f' || e.key === 'F') {
+        e.preventDefault();
+        openFilter();
       }
     };
     document.addEventListener('keydown', onKey);
@@ -82,7 +86,7 @@ export function Shell() {
           <TopBar />
           {banner && <p className="conn-banner" role="status" data-state={socket}>{banner}</p>}
           <main className={`view main-view${entering ? ' entering' : ''}`} key={view} id="main" tabIndex={-1} data-view={view}>
-            {view === 'board' && <Board />}
+            {view === 'board' && <><FilterBar /><Board /></>}
             {view === 'projects' && <Placeholder title="Projects" />}
             {view === 'connections' && <Placeholder title="Connections" />}
           </main>

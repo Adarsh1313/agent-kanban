@@ -20,3 +20,8 @@ export const setHistoryHandler = (h: typeof openHistory) => { openHistory = h; }
 export const openNewChat = (opts?: NewChatOptions) => newChat?.(opts);
 export const openRowMenu = (target: RowMenuTarget, anchor: HTMLElement) => rowMenu?.(target, anchor);
 export const openHistoryChat = (ref: HistoryRef) => openHistory?.(ref);
+
+let filterMenu: (() => void) | null = null;
+export const setFilterHandler = (h: typeof filterMenu) => { filterMenu = h; };
+/** Opens the Filter menu (F); does nothing where there is no Filter button. */
+export const openFilter = () => filterMenu?.();

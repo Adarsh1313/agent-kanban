@@ -4,6 +4,7 @@ import { createPortal, flushSync } from 'react-dom';
 import type { AppState } from '../../state/reducer.ts';
 import { boardColumns, isArchived, isSnoozed, memoState } from '../../state/selectors.ts';
 import { useStore, useStoreInstance } from '../../state/store.ts';
+import { clearAllFilters } from '../filters/model.ts';
 import { Icon, flip } from '../primitives/index.ts';
 import { Card } from './Card.tsx';
 import { Column } from './Column.tsx';
@@ -144,10 +145,7 @@ export function Board() {
   const shown = COLUMNS.reduce((n, c) => n + layout[c].length, 0);
   const empty = loaded && !onBoard && !filtering;
   const noResults = filtering && shown === 0;
-  const clearFilters = () => store.setState((s) => ({
-    ...s,
-    ui: { ...s.ui, focusProvider: null, filters: { provider: null, project: null, status: null, model: null, reason: null, activity: null, source: null } },
-  }));
+  const clearFilters = () => store.setState(clearAllFilters);
 
   return (
     <div className={`board${empty ? ' is-empty' : ''}`} id="board" role="region" aria-label="Board" ref={boardRef}>

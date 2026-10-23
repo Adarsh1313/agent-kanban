@@ -74,11 +74,9 @@ function Providers() {
   const focus = useStore(focusedProvider);
   const toggle = (id: ProviderId) =>
     store.setState((s) => {
+      // Focusing a provider here is the Filter's "Provider is <p>": it shows as a chip and the Filter menu edits it.
       const clearing = focusedProvider(s) === id;
-      const filters = { ...s.ui.filters };
-      // The sidebar focus and the Filter's single-provider choice are one thing to the user: setting one replaces the other.
-      if (!clearing || (filters.provider?.length === 1 && filters.provider[0] === id)) filters.provider = null;
-      return { ...s, ui: { ...s.ui, focusProvider: clearing ? null : id, filters } };
+      return { ...s, ui: { ...s.ui, focusProvider: null, filters: { ...s.ui.filters, provider: clearing ? null : [id] } } };
     });
   return (
     <SideSection title="Providers">
@@ -97,7 +95,7 @@ function Recent() {
   // Memoized on the parts it reads, so streaming deltas do not re-sort every history chat.
   const select = useMemo(
     () => memoState(
-      (s) => [s.chats, s.history, s.projects, s.ui.focusProvider, s.ui.filters.provider, s.ui.archiving, s.now],
+      (s) => [s.chats, s.history, s.projects, s.ui.focusProvider, s.ui.filters, s.ui.archiving, s.now],
       (s) => recentChatsByProject(s, s.now, { projects: PROJECTS_SHOWN + 1, chats: CHATS_SHOWN }, expanded),
     ),
     [expanded],

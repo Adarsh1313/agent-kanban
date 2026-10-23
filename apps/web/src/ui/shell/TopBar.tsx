@@ -2,6 +2,7 @@ import { focusedProvider, projectLabel, unreadCount } from '../../state/selector
 import { useStore } from '../../state/store.ts';
 import { openNewChat } from '../actions.ts';
 import { Icon, Tooltip, providerName, type IconName } from '../primitives/index.ts';
+import { FilterButton } from '../filters/FilterMenu.tsx';
 import { UsageChips } from '../usage/UsageChips.tsx';
 
 const VIEW_META: Record<'board' | 'projects' | 'connections', { icon: IconName; title: string }> = {
@@ -30,7 +31,7 @@ export function TopBar() {
         {crumb && <span className="crumb"> › {crumb}</span>}
       </h1>
       {view === 'board' && (
-        <button className="chip-btn" type="button"><Icon name="filter" size="sm" />Filter</button>
+        <FilterButton />
       )}
       <span className="spacer" />
       <div className="usage-area"><UsageChips /></div>
