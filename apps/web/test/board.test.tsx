@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { Chat, ConnectionHealth, HistoryChat, ToolCall } from '@agent-kanban/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -6,10 +7,11 @@ import { applyEvent, applySnapshot, initialState, type AppState } from '../src/s
 import { createStore, StoreProvider, type Store } from '../src/state/store.ts';
 import { setHistoryHandler, setNewChatHandler, setRowMenuHandler } from '../src/ui/actions.ts';
 import { Board } from '../src/ui/board/Board.tsx';
-import { HINT_AGENT_COLUMNS, RESUME_TEXT } from '../src/ui/board/Card.tsx';
+import { HINT_AGENT_COLUMNS, HINT_DONE_BACK, RESUME_TEXT } from '../src/ui/board/Card.tsx';
 import { clockTime } from '../src/ui/board/format.ts';
 import { flip } from '../src/ui/primitives/flip.ts';
 import { Toasts } from '../src/ui/primitives/toast.tsx';
+import { Popover } from '../src/ui/primitives/Popover.tsx';
 import { chat } from './helpers.ts';
 
 vi.mock('../src/api/client.ts', async (orig) => {
@@ -117,7 +119,7 @@ describe('Board: columns and cards', () => {
     act(() => store.setState((s) => ({ ...s, ui: { ...s.ui, openChatId: null } })));
     fireEvent.keyDown(card('Open me'), { key: 'Enter' });
     expect(store.getState().ui.openChatId).toBe('c1');
-    expect(card('Open me').getAttribute('aria-selected')).toBe('true');
+    expect(card('Open me').getAttribute('aria-current')).toBe('true');
   });
 
   it('opens the row menu from the card "…" button', () => {
@@ -280,7 +282,7 @@ describe('Board: empty and no results', () => {
   });
 
   it('is not shown before the first load, and asks to connect an agent when none is connected', () => {
-    const { unmount } = mount(seeded([], {}, hist(2), []));
+    const { unmount } = mount(createStore({ ...initialState(), now: NOW, history: hist(2) }));
     expect(screen.queryByText('Nothing on the board yet')).toBeNull();
     unmount();
     mount(seeded([], {}, [], [{ ...connected, status: 'not_installed' }]));
@@ -302,5 +304,153 @@ describe('Board: empty and no results', () => {
     expect(store.getState().ui.filters.provider).toBeNull();
     expect(card('Claude chat')).toBeTruthy();
     expect(screen.queryByText('No chats match these filters')).toBeNull();
+  });
+});
+
+function setReducedMotion(on: boolean) {
+  window.matchMedia = ((q: string) => ({ matches: on && q.includes('reduce'), media: q, addEventListener() {}, removeEventListener() {} })) as unknown as typeof window.matchMedia;
+}
+
+describe('Board: fix round 1', () => {
+  const realFromPoint = document.elementFromPoint;
+  const realMatchMedia = window.matchMedia;
+  afterEach(() => {
+    document.elementFromPoint = realFromPoint;
+    window.matchMedia = realMatchMedia;
+    vi.useRealTimers();
+  });
+
+  function dragTo(el: HTMLElement, over: HTMLElement) {
+    document.elementFromPoint = () => over;
+    fireEvent.pointerDown(el, { button: 0, pointerId: 1, clientX: 10, clientY: 10 });
+    fireEvent.pointerMove(el, { pointerId: 1, clientX: 200, clientY: 40 });
+    fireEvent.pointerUp(el, { pointerId: 1, clientX: 200, clientY: 40 });
+  }
+
+  it('a press released outside the card ends the gesture: a later move and click is not a drag', () => {
+    const store = seeded([chat({ title: 'Pressed', column: 'review' })]);
+    mount(store);
+    const el = card('Pressed');
+    const toasts = document.querySelectorAll('.toast').length;
+    document.elementFromPoint = () => column('Done');
+    fireEvent.pointerDown(el, { button: 0, pointerId: 1, clientX: 10, clientY: 10 });
+    fireEvent.pointerUp(document.body, { pointerId: 1, clientX: 400, clientY: 10 });
+    fireEvent.pointerMove(el, { pointerId: 2, clientX: 300, clientY: 80 });
+    fireEvent.pointerUp(el, { pointerId: 2, clientX: 300, clientY: 80 });
+    fireEvent.click(el);
+    expect(mocked.done).not.toHaveBeenCalled();
+    expect(el.classList.contains('dragging')).toBe(false);
+    expect(el.style.transform).toBe('');
+    expect(store.getState().ui.openChatId).toBe('c1');
+    expect(document.querySelectorAll('.toast').length).toBe(toasts);
+  });
+
+  it('a card unmounted mid-drag leaves no listeners behind', () => {
+    const c = chat({ title: 'Leaving', column: 'review' });
+    const store = seeded([c]);
+    mount(store);
+    const el = card('Leaving');
+    fireEvent.pointerDown(el, { button: 0, pointerId: 1, clientX: 10, clientY: 10 });
+    act(() => store.setState((s) => applyEvent(s, { type: 'chat.updated', chat: { ...c, archived: true, updatedAt: '2026-10-23T11:00:00.000Z' } })));
+    const spy = vi.fn();
+    document.elementFromPoint = spy;
+    fireEvent.pointerMove(window, { pointerId: 1, clientX: 300, clientY: 80 });
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 300, clientY: 80 });
+    expect(spy).not.toHaveBeenCalled();
+    expect(mocked.done).not.toHaveBeenCalled();
+  });
+
+  it('Escape with focus on a card button reaches the document and closes an open popover', () => {
+    function WithPopover() {
+      const [open, setOpen] = useState(true);
+      const [anchor, setAnchor] = useState<HTMLElement | null>(null);
+      return (<><button ref={setAnchor}>anchor</button><Popover anchor={anchor} open={open} onClose={() => setOpen(false)} label="Some popover"><p>inside</p></Popover></>);
+    }
+    render(<StoreProvider store={seeded([chat({ title: 'Focused' })])}><Board /><WithPopover /></StoreProvider>);
+    const btn = within(card('Focused')).getByRole('button', { name: 'Stop agent' });
+    btn.focus();
+    fireEvent.keyDown(btn, { key: 'Escape' });
+    expect(screen.getByRole('dialog', { name: 'Some popover', hidden: true }).getAttribute('data-state')).toBe('closed');
+  });
+
+  it('keyboard focus stays on a card when it moves to another column', () => {
+    const c = chat({ title: 'Focus me', column: 'running' });
+    const store = seeded([c]);
+    mount(store);
+    const el = card('Focus me');
+    el.focus();
+    expect(document.activeElement).toBe(el);
+    act(() => store.setState((s) => applyEvent(s, { type: 'chat.updated', chat: { ...c, column: 'review', updatedAt: '2026-10-23T11:00:00.000Z' } })));
+    expect(within(column('Review')).getByRole('article', { name: 'Focus me' })).toBe(el);
+    expect(document.activeElement).toBe(el);
+  });
+
+  it('the arrival tint is dropped once its animation has played', () => {
+    vi.useFakeTimers({ now: Date.now() });
+    const store = seeded([chat({ id: 'old', title: 'Old', sessionRef: 'o' })]);
+    mount(store);
+    const at = new Date().toISOString();
+    act(() => store.setState((s) => applyEvent(s, { type: 'chat.updated', chat: chat({ id: 'new', title: 'Brand new', sessionRef: 'n', createdAt: at, updatedAt: at }) })));
+    const el = card('Brand new');
+    expect(el.classList.contains('new')).toBe(true);
+    act(() => { vi.advanceTimersByTime(700); });
+    expect(el.classList.contains('new')).toBe(false);
+  });
+
+  it('running cards offer Mark done too (keyboard path for running to Done)', () => {
+    mocked.done.mockResolvedValue(undefined);
+    mount(seeded([chat({ title: 'Still going' })]));
+    fireEvent.click(within(card('Still going')).getByRole('button', { name: 'Mark done' }));
+    expect(mocked.done).toHaveBeenCalledWith('c1');
+  });
+
+  it('dragging a Done card to Review calls api.undone', async () => {
+    const c = chat({ title: 'Reopen', column: 'done' });
+    mocked.undone.mockResolvedValue({ ...c, column: 'review', updatedAt: '2026-10-23T11:00:00.000Z' });
+    mount(seeded([c]));
+    dragTo(card('Reopen'), column('Review'));
+    expect(mocked.undone).toHaveBeenCalledWith('c1');
+    await waitFor(() => expect(within(column('Review')).getByRole('article', { name: 'Reopen' })).toBeTruthy());
+  });
+
+  it('dragging a Done card to Running is refused with the Done hint', async () => {
+    mount(seeded([chat({ title: 'Finished one', column: 'done' })]));
+    dragTo(card('Finished one'), column('Running'));
+    expect(mocked.undone).not.toHaveBeenCalled();
+    expect(mocked.done).not.toHaveBeenCalled();
+    expect(await screen.findByText(HINT_DONE_BACK)).toBeTruthy();
+  });
+
+  it('a refused drop animates back, except with reduced motion', () => {
+    mount(seeded([chat({ id: 'a', title: 'Bouncy', column: 'review' }), chat({ id: 'b', title: 'Calm', column: 'review', sessionRef: 's2' })]));
+    const bouncy = card('Bouncy');
+    const calm = card('Calm');
+    bouncy.animate = vi.fn() as unknown as HTMLElement['animate'];
+    calm.animate = vi.fn() as unknown as HTMLElement['animate'];
+    setReducedMotion(false);
+    dragTo(bouncy, column('Running'));
+    expect(bouncy.animate).toHaveBeenCalledTimes(1);
+    setReducedMotion(true);
+    dragTo(calm, column('Running'));
+    expect(calm.animate).not.toHaveBeenCalled();
+    expect(calm.style.transform).toBe('');
+  });
+
+  it('the activity line crossfades to a new step, or swaps at once with reduced motion', () => {
+    vi.useFakeTimers();
+    setReducedMotion(false);
+    const store = seeded([chat({ title: 'Working' })], { toolCalls: { c1: [tool({ id: 'a', summary: 'First step', status: 'running' })] } });
+    mount(store);
+    const now = () => card('Working').querySelector('.activity-line .now')!;
+    act(() => store.setState((s) => applyEvent(s, { type: 'tool.call', chatId: 'c1', toolCall: tool({ id: 'b', summary: 'Second step', status: 'running' }) })));
+    expect(now().textContent).toBe('First step');
+    expect(now().classList.contains('out')).toBe(true);
+    act(() => { vi.advanceTimersByTime(250); });
+    expect(now().textContent).toBe('Second step');
+    expect(now().className).toBe('now');
+    setReducedMotion(true);
+    act(() => store.setState((s) => applyEvent(s, { type: 'tool.call', chatId: 'c1', toolCall: tool({ id: 'c', summary: 'Third step', status: 'running' }) })));
+    expect(now().textContent).toBe('Third step');
+    expect(now().className).toBe('now');
   });
 });

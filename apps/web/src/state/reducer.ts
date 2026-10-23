@@ -72,6 +72,8 @@ export interface AppState {
   /** Bookkeeping that lets a fetch tell which items an event wrote while it was in flight. */
   sync: SyncState;
   socket: 'live' | 'reconnecting' | 'unauthorized';
+  /** True once the first snapshot has been applied (before that the board is loading, not empty). */
+  loaded: boolean;
   /** Wall clock (ms), bumped by the shell every 30 s so snooze checks re-evaluate without any event. */
   now: number;
   ui: UiState;
@@ -108,6 +110,7 @@ export function initialState(): AppState {
     refetch: {},
     sync: { seq: 0, inflight: 0, touched: {} },
     socket: 'reconnecting',
+    loaded: false,
     now: Date.now(),
     ui: {
       view: 'board',
@@ -307,6 +310,7 @@ export function applySnapshot(s: AppState, snap: Snapshot, since: number = s.syn
 
   return {
     ...s,
+    loaded: true,
     chats,
     streaming,
     requests,

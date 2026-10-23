@@ -127,6 +127,8 @@ describe('applySnapshot', () => {
       usage: [{ provider: 'codex', status: 'ok', windows: [], readAt: 'x' }],
       connections: [], history: [{ provider: 'claude', sessionRef: 'h', title: 't', cwd: '/x', updatedAt: 'x' }], projects: [],
     });
+    expect(initialState().loaded).toBe(false);
+    expect(next.loaded).toBe(true);
     expect(next.suggested).toBe('codex');
     expect(next.usage.codex).toBeDefined();
     expect(next.history).toHaveLength(1);

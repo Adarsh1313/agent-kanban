@@ -32,6 +32,7 @@ html, body { overflow: hidden; }
 
 /* Board: each card sits in a stable slot the board moves between columns (FLIP keeps the same node) */
 .col-cards, .card-slot { display: contents; }
+.card[aria-current="true"] { border-color: var(--color-ink); }
 .card-meta .card-proj { display: inline-flex; align-items: center; gap: var(--space-1); min-width: 0; }
 .no-results { flex: 1; display: grid; place-items: center; text-align: center; color: var(--color-text-muted); align-self: stretch; }
 .no-results h3 { margin: var(--space-2) 0 var(--space-1); color: var(--color-text); font-size: var(--text-title); font-weight: var(--weight-semibold); }

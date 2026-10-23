@@ -1,5 +1,5 @@
 import type { Chat, Column } from '@agent-kanban/shared';
-import { useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode } from 'react';
 import { ApiError, api } from '../../api/client.ts';
 import { mergeChats } from '../../state/reducer.ts';
 import { projectLabel } from '../../state/selectors.ts';
@@ -14,6 +14,8 @@ export const RESUME_TEXT = 'Continue where you left off.';
 export const HINT_AGENT_COLUMNS = 'Agents move cards between these columns. Drag to Done when you’re finished.';
 export const HINT_DONE_BACK = 'Done chats can only go back to Review';
 const DRAG_THRESHOLD = 5;
+/** A little longer than the design's 600ms `arrive` keyframe on `.card.new`. */
+const ARRIVE_MS = 700;
 const DRAG_TILT = 'rotate(1.5deg)';
 
 /** The text a failed action shows: the server's own `error` text when there is one. */
@@ -56,7 +58,7 @@ interface ActionProps { label: string; icon: IconName; onClick: (e: MouseEvent<H
 function ActionButton({ label, icon, onClick, disabled, text, menu }: ActionProps) {
   const btn = (
     <button className={text ? 'btn' : 'btn icon-only'} type="button" aria-label={text ? undefined : label} disabled={disabled} aria-haspopup={menu ? 'menu' : undefined}
-      onClick={(e) => { e.stopPropagation(); onClick(e); }} onKeyDown={(e) => e.stopPropagation()}>
+      onClick={(e) => { e.stopPropagation(); onClick(e); }}>
       <Icon name={icon} size="sm" />{text}
     </button>
   );
@@ -81,7 +83,7 @@ function setDropMarks(board: Element | null, from: Column | null, over: Column |
 }
 
 /** A chat on the board. Click (or Enter) opens it; drag moves it to Done (or from Done back to Review). */
-export function Card({ id, fresh }: { id: string; fresh: boolean }) {
+export function Card({ id, fresh, onArrived }: { id: string; fresh: boolean; onArrived?: (id: string) => void }) {
   const store = useStoreInstance();
   const chat = useStore((s) => s.chats[id]);
   const calls = useStore((s) => s.toolCalls[id]);
@@ -91,6 +93,15 @@ export function Card({ id, fresh }: { id: string; fresh: boolean }) {
   const [busy, setBusy] = useState<null | 'stop' | 'resume' | 'done'>(null);
   const ref = useRef<HTMLElement>(null);
   const dragged = useRef(false);
+  const endDrag = useRef<(() => void) | null>(null);
+  // A card that leaves the board mid-gesture drops its window listeners.
+  useEffect(() => () => endDrag.current?.(), []);
+  // The arrival tint plays once. animationend clears it; this timer covers a tab that was hidden meanwhile.
+  useEffect(() => {
+    if (!fresh) return;
+    const t = setTimeout(() => onArrived?.(id), ARRIVE_MS);
+    return () => clearTimeout(t);
+  }, [fresh, id, onArrived]);
 
   if (!chat || !chat.column) return null;
   const column = chat.column;
@@ -107,14 +118,16 @@ export function Card({ id, fresh }: { id: string; fresh: boolean }) {
   const onPointerDown = (e: PointerEvent<HTMLElement>) => {
     const el = ref.current;
     if (e.button !== 0 || !el || (e.target as Element).closest('button')) return;
+    endDrag.current?.();
     const from = column;
     const start = { x: e.clientX, y: e.clientY };
     const board = el.closest('.board');
-    const pointerId = e.pointerId;
     let dragging = false;
     let over: Column | null = null;
     const reduced = reducedMotion();
     dragged.current = false;
+    // Capture keeps the gesture on this card; the listeners sit on window so a release anywhere ends it.
+    try { el.setPointerCapture(e.pointerId); } catch { /* not capturable (tests) */ }
 
     const move = (ev: globalThis.PointerEvent) => {
       const dx = ev.clientX - start.x;
@@ -123,7 +136,6 @@ export function Card({ id, fresh }: { id: string; fresh: boolean }) {
       if (!dragging) {
         dragging = true;
         dragged.current = true;
-        try { el.setPointerCapture(pointerId); } catch { /* not capturable (tests) */ }
         el.classList.add('dragging');
       }
       // Reduced motion: the card still follows the pointer (direct manipulation) but does not tilt or grow.
@@ -140,11 +152,23 @@ export function Card({ id, fresh }: { id: string; fresh: boolean }) {
       }
     };
 
-    const up = () => {
-      el.removeEventListener('pointermove', move);
-      el.removeEventListener('pointerup', up);
-      el.removeEventListener('pointercancel', up);
+    const detach = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', cancel);
       setDropMarks(board, null, null);
+      if (endDrag.current === detach) endDrag.current = null;
+    };
+
+    const cancel = () => {
+      detach();
+      if (!dragging) return;
+      el.classList.remove('dragging');
+      snapBack();
+    };
+
+    const up = () => {
+      detach();
       if (!dragging) return;
       const target = over;
       if (target && target !== from && dropAllowed(from, target)) {
@@ -165,9 +189,10 @@ export function Card({ id, fresh }: { id: string; fresh: boolean }) {
       if (target && target !== from) toast(from === 'done' ? HINT_DONE_BACK : HINT_AGENT_COLUMNS);
     };
 
-    el.addEventListener('pointermove', move);
-    el.addEventListener('pointerup', up);
-    el.addEventListener('pointercancel', up);
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', cancel);
+    endDrag.current = detach;
   };
 
   const onClick = () => {
@@ -192,7 +217,8 @@ export function Card({ id, fresh }: { id: string; fresh: boolean }) {
 
   return (
     <article ref={ref} className={`card${fresh ? ' new' : ''}`} data-id={id} tabIndex={0} aria-label={chat.title}
-      aria-selected={selected ? 'true' : undefined} onClick={onClick} onKeyDown={onKeyDown} onPointerDown={onPointerDown}>
+      aria-current={selected ? 'true' : undefined} onClick={onClick} onKeyDown={onKeyDown} onPointerDown={onPointerDown}
+      onAnimationEnd={(e) => { if (fresh && e.target === e.currentTarget) onArrived?.(id); }}>
       <div className="card-top"><div className="card-title">{chat.title}</div></div>
       <div className="card-meta">
         <ProviderLogo id={chat.provider} size="sm" />
@@ -211,7 +237,7 @@ export function Card({ id, fresh }: { id: string; fresh: boolean }) {
       <div className="card-actions">
         {column === 'running' && <ActionButton label={busy === 'stop' ? 'Stopping…' : 'Stop agent'} icon="stop" disabled={busy === 'stop'} onClick={() => void run('stop')} />}
         {resumable && <ActionButton label="Resume" icon="resume" text="Resume" disabled={busy === 'resume'} onClick={() => void run('resume')} />}
-        {column !== 'running' && column !== 'done' && <ActionButton label="Mark done" icon="check" disabled={busy === 'done'} onClick={() => void run('done')} />}
+        {column !== 'done' && <ActionButton label="Mark done" icon="check" disabled={busy === 'done'} onClick={() => void run('done')} />}
         {column === 'done' && <ActionButton label="Back to Review" icon="back" disabled={busy === 'done'} onClick={() => void run('undone')} />}
         <ActionButton label="More actions" icon="more" menu onClick={(e) => openRowMenu({ chatId: id, history: null }, e.currentTarget)} />
       </div>

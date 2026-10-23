@@ -58,8 +58,7 @@ export function ActivityLine({ calls }: { calls: ToolCall[] | undefined }) {
         <SwapText text={cur?.summary || STARTING} />
         {recent.length > 0 && (
           <button className="more-toggle" type="button" aria-expanded={open}
-            onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }}
-            onKeyDown={(e) => e.stopPropagation()}>
+            onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }}>
             <span className="lbl">{open ? 'Show less' : 'Show more'}</span><Icon name="chevron-down" size="sm" />
           </button>
         )}

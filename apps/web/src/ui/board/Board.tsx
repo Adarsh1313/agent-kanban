@@ -1,5 +1,5 @@
 import type { Column as ColumnId } from '@agent-kanban/shared';
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal, flushSync } from 'react-dom';
 import type { AppState } from '../../state/reducer.ts';
 import { boardColumns, isSnoozed, memoState } from '../../state/selectors.ts';
@@ -30,8 +30,7 @@ function positions(l: Layout): Map<string, { col: ColumnId; i: number }> {
 }
 
 const boardStatus = (s: AppState) => ({
-  // The snapshot always lists every provider's connection: until it has arrived the board is loading, not empty.
-  loaded: Object.keys(s.connections).length > 0,
+  loaded: s.loaded,
   onBoard: Object.values(s.chats).some((c) => c.column !== null && !c.archived && !isSnoozed(c, s.now)),
   filtering: s.ui.focusProvider !== null || Object.values(s.ui.filters).some((v) => v !== null),
 });
@@ -109,6 +108,9 @@ export function Board() {
 
   // Put each card's slot into its column, in order; drop slots of cards that left the board.
   useLayoutEffect(() => {
+    // Moving a node blurs whatever is focused inside it: remember it and give focus back after the move.
+    const active = document.activeElement instanceof HTMLElement && boardRef.current?.contains(document.activeElement) ? document.activeElement : null;
+    const activeCard = active?.closest<HTMLElement>('.card') ?? null;
     const present = new Set<string>();
     for (const col of COLUMNS) {
       const parent = bodies.current[col];
@@ -125,7 +127,19 @@ export function Board() {
         slots.current.delete(id);
       }
     }
+    if (active && document.activeElement !== active) {
+      const target = active.isConnected ? active : activeCard?.isConnected ? activeCard : null;
+      target?.focus({ preventScroll: true });
+    }
   });
+
+  // The arrival tint plays once: a card leaves `fresh` when its animation ends, so later moves don't replay it.
+  const arrived = useCallback((id: string) => setFresh((cur) => {
+    if (!cur.has(id)) return cur;
+    const next = new Set(cur);
+    next.delete(id);
+    return next;
+  }), []);
 
   const shown = COLUMNS.reduce((n, c) => n + layout[c].length, 0);
   const empty = loaded && !onBoard && !filtering;
@@ -140,7 +154,7 @@ export function Board() {
       {COLUMNS.map((col) => (
         <Column key={col} id={col} count={layout[col].length} hidden={noResults} cardsRef={(el) => { bodies.current[col] = el; }} />
       ))}
-      {COLUMNS.flatMap((col) => layout[col].map((id) => createPortal(<Card id={id} fresh={fresh.has(id)} />, slot(id), id)))}
+      {COLUMNS.flatMap((col) => layout[col].map((id) => createPortal(<Card id={id} fresh={fresh.has(id)} onArrived={arrived} />, slot(id), id)))}
       {noResults && (
         <div className="no-results">
           <div>
