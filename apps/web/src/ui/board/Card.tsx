@@ -1,0 +1,220 @@
+import type { Chat, Column } from '@agent-kanban/shared';
+import { useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode } from 'react';
+import { ApiError, api } from '../../api/client.ts';
+import { mergeChats } from '../../state/reducer.ts';
+import { projectLabel } from '../../state/selectors.ts';
+import { useStore, useStoreInstance, type Store } from '../../state/store.ts';
+import { openRowMenu } from '../actions.ts';
+import { Icon, ProviderLogo, type IconName, Tooltip, providerName, toast } from '../primitives/index.ts';
+import { cssMs, cssValue, reducedMotion } from '../primitives/motion.ts';
+import { ActivityLine } from './ActivityLine.tsx';
+import { clockTime, duration, limitResetsAt, relativeTime } from './format.ts';
+
+export const RESUME_TEXT = 'Continue where you left off.';
+export const HINT_AGENT_COLUMNS = 'Agents move cards between these columns. Drag to Done when you’re finished.';
+export const HINT_DONE_BACK = 'Done chats can only go back to Review';
+const DRAG_THRESHOLD = 5;
+const DRAG_TILT = 'rotate(1.5deg)';
+
+/** The text a failed action shows: the server's own `error` text when there is one. */
+export function errorText(err: unknown): string {
+  if (err instanceof ApiError) return err.message;
+  return 'Couldn’t reach Agent Kanban. Check that it is still running and try again.';
+}
+
+/** Runs a card action; the server's reply goes into the store, a failure shows its message and changes nothing. */
+async function act(store: Store, run: () => Promise<Chat | void>): Promise<boolean> {
+  try {
+    const chat = await run();
+    if (chat) store.setState((s) => mergeChats(s, [chat]));
+    return true;
+  } catch (err) {
+    toast(errorText(err));
+    return false;
+  }
+}
+
+/** Only the user moves cards to Done; Done cards can only go back to Review. */
+export const dropAllowed = (from: Column, to: Column) => (from === 'done' ? to === 'review' : to === 'done');
+
+function ReasonBadge({ chat }: { chat: Chat }) {
+  const now = useStore((s) => s.now);
+  const resets = useStore((s) => (chat.needsReason === 'limit' ? limitResetsAt(s.usage[chat.provider], s.now) : null));
+  switch (chat.needsReason) {
+    case 'permission': return <span className="badge needs">Wants to run a command</span>;
+    case 'question': return <span className="badge needs">Asked you a question</span>;
+    case 'stopped': return <span className="badge quiet"><Icon name="stop" size="sm" />Stopped</span>;
+    case 'limit': return <span className="badge danger">{resets ? `Limit reached · resets ${clockTime(resets, now)}` : 'Limit reached'}</span>;
+    case 'error': return <span className="badge danger">Something went wrong</span>;
+    case 'interrupted': return <span className="badge quiet">Interrupted</span>;
+    default: return null;
+  }
+}
+
+interface ActionProps { label: string; icon: IconName; onClick: (e: MouseEvent<HTMLButtonElement>) => void; disabled?: boolean; text?: ReactNode; menu?: boolean }
+
+function ActionButton({ label, icon, onClick, disabled, text, menu }: ActionProps) {
+  const btn = (
+    <button className={text ? 'btn' : 'btn icon-only'} type="button" aria-label={text ? undefined : label} disabled={disabled} aria-haspopup={menu ? 'menu' : undefined}
+      onClick={(e) => { e.stopPropagation(); onClick(e); }} onKeyDown={(e) => e.stopPropagation()}>
+      <Icon name={icon} size="sm" />{text}
+    </button>
+  );
+  return text ? btn : <Tooltip label={label}>{btn}</Tooltip>;
+}
+
+/** The column under the pointer (the dragged card itself is skipped). */
+function columnOf(x: number, y: number, self: HTMLElement): Column | null {
+  const prev = self.style.pointerEvents;
+  self.style.pointerEvents = 'none';
+  const under = typeof document.elementFromPoint === 'function' ? document.elementFromPoint(x, y) : null;
+  self.style.pointerEvents = prev;
+  return (under?.closest<HTMLElement>('.column')?.dataset.col as Column | undefined) ?? null;
+}
+
+function setDropMarks(board: Element | null, from: Column | null, over: Column | null) {
+  board?.querySelectorAll<HTMLElement>('.column').forEach((col) => {
+    const c = col.dataset.col as Column;
+    col.classList.toggle('drop-ok', from !== null && dropAllowed(from, c));
+    col.classList.toggle('drop-hot', from !== null && c === over && dropAllowed(from, c));
+  });
+}
+
+/** A chat on the board. Click (or Enter) opens it; drag moves it to Done (or from Done back to Review). */
+export function Card({ id, fresh }: { id: string; fresh: boolean }) {
+  const store = useStoreInstance();
+  const chat = useStore((s) => s.chats[id]);
+  const calls = useStore((s) => s.toolCalls[id]);
+  const now = useStore((s) => s.now);
+  const project = useStore((s) => (chat ? projectLabel(s, chat.cwd) : ''));
+  const selected = useStore((s) => s.ui.openChatId === id);
+  const [busy, setBusy] = useState<null | 'stop' | 'resume' | 'done'>(null);
+  const ref = useRef<HTMLElement>(null);
+  const dragged = useRef(false);
+
+  if (!chat || !chat.column) return null;
+  const column = chat.column;
+
+  const open = () => store.setState((s) => (s.ui.openChatId === id ? s : { ...s, ui: { ...s.ui, openChatId: id } }));
+
+  const run = async (kind: 'stop' | 'resume' | 'done' | 'undone') => {
+    if (busy) return;
+    setBusy(kind === 'undone' ? 'done' : kind);
+    await act(store, () => (kind === 'stop' ? api.stop(id) : kind === 'resume' ? api.send(id, RESUME_TEXT) : kind === 'done' ? api.done(id) : api.undone(id)));
+    setBusy(null);
+  };
+
+  const onPointerDown = (e: PointerEvent<HTMLElement>) => {
+    const el = ref.current;
+    if (e.button !== 0 || !el || (e.target as Element).closest('button')) return;
+    const from = column;
+    const start = { x: e.clientX, y: e.clientY };
+    const board = el.closest('.board');
+    const pointerId = e.pointerId;
+    let dragging = false;
+    let over: Column | null = null;
+    const reduced = reducedMotion();
+    dragged.current = false;
+
+    const move = (ev: globalThis.PointerEvent) => {
+      const dx = ev.clientX - start.x;
+      const dy = ev.clientY - start.y;
+      if (!dragging && Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
+      if (!dragging) {
+        dragging = true;
+        dragged.current = true;
+        try { el.setPointerCapture(pointerId); } catch { /* not capturable (tests) */ }
+        el.classList.add('dragging');
+      }
+      // Reduced motion: the card still follows the pointer (direct manipulation) but does not tilt or grow.
+      el.style.transform = `translate(${dx}px, ${dy}px)${reduced ? '' : ` ${DRAG_TILT} scale(${cssValue('--lift-scale', '1.02')})`}`;
+      over = columnOf(ev.clientX, ev.clientY, el);
+      setDropMarks(board, from, over);
+    };
+
+    const snapBack = () => {
+      const from_ = el.style.transform;
+      el.style.transform = '';
+      if (!reduced && from_ && typeof el.animate === 'function') {
+        el.animate([{ transform: from_ }, { transform: 'none' }], { duration: cssMs('--duration-swap', 200), easing: cssValue('--ease-out', 'ease-out') });
+      }
+    };
+
+    const up = () => {
+      el.removeEventListener('pointermove', move);
+      el.removeEventListener('pointerup', up);
+      el.removeEventListener('pointercancel', up);
+      setDropMarks(board, null, null);
+      if (!dragging) return;
+      const target = over;
+      if (target && target !== from && dropAllowed(from, target)) {
+        // Keep the card where it was dropped; the board's FLIP clears the transform as it moves the card.
+        el.dataset.dragged = 'true';
+        void act(store, () => (target === 'done' ? api.done(id) : api.undone(id))).then((ok) => {
+          el.classList.remove('dragging');
+          if (el.dataset.dragged) {
+            delete el.dataset.dragged;
+            if (ok) el.style.transform = '';
+            else snapBack();
+          }
+        });
+        return;
+      }
+      el.classList.remove('dragging');
+      snapBack();
+      if (target && target !== from) toast(from === 'done' ? HINT_DONE_BACK : HINT_AGENT_COLUMNS);
+    };
+
+    el.addEventListener('pointermove', move);
+    el.addEventListener('pointerup', up);
+    el.addEventListener('pointercancel', up);
+  };
+
+  const onClick = () => {
+    if (dragged.current) {
+      dragged.current = false;
+      return;
+    }
+    open();
+  };
+  const onKeyDown = (e: KeyboardEvent<HTMLElement>) => {
+    if ((e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget) {
+      e.preventDefault();
+      open();
+    }
+  };
+
+  const reason = chat.needsReason;
+  const resumable = column === 'needs_you' && (reason === 'stopped' || reason === 'interrupted');
+  const finished = column === 'review' || column === 'done';
+  const took = Date.parse(chat.doneAt ?? chat.updatedAt) - Date.parse(chat.createdAt);
+  const steps = calls?.length;
+
+  return (
+    <article ref={ref} className={`card${fresh ? ' new' : ''}`} data-id={id} tabIndex={0} aria-label={chat.title}
+      aria-selected={selected ? 'true' : undefined} onClick={onClick} onKeyDown={onKeyDown} onPointerDown={onPointerDown}>
+      <div className="card-top"><div className="card-title">{chat.title}</div></div>
+      <div className="card-meta">
+        <ProviderLogo id={chat.provider} size="sm" />
+        <span>{chat.model ?? providerName(chat.provider)}</span><span className="sep">·</span>
+        <span className="card-proj"><Icon name="folder" size="sm" />{project}</span><span className="sep">·</span>
+        <span className="tnum">{relativeTime(chat.updatedAt, now)}</span>
+      </div>
+      {column === 'needs_you' && reason && <div className="card-meta"><ReasonBadge chat={chat} /></div>}
+      {finished && (
+        <div className="card-meta">
+          {steps !== undefined && <><Icon name="check" size="sm" /><span>{steps === 0 ? 'No steps' : `${steps} step${steps === 1 ? '' : 's'}`}</span><span className="sep">·</span></>}
+          <Icon name="clock" size="sm" /><span className="tnum">{duration(took)}</span>
+        </div>
+      )}
+      {column === 'running' && <ActivityLine calls={calls} />}
+      <div className="card-actions">
+        {column === 'running' && <ActionButton label={busy === 'stop' ? 'Stopping…' : 'Stop agent'} icon="stop" disabled={busy === 'stop'} onClick={() => void run('stop')} />}
+        {resumable && <ActionButton label="Resume" icon="resume" text="Resume" disabled={busy === 'resume'} onClick={() => void run('resume')} />}
+        {column !== 'running' && column !== 'done' && <ActionButton label="Mark done" icon="check" disabled={busy === 'done'} onClick={() => void run('done')} />}
+        {column === 'done' && <ActionButton label="Back to Review" icon="back" disabled={busy === 'done'} onClick={() => void run('undone')} />}
+        <ActionButton label="More actions" icon="more" menu onClick={(e) => openRowMenu({ chatId: id, history: null }, e.currentTarget)} />
+      </div>
+    </article>
+  );
+}

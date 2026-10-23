@@ -1,8 +1,8 @@
 import { useEffect, useLayoutEffect, useRef } from 'react';
-import { boardColumns } from '../../state/selectors.ts';
 import type { AppState } from '../../state/reducer.ts';
 import { useStore, useStoreInstance, type Store } from '../../state/store.ts';
 import { openNewChat } from '../actions.ts';
+import { Board } from '../board/Board.tsx';
 import { hasOpenLayer } from '../primitives/layers.ts';
 import { Toasts } from '../primitives/index.ts';
 import { Sidebar } from './Sidebar.tsx';
@@ -53,23 +53,6 @@ function useShortcuts() {
   }, []);
 }
 
-function BoardPlaceholder() {
-  const counts = useStore((s) => {
-    const cols = boardColumns(s, s.now);
-    return { running: cols.running.length, needs_you: cols.needs_you.length, review: cols.review.length, done: cols.done.length };
-  });
-  return (
-    <div className="placeholder" id="board">
-      <ul className="counts">
-        <li>Running: {counts.running}</li>
-        <li>Needs you: {counts.needs_you}</li>
-        <li>Review: {counts.review}</li>
-        <li>Done: {counts.done}</li>
-      </ul>
-    </div>
-  );
-}
-
 const Placeholder = ({ title }: { title: string }) => (
   <div className="placeholder"><h2>{title}</h2><p>This page is on its way.</p></div>
 );
@@ -97,7 +80,7 @@ export function Shell() {
           <TopBar />
           {banner && <p className="conn-banner" role="status" data-state={socket}>{banner}</p>}
           <main className={`view main-view${entering ? ' entering' : ''}`} key={view} id="main" tabIndex={-1} data-view={view}>
-            {view === 'board' && <BoardPlaceholder />}
+            {view === 'board' && <Board />}
             {view === 'projects' && <Placeholder title="Projects" />}
             {view === 'connections' && <Placeholder title="Connections" />}
           </main>

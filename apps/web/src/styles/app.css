@@ -25,11 +25,17 @@ html, body { overflow: hidden; }
 .conn-banner { flex: none; padding: var(--space-2) var(--space-4); font-size: var(--text-body); color: var(--color-text-muted); background: var(--color-control); border-bottom: 1px solid var(--color-border); }
 .conn-banner[data-state="unauthorized"] { color: var(--color-needs-text); background: var(--color-needs-soft); }
 
-/* Placeholders until the Board, Projects and Connections tasks fill them */
+/* Placeholders until the Projects and Connections tasks fill them */
 .placeholder { flex: 1; display: grid; place-content: center; gap: var(--space-2); text-align: center; color: var(--color-text-muted); }
 .placeholder h2 { margin: 0; font-size: var(--text-title); font-weight: var(--weight-semibold); color: var(--color-text); }
 .placeholder p { margin: 0; }
-.placeholder .counts { margin: 0; padding: 0; list-style: none; display: flex; gap: var(--space-4); justify-content: center; }
+
+/* Board: each card sits in a stable slot the board moves between columns (FLIP keeps the same node) */
+.col-cards, .card-slot { display: contents; }
+.card-meta .card-proj { display: inline-flex; align-items: center; gap: var(--space-1); min-width: 0; }
+.no-results { flex: 1; display: grid; place-items: center; text-align: center; color: var(--color-text-muted); align-self: stretch; }
+.no-results h3 { margin: var(--space-2) 0 var(--space-1); color: var(--color-text); font-size: var(--text-title); font-weight: var(--weight-semibold); }
+.no-results p { margin: 0 0 var(--space-3); font-size: var(--text-body); }
 
 @media (max-width: 900px) { .sidebar { display: none; } }
 @media (max-width: 640px) { .usage-area .pct, .topbar .new-label { display: none; } }

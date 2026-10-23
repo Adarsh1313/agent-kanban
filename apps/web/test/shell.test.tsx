@@ -175,7 +175,9 @@ describe('Sidebar: pinned and recent', () => {
     mount(store, <Shell />);
     expect(screen.queryByText('Sleepy')).toBeNull();
     act(() => { vi.advanceTimersByTime(31_000); });
-    expect(screen.getByText('Sleepy')).toBeTruthy();
+    // Back in the sidebar and on the board.
+    expect(screen.getAllByText('Sleepy').length).toBe(2);
+    expect(screen.getByRole('article', { name: 'Sleepy' })).toBeTruthy();
   });
 
   it('renders 1 000 history chats in under 200 ms', () => {
@@ -237,10 +239,11 @@ describe('Shell: routes', () => {
     const handler = vi.fn();
     setNewChatHandler(handler);
     mount(seeded(), <Shell />);
+    // Sidebar, top bar and the board's Running column "+".
     for (const b of screen.getAllByRole('button', { name: /^New chat( N)?$/ })) fireEvent.click(b);
-    expect(handler).toHaveBeenCalledTimes(2);
-    fireEvent.keyDown(document.body, { key: 'n' });
     expect(handler).toHaveBeenCalledTimes(3);
+    fireEvent.keyDown(document.body, { key: 'n' });
+    expect(handler).toHaveBeenCalledTimes(4);
     setNewChatHandler(null);
   });
 });
