@@ -32,10 +32,18 @@ export interface Filters {
   source: ('here' | 'native')[] | null;
 }
 
+/** A chat from a provider's own history that is not on the board yet. */
+export interface HistoryRef { provider: ProviderId; sessionRef: string; cwd: string; title: string }
+
 export interface UiState {
   view: 'board' | 'projects' | 'connections';
   projectId: string | null;
+  /** The chat shown in the side panel; mutually exclusive with `openHistory`. */
   openChatId: string | null;
+  /** A history-only chat shown in the side panel; mutually exclusive with `openChatId`. */
+  openHistory: HistoryRef | null;
+  /** Chats archived here whose Undo toast is still showing: hidden at once, archived on the server when it expires. */
+  archiving: Record<string, true>;
   filters: Filters;
   focusProvider: ProviderId | null;
 }
@@ -116,6 +124,8 @@ export function initialState(): AppState {
       view: 'board',
       projectId: null,
       openChatId: null,
+      openHistory: null,
+      archiving: {},
       filters: { provider: null, project: null, status: null, model: null, reason: null, activity: null, source: null },
       focusProvider: null,
     },
@@ -326,6 +336,24 @@ export function applySnapshot(s: AppState, snap: Snapshot, since: number = s.syn
     history: snap.history,
     projects: snap.projects,
   };
+}
+
+/** Opens a board chat in the side panel (closing any history chat shown there). */
+export function openChatIn(s: AppState, id: string): AppState {
+  if (s.ui.openChatId === id && s.ui.openHistory === null) return s;
+  return { ...s, ui: { ...s.ui, openChatId: id, openHistory: null } };
+}
+
+/** Opens a history-only chat in the side panel (closing any board chat shown there). */
+export function openHistoryIn(s: AppState, ref: HistoryRef): AppState {
+  const cur = s.ui.openHistory;
+  if (s.ui.openChatId === null && cur && cur.provider === ref.provider && cur.sessionRef === ref.sessionRef) return s;
+  return { ...s, ui: { ...s.ui, openChatId: null, openHistory: ref } };
+}
+
+export function closePanelIn(s: AppState): AppState {
+  if (s.ui.openChatId === null && s.ui.openHistory === null) return s;
+  return { ...s, ui: { ...s.ui, openChatId: null, openHistory: null } };
 }
 
 export const isChatLoaded = (s: AppState, id: string): boolean => s.loadedChats[id] === true;

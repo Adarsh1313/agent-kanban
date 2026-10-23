@@ -3,6 +3,7 @@ import type { AppState } from '../../state/reducer.ts';
 import { useStore, useStoreInstance, type Store } from '../../state/store.ts';
 import { openNewChat } from '../actions.ts';
 import { Board } from '../board/Board.tsx';
+import { ChatPanel } from '../chat/ChatPanel.tsx';
 import { hasOpenLayer } from '../primitives/layers.ts';
 import { Toasts } from '../primitives/index.ts';
 import { Sidebar } from './Sidebar.tsx';
@@ -86,6 +87,7 @@ export function Shell() {
           </main>
         </div>
       </div>
+      <ChatPanel />
       <Toasts />
     </>
   );

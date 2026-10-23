@@ -38,5 +38,31 @@ html, body { overflow: hidden; }
 .no-results h3 { margin: var(--space-2) 0 var(--space-1); color: var(--color-text); font-size: var(--text-title); font-weight: var(--weight-semibold); }
 .no-results p { margin: 0 0 var(--space-3); font-size: var(--text-body); }
 
+/* Chat panel (design/board.html keeps these inline) */
+.panel:focus { outline: none; }
+.panel-head .t small .icon { flex: none; }
+.panel-head .panel-proj { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.title-edit { display: block; width: 100%; font: inherit; font-size: var(--text-title); font-weight: var(--weight-semibold); letter-spacing: var(--tracking-tight);
+  color: var(--color-text); background: var(--color-surface); border: 1px solid var(--color-border-strong); border-radius: var(--radius-control); padding: 0 var(--space-1); outline: 0; }
+.title-edit:focus-visible { box-shadow: 0 0 0 calc(var(--space-1) * .75) color-mix(in srgb, var(--color-focus) 15%, transparent); }
+.panel-source { padding: var(--space-2) var(--space-4) 0; display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; }
+.thread .turn { display: flex; flex-direction: column; gap: var(--space-4); }
+.thread .msg.agent { width: 100%; }
+.msg-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.msg.agent .work + .msg-text, .msg.agent .msg-text + .msg-text, .msg.agent .work + .thread-note { margin-top: var(--space-3); }
+.msg-time { font-size: var(--text-caption); color: var(--color-text-faint); font-variant-numeric: tabular-nums; }
+.msg.user .msg-time { display: block; text-align: right; margin-top: var(--space-1); }
+.msg .who .msg-time { margin-left: var(--space-1); }
+.thread-note { display: flex; align-items: center; gap: calc(var(--space-1) * 1.5); color: var(--color-text-muted); font-size: var(--text-caption); }
+.thread-note.center { justify-content: center; color: var(--color-text-faint); text-align: center; }
+.thread .show-earlier { align-self: center; flex: none; }
+.steps li.failed .icon { color: var(--color-danger); }
+.request-head { display: flex; align-items: center; gap: calc(var(--space-1) * 1.5); font-weight: var(--weight-medium); }
+.request-note { color: var(--color-text-muted); font-size: var(--text-caption); }
+.request .composer-box textarea { width: 100%; border: 0; outline: 0; resize: none; background: transparent; font: inherit; font-size: var(--text-body); padding: calc(var(--space-1) / 2) var(--space-1); }
+.menu-label .menu-back { width: var(--space-5); height: var(--space-5); margin-right: var(--space-1); }
+.menu-label:has(.menu-back) { display: flex; align-items: center; }
+@media (prefers-reduced-motion: reduce) { .request { animation: none; } }
+
 @media (max-width: 900px) { .sidebar { display: none; } }
 @media (max-width: 640px) { .usage-area .pct, .topbar .new-label { display: none; } }

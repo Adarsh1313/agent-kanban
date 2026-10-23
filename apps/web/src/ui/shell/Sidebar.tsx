@@ -1,7 +1,7 @@
 import type { ProviderId } from '@agent-kanban/shared';
 import { useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
-import { focusedProvider, isSnoozed, memoState, pinned as pinnedChats, providerCounts, recentChatsByProject, type SidebarChat } from '../../state/selectors.ts';
-import type { AppState } from '../../state/reducer.ts';
+import { focusedProvider, isArchived, isSnoozed, memoState, pinned as pinnedChats, providerCounts, recentChatsByProject, type SidebarChat } from '../../state/selectors.ts';
+import { openChatIn, type AppState } from '../../state/reducer.ts';
 import { useStore, useStoreInstance } from '../../state/store.ts';
 import { openHistoryChat, openNewChat, openRowMenu } from '../actions.ts';
 import { Icon, Menu, MenuItem, PROVIDER_IDS, ProviderLogo, StatusIcon, Tooltip, providerName } from '../primitives/index.ts';
@@ -43,7 +43,7 @@ interface RowChat { key: string; chatId: string | null; provider: ProviderId; se
 function ChatRow({ chat, current }: { chat: RowChat; current: boolean }) {
   const store = useStoreInstance();
   const open = () => {
-    if (chat.chatId) store.setState((s) => (s.ui.openChatId === chat.chatId ? s : { ...s, ui: { ...s.ui, openChatId: chat.chatId } }));
+    if (chat.chatId) store.setState((s) => openChatIn(s, chat.chatId!));
     else if (chat.sessionRef) openHistoryChat({ provider: chat.provider, sessionRef: chat.sessionRef, cwd: chat.cwd, title: chat.title });
   };
   const more = (e: MouseEvent<HTMLButtonElement>) => {
@@ -97,13 +97,14 @@ function Recent() {
   // Memoized on the parts it reads, so streaming deltas do not re-sort every history chat.
   const select = useMemo(
     () => memoState(
-      (s) => [s.chats, s.history, s.projects, s.ui.focusProvider, s.ui.filters.provider, s.now],
+      (s) => [s.chats, s.history, s.projects, s.ui.focusProvider, s.ui.filters.provider, s.ui.archiving, s.now],
       (s) => recentChatsByProject(s, s.now, { projects: PROJECTS_SHOWN + 1, chats: CHATS_SHOWN }, expanded),
     ),
     [expanded],
   );
   const groups = useStore(select);
   const openChatId = useStore((s) => s.ui.openChatId);
+  const openHistory = useStore((s) => s.ui.openHistory);
   const toggle = (id: string) =>
     setExpanded((cur) => {
       const next = new Set(cur);
@@ -125,7 +126,10 @@ function Recent() {
                 </button>
               </Tooltip>
             </div>
-            {g.chats.map((c) => <ChatRow key={c.key} chat={c} current={c.chatId !== null && c.chatId === openChatId} />)}
+            {g.chats.map((c) => (
+              <ChatRow key={c.key} chat={c}
+                current={c.chatId !== null ? c.chatId === openChatId : openHistory !== null && openHistory.provider === c.provider && openHistory.sessionRef === c.sessionRef} />
+            ))}
             {g.total > CHATS_SHOWN && (
               <button className="show-more-row" type="button" onClick={() => toggle(g.projectId)}>
                 {open ? 'Show less' : `${g.total - CHATS_SHOWN} more`}
@@ -157,7 +161,7 @@ function Pinned() {
 const counts = (s: AppState) => {
   const now = s.now;
   const board = Object.values(s.chats).filter(
-    (c) => c.column !== null && c.column !== 'done' && !c.archived && !isSnoozed(c, now),
+    (c) => c.column !== null && c.column !== 'done' && !isArchived(s, c) && !isSnoozed(c, now),
   ).length;
   const connected = Object.values(s.connections).filter((c) => c?.status === 'connected' || c?.status === 'update_available').length;
   return { board, projects: s.projects.length, connections: connected };

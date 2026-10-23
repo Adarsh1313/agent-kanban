@@ -3,7 +3,11 @@ import { createPortal } from 'react-dom';
 import { cssMs } from './motion.ts';
 
 export interface ToastAction { label: string; run: () => void }
-interface ToastItem { id: number; message: string; action?: ToastAction }
+export interface ToastOptions {
+  /** Runs when the toast goes away by itself (its time ran out), not when its action was used. */
+  onExpire?: () => void;
+}
+interface ToastItem { id: number; message: string; action?: ToastAction; onExpire?: () => void }
 
 let items: ToastItem[] = [];
 let seq = 0;
@@ -16,8 +20,8 @@ const subscribe = (l: () => void) => {
 const snapshot = () => items;
 
 /** Shows a message (plain words; for a failed action, the server's own error text) with an optional action such as Undo. */
-export function toast(message: string, action?: ToastAction): void {
-  items = [...items, { id: ++seq, message, action }];
+export function toast(message: string, action?: ToastAction, opts: ToastOptions = {}): void {
+  items = [...items, { id: ++seq, message, action, onExpire: opts.onExpire }];
   emit();
 }
 
@@ -36,9 +40,16 @@ function ToastView({ item }: { item: ToastItem }) {
   const hovered = useRef(false);
   const leaving_ = useRef(false);
 
-  const leave = useRef(() => {});
-  leave.current = () => {
+  const leave = useRef((_expired: boolean) => {});
+  leave.current = (expired) => {
+    if (leaving_.current) return;
     clearTimeout(timer.current);
+    if (expired && item.onExpire) {
+      // At most once, even if this toast view is mounted again before it is dismissed.
+      const run = item.onExpire;
+      item.onExpire = undefined;
+      run();
+    }
     armed.current = false;
     leaving_.current = true;
     setLeaving(true);
@@ -49,7 +60,7 @@ function ToastView({ item }: { item: ToastItem }) {
     if (armed.current || leaving_.current) return;
     armed.current = true;
     started.current = Date.now();
-    timer.current = setTimeout(() => leave.current(), left.current);
+    timer.current = setTimeout(() => leave.current(true), left.current);
   };
   const pause = useRef(() => {});
   pause.current = () => {
@@ -79,7 +90,7 @@ function ToastView({ item }: { item: ToastItem }) {
       onMouseLeave={() => { hovered.current = false; if (!document.hidden) arm.current(); }}>
       <span>{item.message}</span>
       {item.action && (
-        <button className="btn" type="button" onClick={() => { item.action!.run(); leave.current(); }}>{item.action.label}</button>
+        <button className="btn" type="button" onClick={() => { item.action!.run(); leave.current(false); }}>{item.action.label}</button>
       )}
     </div>
   );

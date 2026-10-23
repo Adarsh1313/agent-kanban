@@ -1,7 +1,7 @@
 import type { Chat, Column } from '@agent-kanban/shared';
 import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode } from 'react';
 import { ApiError, api } from '../../api/client.ts';
-import { mergeChats } from '../../state/reducer.ts';
+import { mergeChats, openChatIn } from '../../state/reducer.ts';
 import { projectLabel } from '../../state/selectors.ts';
 import { useStore, useStoreInstance, type Store } from '../../state/store.ts';
 import { openRowMenu } from '../actions.ts';
@@ -106,7 +106,7 @@ export function Card({ id, fresh, onArrived }: { id: string; fresh: boolean; onA
   if (!chat || !chat.column) return null;
   const column = chat.column;
 
-  const open = () => store.setState((s) => (s.ui.openChatId === id ? s : { ...s, ui: { ...s.ui, openChatId: id } }));
+  const open = () => store.setState((s) => openChatIn(s, id));
 
   const run = async (kind: 'stop' | 'resume' | 'done' | 'undone') => {
     if (busy) return;

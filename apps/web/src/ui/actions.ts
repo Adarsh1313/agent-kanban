@@ -1,11 +1,12 @@
-import type { ProviderId } from '@agent-kanban/shared';
+import type { HistoryRef } from '../state/reducer.ts';
+
+export type { HistoryRef };
 
 /**
  * Actions that later tasks implement (New chat dialog, row menus, history import). The shell calls
  * these; until a handler is registered they do nothing.
  */
 export interface NewChatOptions { cwd?: string }
-export interface HistoryRef { provider: ProviderId; sessionRef: string; cwd: string; title: string }
 export interface RowMenuTarget { chatId: string | null; history: HistoryRef | null }
 
 let newChat: ((opts?: NewChatOptions) => void) | null = null;

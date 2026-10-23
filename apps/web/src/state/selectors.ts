@@ -28,6 +28,8 @@ export interface ProjectGroup {
 }
 
 export const isSnoozed = (c: { snoozedUntil: string | null }, now: number) => c.snoozedUntil !== null && Date.parse(c.snoozedUntil) > now;
+/** Archived on the server, or archived here with its Undo toast still showing. */
+export const isArchived = (s: AppState, c: { id: string; archived: boolean }) => c.archived || s.ui.archiving[c.id] === true;
 export const baseName = (p: string) => p.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || p;
 
 export function focusedProvider(s: AppState): ProviderId | null {
@@ -66,7 +68,7 @@ const byRecent = (a: { updatedAt: string }, b: { updatedAt: string }) => (a.upda
 export function visibleChats(s: AppState, now: number = Date.now()): Chat[] {
   const focus = focusedProvider(s);
   return Object.values(s.chats)
-    .filter((c) => c.column !== null && !c.archived && !isSnoozed(c, now) && (!focus || c.provider === focus) && passes(c, s.ui.filters, now))
+    .filter((c) => c.column !== null && !isArchived(s, c) && !isSnoozed(c, now) && (!focus || c.provider === focus) && passes(c, s.ui.filters, now))
     .sort(byRecent);
 }
 
@@ -81,14 +83,14 @@ const toSidebar = (c: Chat): SidebarChat => ({
 });
 
 export function pinned(s: AppState, now: number = Date.now()): Chat[] {
-  return Object.values(s.chats).filter((c) => c.pinned && !c.archived && !isSnoozed(c, now)).sort(byRecent);
+  return Object.values(s.chats).filter((c) => c.pinned && !isArchived(s, c) && !isSnoozed(c, now)).sort(byRecent);
 }
 
 function sidebarChats(s: AppState, now: number): SidebarChat[] {
   const focus = focusedProvider(s);
   const known = new Set<string>();
   for (const c of Object.values(s.chats)) if (c.sessionRef) known.add(`${c.provider}\u0000${c.sessionRef}`);
-  const fromBoard = Object.values(s.chats).filter((c) => !c.archived && !c.pinned && !isSnoozed(c, now)).map(toSidebar);
+  const fromBoard = Object.values(s.chats).filter((c) => !isArchived(s, c) && !c.pinned && !isSnoozed(c, now)).map(toSidebar);
   const fromHistory: SidebarChat[] = s.history
     .filter((h) => !known.has(`${h.provider}\u0000${h.sessionRef}`))
     .map((h) => ({ key: `h:${h.provider}:${h.sessionRef}`, chatId: null, provider: h.provider, sessionRef: h.sessionRef, title: h.title, cwd: h.cwd, updatedAt: h.updatedAt, column: null, pinned: false }));

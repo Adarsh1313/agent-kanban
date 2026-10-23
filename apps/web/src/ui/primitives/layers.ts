@@ -1,8 +1,9 @@
 /**
- * The stack of open popovers and dialogs. Escape closes the top-most one; opening a popover closes any
- * other popover (one at a time), while a popover opened over a dialog leaves the dialog open.
+ * The stack of open popovers, dialogs and the chat panel. Escape closes the top-most one; opening a
+ * popover closes any other popover (one at a time), while a popover opened over a dialog or the panel
+ * leaves it open.
  */
-interface Layer { kind: 'popover' | 'dialog'; close: () => void }
+interface Layer { kind: 'popover' | 'dialog' | 'panel'; close: () => void }
 
 const stack: Layer[] = [];
 let listening = false;
@@ -26,4 +27,5 @@ export function pushLayer(kind: Layer['kind'], close: () => void): () => void {
   };
 }
 
-export const hasOpenLayer = (): boolean => stack.length > 0;
+/** A popover or dialog is open (the side panel does not count: shortcuts such as N still work beside it). */
+export const hasOpenLayer = (): boolean => stack.some((l) => l.kind !== 'panel');
