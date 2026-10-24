@@ -1,4 +1,4 @@
-import { focusedProvider, projectLabel } from '../../state/selectors.ts';
+import { focusedProvider } from '../../state/selectors.ts';
 import { useStore } from '../../state/store.ts';
 import { openNewChat } from '../actions.ts';
 import { Icon, providerName, type IconName } from '../primitives/index.ts';
@@ -19,7 +19,8 @@ export function TopBar() {
       const p = focusedProvider(s);
       return p ? providerName(p) : '';
     }
-    return s.ui.view === 'projects' && s.ui.projectId ? projectLabel(s, s.ui.projectId) : '';
+    // The Projects page has its own breadcrumb (design/projects.js clears the top bar's).
+    return '';
   });
   const meta = VIEW_META[view];
 

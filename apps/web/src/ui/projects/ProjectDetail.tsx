@@ -228,6 +228,14 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const [filter, setFilter] = useState<Filter>('all');
   const [swapped, setSwapped] = useState(0);
   const [showAll, setShowAll] = useState(false);
+  const listRef = useRef<HTMLDivElement>(null);
+  /** "Show N more" moves focus to the first row it revealed (the button itself goes away). */
+  const focusRevealed = useRef(false);
+  useEffect(() => {
+    if (!showAll || !focusRevealed.current) return;
+    focusRevealed.current = false;
+    listRef.current?.querySelectorAll<HTMLElement>('.crow')[CHATS_SHOWN]?.focus();
+  }, [showAll]);
 
   if (!project) {
     if (!loaded) return null;
@@ -252,10 +260,10 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
 
   return (
     <div className="page-inner">
-      <div className="crumbs">
+      <nav className="crumbs" aria-label="Breadcrumb">
         <button type="button" onClick={() => navigate('projects')}><Icon name="back" size="sm" />Projects</button>
-        <span aria-hidden="true">/</span><span>{project.name}</span>
-      </div>
+        <span aria-hidden="true">/</span><span aria-current="page">{project.name}</span>
+      </nav>
       <div className="page-head">
         <div className="t">
           <h2 className="page-title"><span className="folder-glyph big-glyph proj-glyph" aria-hidden="true">{(project.name || '?')[0]!.toUpperCase()}</span>{project.name}</h2>
@@ -277,12 +285,12 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
               </span>
             )}
           </h3>
-          <div className={`chat-list${swapped > 0 ? ' swapped' : ''}`} key={swapped}>
+          <div className={`chat-list${swapped > 0 ? ' swapped' : ''}`} key={swapped} ref={listRef}>
             {visible.length === 0
               ? <div className="page-empty chats-empty">{chats.length === 0 ? 'No chats in this project yet.' : 'No chats from this provider yet.'}</div>
               : visible.map((c, i) => <ChatRow key={c.key} c={c} now={now} index={i} swapped={swapped > 0} />)}
             {list.length > visible.length && (
-              <button className="chats-more" type="button" onClick={() => setShowAll(true)}>Show {list.length - visible.length} more</button>
+              <button className="chats-more" type="button" onClick={() => { focusRevealed.current = true; setShowAll(true); }}>Show {list.length - visible.length} more</button>
             )}
           </div>
         </div>

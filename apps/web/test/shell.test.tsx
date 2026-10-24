@@ -223,11 +223,18 @@ describe('Shell: routes', () => {
     expect(screen.getByRole('button', { name: /Projects/, current: 'page' })).toBeTruthy();
   });
 
-  it('#/projects/<path> shows the project name in the breadcrumb', async () => {
-    const store = seeded();
+  it('#/projects/<path>: the top bar says just "Projects"; the page\'s own breadcrumb and title name the project', async () => {
+    const path = 'C:\\Users\\me\\open-project';
+    const base = seeded().getState();
+    const store = createStore({ ...base, projects: [{ id: path, name: 'open-project', path, providers: [], columns: { running: 0, needs_you: 0, review: 0, done: 0 }, historyOnly: 0, lastActivityAt: '' }] });
     mount(store, <Shell />);
-    act(() => { location.hash = `#/projects/${encodeURIComponent('C:\\Users\\me\\open-project')}`; });
-    await waitFor(() => expect(screen.getByRole('heading', { level: 1 }).textContent).toContain('open-project'));
+    act(() => { location.hash = `#/projects/${encodeURIComponent(path)}`; });
+    await waitFor(() => expect(screen.getByRole('heading', { level: 2, name: 'open-project' }).textContent).toContain('open-project'));
+    const h1 = screen.getByRole('heading', { level: 1 });
+    expect(h1.textContent).toBe('Projects');
+    expect(h1.querySelector('.crumb')).toBeNull();
+    const crumbs = screen.getByRole('navigation', { name: 'Breadcrumb' });
+    expect(crumbs.querySelector('[aria-current="page"]')!.textContent).toBe('open-project');
     expect(store.getState().ui.view).toBe('projects');
     expect(store.getState().ui.projectId).toBe('C:\\Users\\me\\open-project');
   });

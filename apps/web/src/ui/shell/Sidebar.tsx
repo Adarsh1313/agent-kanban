@@ -2,6 +2,7 @@ import type { ProviderId } from '@agent-kanban/shared';
 import { useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
 import { focusedProvider, isArchived, isSnoozed, memoState, pinned as pinnedChats, providerCounts, recentChatsByProject, type SidebarChat } from '../../state/selectors.ts';
 import { openChatIn, type AppState } from '../../state/reducer.ts';
+import { uniqueProjects } from '../projects/model.ts';
 import { useStore, useStoreInstance } from '../../state/store.ts';
 import { openHistoryChat, openNewChat, openRowMenu } from '../actions.ts';
 import { Icon, Menu, MenuItem, PROVIDER_IDS, ProviderLogo, StatusIcon, Tooltip, providerName } from '../primitives/index.ts';
@@ -121,7 +122,7 @@ function Recent() {
             <div className="proj-row" role="button" tabIndex={0} title={`Open ${g.name}`} onClick={goProject} onKeyDown={onActivate(goProject)}>
               <span className="name">{g.name}</span>
               <Tooltip label={`New chat in ${g.name}`}>
-                <button className="add" type="button" aria-label={`New chat in ${g.name}`} onClick={(e) => { e.stopPropagation(); openNewChat({ cwd: g.projectId }); }}>
+                <button className="add" type="button" aria-label={`New chat in ${g.name}`} onClick={(e) => { e.stopPropagation(); openNewChat(g.projectId ? { cwd: g.projectId } : undefined); }}>
                   <Icon name="plus" size="sm" />
                 </button>
               </Tooltip>
@@ -164,7 +165,7 @@ const counts = (s: AppState) => {
     (c) => c.column !== null && c.column !== 'done' && !isArchived(s, c) && !isSnoozed(c, now),
   ).length;
   const connected = Object.values(s.connections).filter((c) => c?.status === 'connected' || c?.status === 'update_available').length;
-  return { board, projects: s.projects.filter((p) => p.id.trim() !== '').length, connections: connected };
+  return { board, projects: uniqueProjects(s).length, connections: connected };
 };
 
 export function Sidebar() {

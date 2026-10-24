@@ -7,7 +7,7 @@ import { createStore, StoreProvider, type Store } from '../src/state/store.ts';
 import { setHistoryHandler, setNewChatHandler } from '../src/ui/actions.ts';
 import { Toasts } from '../src/ui/primitives/toast.tsx';
 import { ProjectsPage, resetProjectsVisit } from '../src/ui/projects/ProjectsPage.tsx';
-import { folderKey, resetProjectInfoCache } from '../src/ui/projects/model.ts';
+import { chatsByFolder, folderKey, resetProjectInfoCache } from '../src/ui/projects/model.ts';
 import { chat } from './helpers.ts';
 
 vi.mock('../src/api/client.ts', async (orig) => {
@@ -40,6 +40,8 @@ function seeded(projects: Project[], chats: Chat[] = [], history: HistoryChat[] 
 const mount = (store: Store) => render(<StoreProvider store={store}><ProjectsPage /><Toasts /></StoreProvider>);
 const rows = () => [...document.querySelectorAll<HTMLAnchorElement>('a.prow')];
 const rowNames = () => rows().map((r) => r.querySelector('b')!.textContent);
+/** jsdom has no AnimationEvent, so React listens for the prefixed name there (browsers fire animationend). */
+const animationEnd = (el: Element) => fireEvent(el, new Event('webkitAnimationEnd', { bubbles: true }));
 const go = (store: Store, projectId: string | null) => act(() => store.setState((s) => ({ ...s, ui: { ...s.ui, projectId } })));
 
 const ALPHA = project('/work/alpha', ['claude'], ago(5));
@@ -91,6 +93,17 @@ describe('Projects list', () => {
     expect(rows()).toHaveLength(3);
   });
 
+  it('the same folder spelled differently is one row, counted once', () => {
+    const a = project('C:\\Users\\me\\app', ['claude'], ago(5));
+    const b = { ...project('C:/Users/me/app/', ['codex'], ago(1)), name: 'app-dup' };
+    const c = { ...project('c:\\users\\ME\\app', ['codex'], ago(2)), name: 'app-dup2' };
+    mount(seeded([a, b, c, BETA], [chat({ id: 'x', cwd: 'C:/Users/me/app' })]));
+    expect(rowNames()).toEqual(['app', 'beta']);
+    expect(screen.getByRole('heading', { name: /Projects/ }).textContent).toContain('2');
+    expect(rows()[0]!.querySelector('.legend')!.textContent).toBe('1 working');
+    expect(screen.getByRole('list', { name: 'Projects' }).querySelectorAll('li')).toHaveLength(2);
+  });
+
   it('with no projects shows the empty state', () => {
     mount(seeded([]));
     expect(screen.getByRole('heading', { name: 'No projects yet' })).toBeTruthy();
@@ -121,23 +134,26 @@ describe('Projects list', () => {
     const projects = Array.from({ length: 80 }, (_, i) => project(`/work/p${i}`, ['claude', 'codex'], ago(i)));
     const history = Array.from({ length: 1200 }, (_, i) => hist({ sessionRef: `h${i}`, cwd: `/work/p${i % 80}`, provider: i % 2 ? 'codex' : 'claude', updatedAt: ago(i) }));
     const store = seeded(projects, [], history);
-    let took = Infinity;
-    for (let i = 0; i < 3; i++) {
-      cleanup();
-      const t0 = performance.now();
-      mount(store);
-      took = Math.min(took, performance.now() - t0);
-    }
+    const t0 = performance.now();
+    mount(store); // cold: the chat index is built during this mount
+    const took = performance.now() - t0;
     expect(rows()).toHaveLength(80);
-    // ~175 ms alone in jsdom; the bound leaves room for a loaded machine running every suite at once.
     expect(took).toBeLessThan(1000);
     expect(mocked.projectInfo).not.toHaveBeenCalled();
+    // An unrelated change (a panel opening, a usage reading) reuses the index instead of regrouping 1 200 chats.
+    const before = chatsByFolder(store.getState());
+    act(() => store.setState((s) => ({ ...s, usage: {}, ui: { ...s.ui, openChatId: 'x' } })));
+    expect(chatsByFolder(store.getState())).toBe(before);
   });
 
-  it('rows rise in on the first visit only', () => {
+  it('rows rise in on the first visit only; a store update does not cut the rise short, the last row ending it does', () => {
     const store = seeded([ALPHA, BETA]);
     mount(store);
     expect(rows()[0]!.classList.contains('stagger')).toBe(true);
+    act(() => store.setState((s) => ({ ...s, now: s.now + 30_000 })));
+    expect(rows()[0]!.classList.contains('stagger')).toBe(true);
+    animationEnd(rows()[1]!);
+    expect(rows()[0]!.classList.contains('stagger')).toBe(false);
     cleanup();
     mount(store);
     expect(rows()[0]!.classList.contains('stagger')).toBe(false);
@@ -172,6 +188,45 @@ describe('Project detail', () => {
     expect(newChat).toHaveBeenLastCalledWith({ cwd: '/work/beta', provider: 'codex' });
     fireEvent.click(screen.getByRole('button', { name: 'New chat' }));
     expect(newChat).toHaveBeenLastCalledWith({ cwd: '/work/beta' });
+  });
+
+  it('"worked with" comes from the live chats; the server list only when the folder has none', () => {
+    // The server says Codex worked here, but no Codex chat is left (archived): no "0 chats" card.
+    mount(seeded([BETA], [chat({ id: 'a', cwd: '/work/beta' }), chat({ id: 'b', cwd: '/work/beta', provider: 'codex', sessionRef: 's9', archived: true })], [], '/work/beta'));
+    let cards = [...document.querySelectorAll('.know')];
+    expect(cards[0]!.classList.contains('off')).toBe(false);
+    expect(cards[1]!.classList.contains('off')).toBe(true);
+    expect(document.body.textContent).not.toContain('0 chats');
+    cleanup();
+    mount(seeded([BETA], [], [], '/work/beta'));
+    cards = [...document.querySelectorAll('.know')];
+    expect(cards.map((c) => c.classList.contains('off'))).toEqual([false, false, true]);
+  });
+
+  it('breadcrumb is a nav with the project as the current page; "Show N more" focuses the first revealed row', () => {
+    const many = Array.from({ length: 55 }, (_, i) => hist({ sessionRef: `h${i}`, title: `Chat ${i}`, updatedAt: ago(i + 1) }));
+    mount(seeded([BETA], [], many, '/work/beta'));
+    const nav = screen.getByRole('navigation', { name: 'Breadcrumb' });
+    expect(nav.querySelector('[aria-current="page"]')!.textContent).toBe('beta');
+    expect(document.querySelectorAll('.crow')).toHaveLength(50);
+    fireEvent.click(screen.getByRole('button', { name: 'Show 5 more' }));
+    expect(document.querySelectorAll('.crow')).toHaveLength(55);
+    expect(document.activeElement).toBe(document.querySelectorAll('.crow')[50]);
+    expect(document.activeElement!.textContent).toContain('Chat 50');
+  });
+
+  it('the page slide is latched: a store update keeps it, its animationend clears it', () => {
+    const store = seeded([BETA]);
+    mount(store);
+    go(store, '/work/beta');
+    const page = () => document.querySelector<HTMLElement>('.projects-page')!;
+    expect(page().classList.contains('entering')).toBe(true);
+    act(() => store.setState((s) => ({ ...s, now: s.now + 30_000 })));
+    expect(page().classList.contains('entering')).toBe(true);
+    animationEnd(page());
+    expect(page().classList.contains('entering')).toBe(false);
+    go(store, null);
+    expect(page().className).toContain('entering from-left');
   });
 
   it('chats: needs-you first; a board chat opens in the panel, a history chat through openHistoryChat; the provider filter narrows the list', async () => {

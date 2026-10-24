@@ -6,7 +6,7 @@ import { openNewChat } from '../actions.ts';
 import { Icon, PROVIDER_IDS, ProviderLogo, providerName, StatusIcon, Tooltip } from '../primitives/index.ts';
 import { hashFor } from '../shell/route.ts';
 import { ProjectDetail } from './ProjectDetail.tsx';
-import { agoLabel, chatsByFolder, folderKey, plural, statsOf, workedWith, type ProjectStats } from './model.ts';
+import { agoLabel, chatsByFolder, folderKey, plural, statsOf, uniqueProjects, workedWith, type ProjectStats } from './model.ts';
 
 type Sort = 'name' | 'activity';
 
@@ -22,8 +22,6 @@ const BAR: [Column, string][] = [
 ];
 const LEGEND: [Column, string][] = [['running', 'working'], ['needs_you', 'need you'], ['review', 'to review']];
 
-/** Folders a chat can live in (history can carry chats with no folder; those have no page). */
-const usable = (s: AppState) => s.projects.filter((p) => p.id.trim() !== '');
 
 function StatusBar({ stats }: { stats: ProjectStats }) {
   const total = stats.total || 1;
@@ -49,7 +47,7 @@ function ProjectRow({ row, now, stagger }: { row: Row; now: number; stagger: num
   const { project, stats } = row;
   const style: CSSProperties | undefined = stagger === null ? undefined : { animationDelay: `calc(var(--stagger) * ${Math.min(stagger, STAGGER_ROWS)})` };
   return (
-    <a className={`prow${stagger === null ? '' : ' stagger'}`} style={style} href={hashFor('projects', project.id)}>
+    <li><a className={`prow${stagger === null ? '' : ' stagger'}`} style={style} href={hashFor('projects', project.id)}>
       <div className="name">
         <span className="folder-glyph big-glyph proj-glyph" aria-hidden="true">{(project.name || '?')[0]!.toUpperCase()}</span>
         <span><b>{project.name}</b><small>{project.path}</small></span>
@@ -67,19 +65,21 @@ function ProjectRow({ row, now, stagger }: { row: Row; now: number; stagger: num
       <StatusBar stats={stats} />
       <div className="when">{agoLabel(row.lastAt, now)}</div>
       <div className="go" aria-hidden="true"><Icon name="chevron-right" /></div>
-    </a>
+    </a></li>
   );
 }
 
-const listState = (s: AppState) => ({ projects: usable(s), index: chatsByFolder(s), now: s.now, loaded: s.loaded });
+const listState = (s: AppState) => ({ projects: uniqueProjects(s), index: chatsByFolder(s), now: s.now, loaded: s.loaded });
 
 function ProjectList() {
   const { projects, index, now, loaded } = useStore(listState);
-  const [q, setQ] = useState('');
-  const [sort, setSort] = useState<Sort>('activity');
-  const [stagger] = useState(() => !visited);
-  const firstPaint = useRef(true);
-  useEffect(() => { visited = true; firstPaint.current = false; }, []);
+  const [q, setQuery] = useState('');
+  const [sort, setSortKey] = useState<Sort>('activity');
+  // Latched at mount so a store update can't cut the rise short; cleared when the last row has risen, or by a sort or search.
+  const [stagger, setStagger] = useState(() => !visited);
+  useEffect(() => { visited = true; }, []);
+  const setQ = (v: string) => { setStagger(false); setQuery(v); };
+  const setSort = (v: Sort) => { setStagger(false); setSortKey(v); };
 
   const needle = q.trim().toLowerCase();
   const rows: Row[] = projects
@@ -91,7 +91,7 @@ function ProjectList() {
     .sort(sort === 'name'
       ? (a, b) => a.project.name.localeCompare(b.project.name, undefined, { sensitivity: 'base' })
       : (a, b) => (a.lastAt < b.lastAt ? 1 : a.lastAt > b.lastAt ? -1 : a.project.name.localeCompare(b.project.name)));
-  const animate = stagger && firstPaint.current && !needle;
+  const animate = stagger && !needle;
 
   const sortButton = (key: Sort, label: string) => (
     <button type="button" aria-pressed={sort === key} aria-label={`Sort by ${label.toLowerCase()}`} onClick={() => setSort(key)}>
@@ -128,13 +128,29 @@ function ProjectList() {
           <button className="btn" type="button" onClick={() => setQ('')}>Clear search</button>
         </div>
       ) : (
-        <div className="plist" aria-label="Projects">
+        <div className="plist">
           <div className="plist-head">
             {sortButton('name', 'Project')}<span>Worked on with</span><span>Chats</span>{sortButton('activity', 'Last activity')}<span />
           </div>
-          {rows.map((row, i) => <ProjectRow key={row.project.id} row={row} now={now} stagger={animate ? i : null} />)}
+          <ul className="plist-rows" aria-label="Projects"
+            onAnimationEnd={(e) => { if (animate && (e.target as Element).closest('li') === e.currentTarget.lastElementChild) setStagger(false); }}>
+            {rows.map((row, i) => <ProjectRow key={row.project.id} row={row} now={now} stagger={animate ? i : null} />)}
+          </ul>
         </div>
       )}
+    </div>
+  );
+}
+
+type Slide = 'in' | 'back' | null;
+
+/** One page (list or a project). The slide is latched at mount and cleared when it ends, so a re-render can't cut it short. */
+function ProjectsView({ projectId, slide }: { projectId: string | null; slide: Slide }) {
+  const [anim, setAnim] = useState<Slide>(slide);
+  return (
+    <div className={`view page projects-page${anim ? ` entering${anim === 'back' ? ' from-left' : ''}` : ''}`}
+      onAnimationEnd={(e) => { if (e.target === e.currentTarget) setAnim(null); }}>
+      {projectId === null ? <ProjectList /> : <ProjectDetail projectId={projectId} />}
     </div>
   );
 }
@@ -144,13 +160,7 @@ export function ProjectsPage() {
   const projectId = useStore((s) => s.ui.projectId);
   const prev = useRef(projectId);
   const changed = prev.current !== projectId;
-  const back = changed && projectId === null;
   useEffect(() => { prev.current = projectId; });
-  const pageRef = useRef<HTMLDivElement>(null);
-  useEffect(() => { pageRef.current?.scrollTo?.(0, 0); }, [projectId]);
-  return (
-    <div ref={pageRef} key={projectId ?? ''} className={`view page projects-page${changed ? ` entering${back ? ' from-left' : ''}` : ''}`}>
-      {projectId === null ? <ProjectList /> : <ProjectDetail projectId={projectId} />}
-    </div>
-  );
+  // A fresh view per page (keyed), so the scroll starts at the top.
+  return <ProjectsView key={projectId ?? ''} projectId={projectId} slide={changed ? (projectId === null ? 'back' : 'in') : null} />;
 }

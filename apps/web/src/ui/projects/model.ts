@@ -89,10 +89,30 @@ export function statsOf(list: ProjectChat[]): ProjectStats {
   return { total: list.length, columns, quiet: list.length - onBoard, providers, lastAt };
 }
 
-/** Providers that have worked in a project: any chat there, or the server lists them. */
+/**
+ * Providers that have worked in a project, from its live chats; the server's list only when the store has
+ * no chat there at all (so a provider card never says "0 chats").
+ */
 export function workedWith(project: Project, stats: ProjectStats, ids: ProviderId[]): ProviderId[] {
-  return ids.filter((id) => stats.providers[id] || project.providers.some((p) => p.provider === id));
+  if (stats.total > 0) return ids.filter((id) => stats.providers[id]);
+  return ids.filter((id) => project.providers.some((p) => p.provider === id));
 }
+
+/**
+ * The projects with a page: one per folder however it is spelled (C:, C:/a and C:\ are one row; the first
+ * entry wins), and none for the empty folder history can carry.
+ */
+function dedupe(projects: Project[]): Project[] {
+  const seen = new Set<string>();
+  return projects.filter((p) => {
+    if (p.id.trim() === '') return false;
+    const k = folderKey(p.id);
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+}
+export const uniqueProjects = memoState((s) => [s.projects], (s) => dedupe(s.projects));
 
 /** The project a route's id points at (the sidebar links by a chat's folder, which may be spelled differently). */
 export function findByFolder(projects: Project[], id: string): Project | undefined {
