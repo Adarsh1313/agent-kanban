@@ -48,6 +48,14 @@ export function chipLabel(id: ProviderId, r: UsageReading | undefined, installed
   return `${name}: ${text}${r?.status === 'error' ? ' (last numbers we had)' : ''}`;
 }
 
+/** "82% of 5-hour · 64% of weekly left" (or the chip's note, e.g. "Not signed in"). */
+export function usageSummary(r: UsageReading | undefined, installed = true): string {
+  const note = chipNote(r, installed);
+  if (note) return note;
+  const parts = [['5-hour', windowOf(r, 'five_hour')], ['weekly', windowOf(r, 'weekly')]] as const;
+  return `${parts.filter(([, w]) => w).map(([n, w]) => `${pct(w!.leftPct)} of ${n}`).join(' · ')} left`;
+}
+
 /**
  * "Resets 2:40 pm" today, "Resets Thu 9:00 am" within the week, "Resets Nov 21" further out (a weekday alone
  * would be ambiguous); null when the provider gave no reset time.

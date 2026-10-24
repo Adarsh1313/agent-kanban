@@ -26,11 +26,6 @@ html, body { overflow: hidden; }
 .conn-banner { flex: none; padding: var(--space-2) var(--space-4); font-size: var(--text-body); color: var(--color-text-muted); background: var(--color-control); border-bottom: 1px solid var(--color-border); }
 .conn-banner[data-state="unauthorized"] { color: var(--color-needs-text); background: var(--color-needs-soft); }
 
-/* Placeholder until the Connections task fills it */
-.placeholder { flex: 1; display: grid; place-content: center; gap: var(--space-2); text-align: center; color: var(--color-text-muted); }
-.placeholder h2 { margin: 0; font-size: var(--text-title); font-weight: var(--weight-semibold); color: var(--color-text); }
-.placeholder p { margin: 0; }
-
 /* Board: each card sits in a stable slot the board moves between columns (FLIP keeps the same node) */
 .col-cards, .card-slot { display: contents; }
 .card[aria-current="true"] { border-color: var(--color-ink); }
@@ -101,6 +96,11 @@ button.usage-focus { color: inherit; transition: background-color var(--duration
   .refresh .icon.spinning { animation: none; }
   .meter .fill, .minimeter i::after, .usage-focus .m i::after { transition: none; }
 }
+
+/* Connections (read-only cards; design/connections.js) */
+.conn-update { color: var(--color-running); }
+.conn-checked { color: var(--color-text-faint); font-size: var(--text-caption); }
+.conn-head .logo { flex: none; }
 
 @media (max-width: 900px) { .sidebar { display: none; } }
 @media (max-width: 640px) { .usage-area .pct, .topbar .new-label, .usage-focus .m span { display: none; } }

@@ -3,6 +3,7 @@ import type { AppState } from '../../state/reducer.ts';
 import { useStore, useStoreInstance, type Store } from '../../state/store.ts';
 import { openFilter, openNewChat } from '../actions.ts';
 import { Board } from '../board/Board.tsx';
+import { ConnectionsPage } from '../connections/ConnectionsPage.tsx';
 import { ChatPanel } from '../chat/ChatPanel.tsx';
 import { FilterBar } from '../filters/FilterBar.tsx';
 import { NewChatDialog } from '../newchat/NewChatDialog.tsx';
@@ -60,10 +61,6 @@ function useShortcuts() {
   }, []);
 }
 
-const Placeholder = ({ title }: { title: string }) => (
-  <div className="placeholder"><h2>{title}</h2><p>This page is on its way.</p></div>
-);
-
 export function Shell() {
   const store = useStoreInstance();
   const view = useStore((s) => s.ui.view);
@@ -89,7 +86,7 @@ export function Shell() {
           <main className={`view main-view${entering ? ' entering' : ''}`} key={view} id="main" tabIndex={-1} data-view={view}>
             {view === 'board' && <><FilterBar /><Board /></>}
             {view === 'projects' && <ProjectsPage />}
-            {view === 'connections' && <Placeholder title="Connections" />}
+            {view === 'connections' && <ConnectionsPage />}
           </main>
         </div>
       </div>
