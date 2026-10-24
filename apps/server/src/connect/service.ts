@@ -16,6 +16,10 @@ const LOGOUT_TIMEOUT_MS = 60_000;
 // Antigravity's agent takes ~40 s to start before it can sign out.
 const ANTIGRAVITY_SIGN_OUT_TIMEOUT_MS = 3 * 60_000;
 const KILL_WAIT_MS = 5_000;
+// A global npm install that hasn't finished in 15 minutes is stuck (usually the network).
+export const NPM_TIMEOUT_MS = 15 * 60_000;
+// After an update, an adapter with a chat running on it is replaced once that chat is done.
+export const RECYCLE_RETRY_MS = 30_000;
 const MAX_OUTPUT = 256 * 1024;
 const MAX_LINE = 64 * 1024;
 
@@ -43,6 +47,15 @@ export interface AntigravityAuth {
   signIn(onUrl: (url: string) => void, signal: AbortSignal): Promise<void>;
   /** false: the agent has no logout method. */
   signOut(signal: AbortSignal): Promise<boolean>;
+  /** False while a chat, sign-in or anything else runs on the agent. */
+  isIdle?(): boolean;
+}
+
+/** What ConnectService needs from an adapter after its provider was updated. */
+export interface UpdatableAdapter {
+  isIdle?(): boolean;
+  /** Replace the helper process so the next chat runs the new version; false if something still runs on it. */
+  restartIfIdle?(): Promise<boolean>;
 }
 
 export interface ConnectServiceOptions {
@@ -56,7 +69,7 @@ export interface ConnectServiceOptions {
   };
   openBrowser: (url: string) => void;
   monitor: { check: (provider?: ProviderId) => Promise<unknown> };
-  registry: { ensure: (id: ProviderId, knownPath?: string) => Promise<unknown> };
+  registry: { ensure: (id: ProviderId, knownPath?: string) => Promise<UpdatableAdapter | undefined> };
   onUpdate: (s: ConnectState) => void;
   /** Agent Kanban's home (AGENT_KANBAN_HOME): the Antigravity install goes under <home>/.agent-kanban. */
   home: string;
@@ -70,20 +83,31 @@ const isCli = (id: ProviderId): id is Cli => id === 'claude' || id === 'codex';
 class Cancelled extends Error {}
 class TimedOut extends Error {}
 
+/** The only hosts a provider's sign-in page may be on (exact hostnames). Any other link is never stored. */
+export const SIGN_IN_HOSTS: Record<ProviderId, readonly string[]> = {
+  claude: ['claude.ai', 'claude.com', 'console.anthropic.com'],
+  codex: ['auth.openai.com'],
+  antigravity: ['accounts.google.com'],
+};
+
 /**
- * The first https link in a line of a tool's output, normalised, or null. ANSI colour and OSC sequences are
- * removed first; trailing punctuation is not part of the link.
+ * The first https link in a line of a tool's output whose hostname is exactly one of `hosts`, normalised,
+ * or null. ANSI colour and OSC sequences are removed first; trailing punctuation is not part of the link.
+ * Links with a user name or password, or that aren't printable ASCII, are skipped.
  */
-export function findHttpsUrl(line: string): string | null {
+export function findHttpsUrl(line: string, hosts: readonly string[]): string | null {
   // eslint-disable-next-line no-control-regex
   const plain = line.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '').replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '');
-  const m = /https:\/\/[!-~]+/.exec(plain);
-  if (!m) return null;
-  const raw = m[0].replace(/["'<>`]+.*$/, '').replace(/[)\].,;:!?]+$/, '');
-  let u: URL;
-  try { u = new URL(raw); } catch { return null; }
-  if (u.protocol !== 'https:' || u.username || u.password || !u.hostname) return null;
-  return u.href;
+  for (const m of plain.matchAll(/https:\/\/[!-~]+/g)) {
+    const raw = m[0].replace(/["'<>`]+.*$/, '').replace(/[)\].,;:!?]+$/, '');
+    let u: URL;
+    try { u = new URL(raw); } catch { continue; }
+    if (u.protocol !== 'https:' || u.username || u.password || u.port) continue;
+    if (!hosts.includes(u.hostname)) continue;
+    if (!/^[!-~]+$/.test(u.href)) continue;
+    return u.href;
+  }
+  return null;
 }
 
 function errCodes(err: unknown): string[] {
@@ -100,21 +124,39 @@ const PERMISSION_RE = /\b(EACCES|EPERM)\b/;
 const NETWORK_RE = /\b(ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ECONNRESET|ETIMEDOUT|ENETUNREACH|EHOSTUNREACH|ERR_SOCKET_TIMEOUT)\b|network request|socket hang up/i;
 const NETWORK_CODES = new Set(['ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED', 'ENETUNREACH', 'EHOSTUNREACH', 'UND_ERR_CONNECT_TIMEOUT']);
 
-/** Plain copy for a failed `npm install -g`. */
+const NPM_NETWORK_CODES = new Set([
+  'ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED', 'ECONNRESET', 'ECONNABORTED', 'ETIMEDOUT', 'ENETUNREACH', 'EHOSTUNREACH',
+  'ERR_SOCKET_TIMEOUT', 'EPROTO', 'UNABLE_TO_GET_ISSUER_CERT_LOCALLY', 'SELF_SIGNED_CERT_IN_CHAIN',
+]);
+
+/**
+ * Plain copy for a failed `npm install -g`. npm's own "npm error code X" (or "npm ERR! code X") line decides
+ * when there is one; stray words elsewhere in the log (e.g. an EPERM cleanup warning) don't.
+ */
 export function npmFailureMessage(id: ProviderId, output: string, errorCode?: string): string {
   if (errorCode === 'ENOENT') return npmMissing(id);
-  if ((errorCode && PERMISSION_RE.test(errorCode)) || PERMISSION_RE.test(output)) return notAllowed(id);
+  if (errorCode && PERMISSION_RE.test(errorCode)) return notAllowed(id);
+  const code = /npm (?:ERR!|error) code (\w+)/.exec(output)?.[1];
+  if (code) {
+    if (code === 'EACCES' || code === 'EPERM') return notAllowed(id);
+    if (NPM_NETWORK_CODES.has(code)) return NETWORK_FAILED;
+    return installFailed(id);
+  }
+  if (PERMISSION_RE.test(output)) return notAllowed(id);
   if (NETWORK_RE.test(output)) return NETWORK_FAILED;
   return installFailed(id);
 }
 
-interface Op { ac: AbortController }
+interface Op { ac: AbortController; done?: Promise<void> }
 
 export class ConnectService {
   private opts: ConnectServiceOptions;
   private now: () => Date;
   private state = new Map<ProviderId, ConnectState>();
   private ops = new Map<ProviderId, Op>();
+  /** Providers updated while a chat ran on them: their adapter is replaced once idle. */
+  private recycleTimers = new Map<ProviderId, NodeJS.Timeout>();
+  private disposed = false;
 
   constructor(opts: ConnectServiceOptions) {
     this.opts = opts;
@@ -131,7 +173,17 @@ export class ConnectService {
   install(id: ProviderId): ConnectState { return this.start(id, 'installing', (op) => this.doInstall(id, op, 'installing')); }
   update(id: ProviderId): ConnectState { return this.start(id, 'updating', (op) => this.doInstall(id, op, 'updating')); }
   signIn(id: ProviderId): ConnectState { return this.start(id, 'signing_in', (op) => (isCli(id) ? this.doCliSignIn(id, op) : this.doAntigravitySignIn(op))); }
-  signOut(id: ProviderId): ConnectState { return this.start(id, 'signing_out', (op) => this.doSignOut(id, op)); }
+  /**
+   * Antigravity signs out through its agent, which drops every session: refused (busy) while a chat or
+   * anything else runs on it, rather than cutting that off.
+   */
+  async signOut(id: ProviderId): Promise<ConnectState> {
+    if (id === 'antigravity' && !this.ops.has(id)) {
+      const a = await this.opts.antigravity.adapter().catch(() => undefined);
+      if (a?.isIdle && !a.isIdle()) throw new ConnectBusyError(busyMessage(id));
+    }
+    return this.start(id, 'signing_out', (op) => this.doSignOut(id, op));
+  }
 
   /** Stops the running operation (its processes are killed); nothing running is fine. */
   cancel(id: ProviderId): ConnectState {
@@ -148,8 +200,17 @@ export class ConnectService {
     return s;
   }
 
-  /** Cancels everything (server shutdown). */
-  dispose(): void { for (const id of PROVIDERS) this.cancel(id); }
+  /** Cancels everything (server shutdown) and waits, bounded, until their processes are gone. */
+  async dispose(): Promise<void> {
+    this.disposed = true;
+    for (const t of this.recycleTimers.values()) clearTimeout(t);
+    this.recycleTimers.clear();
+    const running = [...this.ops.values()].map((op) => op.done ?? Promise.resolve());
+    for (const id of PROVIDERS) this.cancel(id);
+    let t: NodeJS.Timeout | undefined;
+    await Promise.race([Promise.allSettled(running), new Promise<void>((r) => { t = setTimeout(r, KILL_WAIT_MS * 2); })]);
+    clearTimeout(t);
+  }
 
   // ---- plumbing ----
 
@@ -164,7 +225,7 @@ export class ConnectService {
     const op: Op = { ac: new AbortController() };
     this.ops.set(id, op);
     this.set(id, { phase, step: null, progress: null, signInUrl: null, message: null });
-    void job(op).catch((e) => {
+    op.done = job(op).catch((e) => {
       console.error(`[agent-kanban] ${APP[id]} ${phase} failed`, e);
       if (this.ops.get(id) === op) this.finish(id, op, { phase: 'error', message: phase === 'signing_in' ? SIGN_IN_DIDNT_FINISH : 'Something went wrong. Try again.' });
     });
@@ -245,6 +306,7 @@ export class ConnectService {
     let r;
     try {
       r = await this.exec(npm, ['install', '-g', `${NPM_PACKAGE[id]}@latest`, '--loglevel', 'http', '--no-fund', '--no-audit'], signal, {
+        timeoutMs: NPM_TIMEOUT_MS,
         onOutput: (t) => {
           const n = (t.match(/\bhttp fetch\b/g) ?? []).length;
           if (n === 0) return;
@@ -256,13 +318,16 @@ export class ConnectService {
       return this.finishAborted(id, op);
     }
     if (signal.aborted) return this.finishAborted(id, op);
+    if (r.timedOut) return this.finish(id, op, { phase: 'error', message: NETWORK_FAILED });
     if (r.code !== 0) return this.finish(id, op, { phase: 'error', message: npmFailureMessage(id, r.output, r.errorCode) });
 
     this.set(id, { step: 'Installing', progress: 0.9 });
     const bin = await this.opts.findBinary(id).catch(() => null);
     if (signal.aborted) return this.finishAborted(id, op);
     if (!bin) return this.finish(id, op, { phase: 'error', message: notFoundAfterInstall(id) });
-    await this.opts.registry.ensure(id, bin).catch(() => {});
+    const adapter = await this.opts.registry.ensure(id, bin).catch(() => undefined);
+    // The path is usually unchanged, so the registry keeps the same adapter: replace its helper process.
+    if (phase === 'updating' && adapter) await this.recycleWhenIdle(id, adapter);
     this.finish(id, op, { phase: 'idle' });
   }
 
@@ -330,7 +395,7 @@ export class ConnectService {
         const lines = pending.split(/\r?\n|\r/);
         pending = lines.pop() ?? '';
         for (const line of lines) {
-          const url = findHttpsUrl(line);
+          const url = findHttpsUrl(line, SIGN_IN_HOSTS[id]); // other links (e.g. release notes) are skipped
           if (url) { found = true; if (!signal.aborted) this.set(id, { signInUrl: url }); return; }
         }
       });
@@ -351,9 +416,11 @@ export class ConnectService {
     } finally {
       clearTimeout(deadline);
       signal.removeEventListener('abort', killLogin);
+      // However this ends (done, cancelled, out of time, or an unexpected error), no login process is left.
+      const proc = login as RunningCommand | null;
+      if (proc) { proc.kill(); await this.settle(proc); }
     }
-    // Cancelled or out of time: the login process is gone before the card goes back to Signed out.
-    if (login) { (login as RunningCommand).kill(); await this.settle(login); }
+    // Cancelled or out of time: the card goes back to Signed out.
     this.finishAborted(id, op);
   }
 
@@ -369,7 +436,7 @@ export class ConnectService {
     try {
       // The agent opens the browser itself; the link is kept only for "Open the browser again".
       await adapter.signIn((url) => {
-        const href = findHttpsUrl(url);
+        const href = findHttpsUrl(url, SIGN_IN_HOSTS.antigravity);
         if (href && !signal.aborted && this.ops.get(id) === op) this.set(id, { signInUrl: href });
       }, signal);
       if (signal.aborted) return this.finishAborted(id, op);
@@ -416,6 +483,22 @@ export class ConnectService {
     }
     if (signal.aborted) return this.finishAborted(id, op);
     this.finish(id, op, r.code === 0 ? { phase: 'idle' } : { phase: 'error', message: signOutFailed(id) });
+  }
+
+  /**
+   * After an update: replace the adapter's long-lived process now if nothing runs on it, otherwise keep
+   * trying every 30 s until it is idle, so the next chat runs the new version.
+   */
+  private async recycleWhenIdle(id: ProviderId, adapter: UpdatableAdapter): Promise<void> {
+    const pending = this.recycleTimers.get(id);
+    if (pending) { clearTimeout(pending); this.recycleTimers.delete(id); }
+    if (!adapter.restartIfIdle || this.disposed) return;
+    let done = false;
+    if (!adapter.isIdle || adapter.isIdle()) done = await adapter.restartIfIdle().catch(() => false);
+    if (done || (adapter.isIdle && adapter.isIdle())) return; // idle: nothing old left to replace
+    const t = setTimeout(() => { this.recycleTimers.delete(id); void this.recycleWhenIdle(id, adapter); }, RECYCLE_RETRY_MS);
+    t.unref?.();
+    this.recycleTimers.set(id, t);
   }
 
   // ---- timing helpers ----

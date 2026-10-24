@@ -7,9 +7,9 @@ import type { AddressInfo } from 'node:net';
 import type { ConnectState, ProviderId } from '@agent-kanban/shared';
 import {
   ConnectService, ConnectBusyError, SIGN_IN_TIMEOUT_MS, POLL_MS, SIGN_IN_DIDNT_FINISH, NETWORK_FAILED,
-  ANTIGRAVITY_SIGN_OUT_IN_APP, findHttpsUrl,
+  ANTIGRAVITY_SIGN_OUT_IN_APP, findHttpsUrl, SIGN_IN_HOSTS, NPM_TIMEOUT_MS, RECYCLE_RETRY_MS, npmFailureMessage,
 } from '../src/connect/service.ts';
-import type { AntigravityAuth } from '../src/connect/service.ts';
+import type { AntigravityAuth, UpdatableAdapter } from '../src/connect/service.ts';
 import type { CommandExit, CommandRunner, RunningCommand } from '../src/connect/run.ts';
 import { commandTarget, spawnCommand } from '../src/connect/run.ts';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
@@ -61,6 +61,8 @@ function make(opts: {
   adapter?: AntigravityAuth;
   /** false: claude / codex are found only after an npm install finished. */
   installed?: boolean;
+  /** What registry.ensure returns (default: no adapter). */
+  registryAdapter?: UpdatableAdapter;
 }) {
   const r = fakeRunner(opts.script);
   const updates: ConnectState[] = [];
@@ -81,7 +83,7 @@ function make(opts: {
     },
     openBrowser: (u) => { opened.push(u); },
     monitor: { check: async (id) => { checks.push(id); return []; } },
-    registry: { ensure: async (id, p) => { ensured.push([id, p]); return undefined; } },
+    registry: { ensure: async (id, p) => { ensured.push([id, p]); return opts.registryAdapter; } },
     onUpdate: (s) => updates.push(s),
     home: '/nonexistent-ak-home',
   });
@@ -314,12 +316,21 @@ test('"Open the browser again" opens only the captured https link', async (t) =>
   await flush();
 });
 
-test('findHttpsUrl: first https link, ANSI removed, trailing punctuation dropped, http ignored', () => {
-  assert.equal(findHttpsUrl('visit \x1b[4mhttps://claude.ai/x?a=1&b=2\x1b[0m.'), 'https://claude.ai/x?a=1&b=2');
-  assert.equal(findHttpsUrl('(https://example.com/a)'), 'https://example.com/a');
-  assert.equal(findHttpsUrl('go to http://localhost:1455/callback'), null);
-  assert.equal(findHttpsUrl('"https://a.example/b"'), 'https://a.example/b');
-  assert.equal(findHttpsUrl('nothing here'), null);
+test('findHttpsUrl: first allowed https link, ANSI removed, trailing punctuation dropped, others ignored', () => {
+  const claude = SIGN_IN_HOSTS.claude;
+  assert.equal(findHttpsUrl('visit \x1b[4mhttps://claude.ai/x?a=1&b=2\x1b[0m.', claude), 'https://claude.ai/x?a=1&b=2');
+  assert.equal(findHttpsUrl('(https://claude.com/a)', claude), 'https://claude.com/a');
+  assert.equal(findHttpsUrl('"https://console.anthropic.com/b"', claude), 'https://console.anthropic.com/b');
+  assert.equal(findHttpsUrl('go to http://claude.ai/callback', claude), null);
+  assert.equal(findHttpsUrl('nothing here', claude), null);
+  // exact hostnames only: no look-alikes, subdomains, user info or ports
+  for (const bad of ['https://claude.ai.evil.com/x', 'https://evil.claude.ai/x', 'https://user@claude.ai/x', 'https://claude.ai:8443/x', 'https://example.com/a']) {
+    assert.equal(findHttpsUrl(bad, claude), null, bad);
+  }
+  assert.equal(findHttpsUrl('see https://github.com/x then https://claude.ai/ok', claude), 'https://claude.ai/ok');
+  assert.equal(findHttpsUrl('https://auth.openai.com/oauth/authorize?x=1', SIGN_IN_HOSTS.codex), 'https://auth.openai.com/oauth/authorize?x=1');
+  assert.equal(findHttpsUrl('https://auth.openai.com/oauth/authorize?x=1', claude), null);
+  assert.equal(SIGN_IN_HOSTS.antigravity.join(), 'accounts.google.com');
 });
 
 test('sign out: `claude auth logout` / `codex logout`', async () => {
@@ -542,4 +553,170 @@ test('spawnCommand: streams output and kill ends the process', async () => {
   assert.notEqual(r.code, 0);
   const missing = await spawnCommand(join(tmpdir(), 'ak-no-such-binary-xyz'), []).exited;
   assert.equal(missing.errorCode, 'ENOENT');
+});
+
+// ---- fix round 1 ----
+
+test('sign-in link: a foreign https line (release notice) is skipped and the real link is captured', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const out = 'A new version of Codex is available: https://github.com/openai/codex/releases/latest\n'
+    + `If your browser did not open, navigate to this URL to authenticate: ${CODEX_URL}\n`;
+  const c = make({ script: loginScript('codex', () => false, out) });
+  c.svc.signIn('codex');
+  await flush();
+  assert.equal(c.last('codex').signInUrl, new URL(CODEX_URL).href);
+  assert.ok(!c.updates.some((u) => u.signInUrl?.includes('github.com')), 'the foreign link was never stored');
+  c.svc.cancel('codex');
+  await flush();
+});
+
+test('sign-in link: output with only foreign links stores nothing and there is nothing to reopen', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const c = make({ script: loginScript('codex', () => false, 'Visit https://evil.example/login or https://auth.openai.com.evil.io/x\n') });
+  c.svc.signIn('codex');
+  await flush();
+  assert.equal(c.last('codex').signInUrl, null);
+  assert.ok(c.updates.every((u) => u.signInUrl === null));
+  assert.throws(() => c.svc.openSignInPage('codex'), /no sign-in page/);
+  assert.deepEqual(c.opened, []);
+  c.svc.cancel('codex');
+  await flush();
+});
+
+test('Antigravity: a sign-in link off accounts.google.com is not stored', async () => {
+  const { adapter } = fakeAdapter({ url: 'https://accounts.google.com.evil.io/o/oauth2/v2/auth?x=1', hang: true });
+  const c = make({ script: () => ({}), adapter });
+  c.svc.signIn('antigravity');
+  await flush();
+  assert.ok(c.updates.every((u) => u.signInUrl === null));
+  c.svc.cancel('antigravity');
+  await flush();
+});
+
+function spyAdapter(idle: () => boolean) {
+  const calls = { restarts: 0 };
+  const adapter: UpdatableAdapter = {
+    isIdle: idle,
+    restartIfIdle: async () => { if (!idle()) return false; calls.restarts++; return true; },
+  };
+  return { adapter, calls };
+}
+
+test('update replaces the (same-path) adapter\'s process so the next chat runs the new version', async () => {
+  const spy = spyAdapter(() => true);
+  const c = make({ script: () => ({ out: NPM_OK }), registryAdapter: spy.adapter });
+  c.svc.update('codex');
+  await flush();
+  assert.equal(c.last('codex').phase, 'idle');
+  assert.deepEqual(c.ensured, [['codex', '/bin/codex']]);
+  assert.equal(spy.calls.restarts, 1);
+});
+
+test('update while a chat runs: the adapter is replaced once it is idle (retried every 30 s)', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let idle = false;
+  const spy = spyAdapter(() => idle);
+  const c = make({ script: () => ({ out: NPM_OK }), registryAdapter: spy.adapter });
+  c.svc.update('codex');
+  await flush();
+  assert.equal(c.last('codex').phase, 'idle');
+  assert.equal(spy.calls.restarts, 0, 'not cut off while the chat runs');
+  t.mock.timers.tick(RECYCLE_RETRY_MS);
+  await flush();
+  assert.equal(spy.calls.restarts, 0);
+  idle = true;
+  t.mock.timers.tick(RECYCLE_RETRY_MS);
+  await flush();
+  assert.equal(spy.calls.restarts, 1);
+  t.mock.timers.tick(RECYCLE_RETRY_MS * 3);
+  await flush();
+  assert.equal(spy.calls.restarts, 1, 'no more retries once replaced');
+});
+
+test('install (not update) does not restart the adapter', async () => {
+  const spy = spyAdapter(() => true);
+  const c = make({ script: () => ({ out: NPM_OK }), installed: false, registryAdapter: spy.adapter });
+  c.svc.install('codex');
+  await flush();
+  assert.equal(spy.calls.restarts, 0);
+});
+
+test('an unexpected error during CLI sign-in still kills the login process', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let statusCalls = 0;
+  const r = fakeRunner(loginScript('codex', () => false));
+  const run: CommandRunner = (cmd, args) => {
+    if (args[0] === 'login' && args[1] === 'status' && ++statusCalls === 2) throw new Error('spawn exploded');
+    return r.run(cmd, args);
+  };
+  const states: ConnectState[] = [];
+  const svc = new ConnectService({
+    run, npmPath: async () => null, findBinary: async (id) => `/bin/${id}`,
+    antigravity: { install: async () => ({ path: 'x', version: '1' }), adapter: async () => undefined },
+    openBrowser: () => {}, monitor: { check: async () => [] }, registry: { ensure: async () => undefined },
+    onUpdate: (s) => states.push(s), home: '/nonexistent-ak-home',
+  });
+  svc.signIn('codex');
+  await flush();
+  t.mock.timers.tick(POLL_MS);
+  await flush();
+  const login = r.calls.find((x) => x.args.length === 1 && x.args[0] === 'login')!;
+  assert.equal(login.killed, true);
+  assert.deepEqual(r.alive(), []);
+  assert.equal(svc.get('codex').phase, 'error');
+  assert.equal(svc.get('codex').message, SIGN_IN_DIDNT_FINISH);
+  assert.equal(svc.busy('codex'), false);
+});
+
+test('npm install is bounded at 15 minutes: the process tree is killed and the network copy shown', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const c = make({ script: () => ({ hang: true }), installed: false });
+  c.svc.install('codex');
+  await flush();
+  t.mock.timers.tick(NPM_TIMEOUT_MS - 1);
+  await flush();
+  assert.equal(c.last('codex').phase, 'installing');
+  t.mock.timers.tick(1);
+  await flush();
+  assert.equal(c.calls[0]!.killed, true);
+  assert.deepEqual(c.alive(), []);
+  assert.equal(c.last('codex').phase, 'error');
+  assert.equal(c.last('codex').message, NETWORK_FAILED);
+});
+
+test('npmFailureMessage: npm\'s own "error code" line decides over stray words in the log', () => {
+  const network = 'npm warn cleanup Failed to remove some directories [ Error: EPERM: operation not permitted, rmdir ]\n'
+    + 'npm error code ENOTFOUND\nnpm error syscall getaddrinfo\nnpm error network request to https://registry.npmjs.org/@openai%2fcodex failed\n';
+  assert.equal(npmFailureMessage('codex', network), NETWORK_FAILED);
+  assert.equal(npmFailureMessage('codex', 'npm ERR! code EACCES\nnpm ERR! syscall mkdir\n'), "Couldn't install Codex: your computer didn't allow it. Try running Agent Kanban as an administrator, or install Codex yourself.");
+  assert.equal(npmFailureMessage('codex', 'npm error code E404\nnpm error 404 Not Found\n'), "Couldn't install Codex. Try again, or install Codex yourself.");
+  assert.equal(npmFailureMessage('codex', 'Error: EPERM: operation not permitted\n'), "Couldn't install Codex: your computer didn't allow it. Try running Agent Kanban as an administrator, or install Codex yourself.");
+  assert.equal(npmFailureMessage('codex', '', 'ENOENT'), 'Agent Kanban needs npm to install Codex. Install Node.js from nodejs.org, then try again.');
+});
+
+test('dispose cancels running operations and waits until their processes are gone', async () => {
+  const c = make({ script: loginScript('codex', () => false) });
+  c.svc.signIn('codex');
+  c.svc.install('claude');
+  await flush();
+  assert.ok(c.alive().length > 0);
+  await c.svc.dispose();
+  assert.deepEqual(c.alive(), []);
+  assert.equal(c.last('codex').phase, 'idle');
+  assert.equal(c.svc.busy('codex'), false);
+  assert.equal(c.svc.busy('claude'), false);
+});
+
+test('Antigravity sign-out while a chat runs on the agent → busy (409), nothing signed out', async () => {
+  const fa = fakeAdapter();
+  let idle = false;
+  const adapter: AntigravityAuth = { ...fa.adapter, isIdle: () => idle };
+  const c = make({ script: () => ({}), adapter });
+  await assert.rejects(c.svc.signOut('antigravity'), (e: unknown) => e instanceof ConnectBusyError && e.message === 'Antigravity is busy. Wait for it to finish or cancel it.');
+  assert.equal(fa.calls.signOut, 0);
+  assert.equal(c.last('antigravity').phase, 'idle');
+  idle = true;
+  await c.svc.signOut('antigravity');
+  await flush();
+  assert.equal(fa.calls.signOut, 1);
 });

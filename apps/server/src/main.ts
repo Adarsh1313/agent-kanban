@@ -127,11 +127,12 @@ async function shutdown(): Promise<void> {
   stopping = true;
   usage.stop();
   connections.stop();
-  connect.dispose();
+  // Installs and sign-ins in progress are cancelled; their process trees are killed before we exit.
+  const connectDone = connect.dispose().catch(() => {});
   api.server.close();
   api.close();
   const dispose = adapters.dispose();
-  await Promise.race([dispose, new Promise((r) => setTimeout(r, 5_000))]);
+  await Promise.race([Promise.all([dispose, connectDone]), new Promise((r) => setTimeout(r, 10_000))]);
   api.server.closeAllConnections();
   process.exit(0);
 }

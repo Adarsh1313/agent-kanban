@@ -257,7 +257,7 @@ export function createApi(opts: {
       };
       const run = Object.hasOwn(actions, m[1]!) ? actions[m[1]!] : undefined;
       if (!run) throw new HttpError(404, 'Not found.');
-      return { status: 202, body: run() };
+      return { status: 202, body: await run() };
     }
     if (match('GET', '/api/settings')) {
       if (!settings) throw new HttpError(404, 'Not found.');
