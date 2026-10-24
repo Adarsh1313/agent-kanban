@@ -54,6 +54,7 @@ export class Store {
         id INTEGER PRIMARY KEY AUTOINCREMENT, provider TEXT NOT NULL, status TEXT NOT NULL,
         windows TEXT NOT NULL, read_at TEXT NOT NULL, message TEXT
       );
+      CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
       CREATE INDEX IF NOT EXISTS messages_chat ON messages (chat_id);
       CREATE INDEX IF NOT EXISTS tool_calls_chat ON tool_calls (chat_id);
       CREATE INDEX IF NOT EXISTS requests_chat ON requests (chat_id);
@@ -189,5 +190,15 @@ export class Store {
     const out: UsageReading = { provider: r.provider, status: r.status, windows: JSON.parse(r.windows) as UsageWindow[], readAt: r.read_at };
     if (r.message !== null) out.message = r.message;
     return out;
+  }
+
+  /** A stored setting (JSON text), or undefined when it was never set. */
+  getSetting(key: string): string | undefined {
+    const r = this.db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as Row | undefined;
+    return r && typeof r.value === 'string' ? r.value : undefined;
+  }
+
+  setSetting(key: string, value: string): void {
+    this.db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(key, value);
   }
 }

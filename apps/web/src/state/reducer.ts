@@ -292,6 +292,8 @@ export function applyEvent(s: AppState, e: ServerEvent, now: Date = new Date()):
     }
     case 'connection.updated':
       return mk([], { connections: { ...s.connections, [e.health.provider]: e.health } });
+    case 'connect.updated':
+      return s; // the Connections page handles install / sign-in progress (Plan 3 Task 5)
     case 'notification': {
       const item: AppNotification = { id: `n${s.sync.seq + 1}`, chatId: e.chatId, kind: e.kind, at: now.toISOString(), unread: true };
       return mk([chatKey(e.chatId)], { notifications: [item, ...s.notifications].slice(0, MAX_NOTIFICATIONS) });

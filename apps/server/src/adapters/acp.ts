@@ -14,6 +14,8 @@ export type AcpInitializeResult = {
    * session/new (-32000 "Authentication required") tells.
    */
   authenticated: boolean | null;
+  /** The agent advertises ACP's `logout` method (agentCapabilities.auth.logout); clients must not call it otherwise. */
+  canLogout: boolean;
 };
 
 export type AcpPermissionOption = { optionId: string; name: string; kind: string };
@@ -136,12 +138,18 @@ export class AcpClient {
       ...(agentInfo ? { agentInfo } : {}),
       authMethods,
       authenticated: readAuthenticated(r, authMethods),
+      canLogout: r?.agentCapabilities?.auth?.logout != null && typeof r.agentCapabilities.auth.logout === 'object',
     };
   }
 
   /** Runs the agent's sign-in. It can take as long as the user takes in the browser; the caller enforces its own limit. */
   async authenticate(methodId: string): Promise<void> {
     await this.proc.request('authenticate', { methodId }, PROMPT_TIMEOUT_MS);
+  }
+
+  /** ACP `logout`: the agent removes its own stored credentials. Call it only when `canLogout`. */
+  async logout(): Promise<void> {
+    await this.proc.request('logout', {});
   }
 
   async newSession(cwd: string): Promise<string> {

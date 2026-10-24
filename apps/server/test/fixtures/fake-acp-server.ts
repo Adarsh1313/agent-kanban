@@ -13,6 +13,7 @@
 // FAKE_NEW_DELAY_MS: session/new answers after this delay.
 // FAKE_VERSION: agentInfo.version (default 1.3.0).
 // FAKE_STOP: the stop reason the default turn ends with (default end_turn).
+// FAKE_NO_LOGOUT=1: initialize doesn't advertise auth.logout (and logout is method-not-found).
 // Strict about framing: any incoming message without "jsonrpc":"2.0" is rejected (requests) or ignored.
 import { createInterface } from 'node:readline';
 
@@ -90,7 +91,7 @@ createInterface({ input: process.stdin }).on('line', (line) => {
     case 'initialize':
       return reply(m.id, {
         protocolVersion: 1,
-        agentCapabilities: { loadSession: true },
+        agentCapabilities: { loadSession: true, ...(process.env.FAKE_NO_LOGOUT === '1' ? {} : { auth: { logout: {} } }) },
         agentInfo: { name: 'fake-agy', version: process.env.FAKE_VERSION ?? '1.3.0' },
         authMethods: [{ id: 'google', name: 'Sign in with Google', description: null }],
         ...(process.env.FAKE_NO_AUTH_FLAG === '1' ? {} : { authenticated }),
@@ -104,6 +105,11 @@ createInterface({ input: process.stdin }).on('line', (line) => {
       }
       if (process.env.FAKE_AUTH_HANG === '1') return;
       authenticated = true;
+      return reply(m.id, {});
+    case 'logout':
+      if (process.env.FAKE_NO_LOGOUT === '1') return fail(m.id, -32601, 'method not found: logout');
+      authenticated = false;
+      sessions.clear();
       return reply(m.id, {});
     case 'session/new': {
       if (process.env.FAKE_NEW_SIGNIN === '1') {

@@ -13,6 +13,24 @@ const STDERR_LINES = 20;
 const MAX_LINE_CHARS = 1024 * 1024; // stdout lines longer than this are dropped unparsed
 
 /**
+ * Kills a child process and everything it started: `taskkill /T /F` on Windows (or the injected one),
+ * SIGTERM elsewhere. Never throws.
+ */
+export function killTree(child: ChildProcess, taskkill?: (pid: number) => ChildProcess): void {
+  const pid = child.pid;
+  if ((process.platform === 'win32' || taskkill) && pid !== undefined) {
+    try {
+      const k = taskkill ? taskkill(pid) : spawn('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
+      const fallback = () => { try { child.kill(); } catch { /* already gone */ } };
+      k.on('error', fallback);
+      k.on('exit', (code) => { if (code !== 0) fallback(); });
+      return;
+    } catch { /* fall through */ }
+  }
+  try { child.kill('SIGTERM'); } catch { /* already gone */ }
+}
+
+/**
  * Line-delimited JSON-RPC over a child process's stdio. By default messages are sent without "jsonrpc" (Codex);
  * `{ jsonrpc: '2.0' }` adds the field to every outgoing message (ACP). Both forms are accepted on input.
  * Stdout lines that are not JSON objects go to `onTextLine` listeners and never break framing.
@@ -114,19 +132,7 @@ export class JsonRpcProcess {
     clearTimeout(escalate);
   }
 
-  private killTree(): void {
-    const pid = this.child.pid;
-    if ((process.platform === 'win32' || this.taskkill) && pid !== undefined) {
-      try {
-        const k = this.taskkill ? this.taskkill(pid) : spawn('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
-        const fallback = () => { try { this.child.kill(); } catch { /* already gone */ } };
-        k.on('error', fallback);
-        k.on('exit', (code) => { if (code !== 0) fallback(); });
-        return;
-      } catch { /* fall through */ }
-    }
-    try { this.child.kill('SIGTERM'); } catch { /* already gone */ }
-  }
+  private killTree(): void { killTree(this.child, this.taskkill); }
 
   private write(msg: object): void {
     const framed = this.jsonrpc ? { jsonrpc: this.jsonrpc, ...msg } : msg;

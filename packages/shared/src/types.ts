@@ -82,7 +82,33 @@ export type ServerEvent =
   | { type: 'request.closed'; chatId: string; requestId: string }
   | { type: 'usage.updated'; reading: UsageReading }
   | { type: 'connection.updated'; health: ConnectionHealth }
+  | { type: 'connect.updated'; state: ConnectState }
   | { type: 'notification'; chatId: string; kind: 'permission' | 'question' | 'finished' | 'limit' | 'error' };
+
+export type ConnectPhase = 'idle' | 'installing' | 'signing_in' | 'signing_out' | 'updating' | 'error';
+
+/** What Agent Kanban is doing for a provider right now (install, sign-in, sign-out, update) and how far it got. */
+export interface ConnectState {
+  provider: ProviderId;
+  phase: ConnectPhase;
+  /** Plain step text, e.g. "Downloading Codex…". */
+  step: string | null;
+  /** 0..1, or null when it can't be measured. */
+  progress: number | null;
+  /** The sign-in page the provider printed (https only), for "Open the browser again". */
+  signInUrl: string | null;
+  /** Error or outcome text to show on the card. */
+  message: string | null;
+  updatedAt: string;
+}
+
+export interface Settings {
+  onboarded: boolean;
+  /** Show this provider's own chats in Recent chats and Projects. */
+  showChats: Record<ProviderId, boolean>;
+  /** Consider this provider for the "Most room" suggestion. */
+  suggest: Record<ProviderId, boolean>;
+}
 
 export interface Project {
   /** The absolute folder, exactly as the chats store it. */

@@ -144,7 +144,7 @@ export class AntigravityAdapter implements ProviderAdapter {
     const proc = this.makeProcess();
     this.startingProc = proc;
     const acp = new AcpClient(proc);
-    const live: Live = { proc, acp, init: { protocolVersion: 1, authMethods: [], authenticated: null }, sessions: new Set(), loads: new Map() };
+    const live: Live = { proc, acp, init: { protocolVersion: 1, authMethods: [], authenticated: null, canLogout: false }, sessions: new Set(), loads: new Map() };
     acp.onUpdate((sid, u) => this.onUpdate(sid, u));
     acp.onPermission((sid, req) => this.onPermission(sid, req));
     acp.onAuthUrl((url) => {
@@ -462,6 +462,28 @@ export class AntigravityAdapter implements ProviderAdapter {
     } finally {
       this.authUrlFn = null;
       this.signInLive = null;
+      this.touchIdle();
+    }
+  }
+
+  /**
+   * Signs out through the agent's own ACP `logout` (agy_acp_server 1.3.0 advertises it: it clears its stored
+   * Google credentials and settings.json `auth.type`). Agent Kanban never touches those files itself.
+   * Resolves false when the agent doesn't offer logout. Starts the agent if needed; `signal` bounds the wait.
+   */
+  async signOut(signal: AbortSignal): Promise<boolean> {
+    signal.throwIfAborted();
+    if (this.authUrlFn) throw new Error('Antigravity sign-in is still running.');
+    this.busy++;
+    try {
+      const live = await abortable(this.ensureProcess(), signal);
+      if (!live.init.canLogout) return false;
+      await abortable(live.acp.logout(), signal);
+      this.learned = false;
+      live.sessions.clear(); // the agent tears its sessions down with the credentials
+      return true;
+    } finally {
+      this.busy--;
       this.touchIdle();
     }
   }

@@ -8,8 +8,8 @@ export function pickBinary(output: string, win: boolean): string | null {
   return lines.find((l) => lower(l).endsWith('.exe')) ?? lines.find((l) => lower(l).endsWith('.cmd')) ?? null;
 }
 
-/** Locate the official CLI on PATH (the adapters resolve .cmd shims themselves). */
-export function findBinary(name: 'claude' | 'codex'): Promise<string | null> {
+/** Locate the official CLI (or npm) on PATH (.cmd shims are resolved by whoever spawns them). */
+export function findBinary(name: 'claude' | 'codex' | 'npm'): Promise<string | null> {
   const win = process.platform === 'win32';
   return new Promise((resolve) => {
     execFile(win ? 'where.exe' : 'which', [name], { windowsHide: true, timeout: 10_000 }, (err, stdout) => {

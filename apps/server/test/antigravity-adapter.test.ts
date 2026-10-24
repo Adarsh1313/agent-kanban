@@ -265,6 +265,26 @@ test('signIn when the agent itself says signed in resolves at once without a lin
   } finally { await adapter.dispose(); }
 });
 
+test('signOut uses the agent\'s own ACP logout (advertised in auth.logout) and then reads signed out', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'ak-gemini-'));
+  writeSettings(home, JSON.stringify({ auth: { type: 'oauth-personal' } }));
+  const { adapter } = make('ready', { FAKE_NO_AUTH_FLAG: '1' }, { geminiHome: home });
+  try {
+    assert.equal((await adapter.ping()).signedIn, true);
+    assert.equal(await adapter.signOut(new AbortController().signal), true);
+    assert.equal((await adapter.ping()).signedIn, false);
+    await assert.rejects(adapter.startChat({ cwd, prompt: 'hi' }), /isn't signed in/);
+  } finally { await adapter.dispose(); }
+});
+
+test('signOut resolves false when the agent has no logout method', async () => {
+  const { adapter } = make('ready', { FAKE_NO_LOGOUT: '1' });
+  try {
+    assert.equal(await adapter.signOut(new AbortController().signal), false);
+    assert.equal((await adapter.ping()).signedIn, true);
+  } finally { await adapter.dispose(); }
+});
+
 test('without an authenticated flag (real agent), signed in follows settings.json auth.type', async () => {
   const home = mkdtempSync(join(tmpdir(), 'ak-gemini-'));
   const { adapter } = make('ready', { FAKE_NO_AUTH_FLAG: '1' }, { geminiHome: home });
