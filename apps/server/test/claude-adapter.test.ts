@@ -644,3 +644,29 @@ test('a running turn or a pending request keeps an idle chat query open', async 
   assert.equal(g.calls[0]!.closed, 0, 'a pending request is never closed');
   await b.dispose();
 });
+
+test('listModels inside the ping backoff returns [] without creating a query', async () => {
+  mock.timers.enable({ apis: ['Date'], now: 0 });
+  const f = fake(async function* () { await never(); }, { accountInfo: () => never(), supportedModels: async () => [{ value: 'default', displayName: 'Default' }] });
+  const a = new ClaudeAdapter({ claudePath: 'c', query: f.query, usageTimeoutMs: 30 });
+  try {
+    assert.equal((await a.ping()).ok, false);
+    assert.equal(f.calls.length, 1);
+    assert.deepEqual(await a.listModels(), []);
+    assert.equal(f.calls.length, 1, 'no new query inside the window');
+    mock.timers.tick(1000);
+    assert.equal((await a.listModels()).length, 1);
+  } finally { mock.timers.reset(); await a.dispose(); }
+});
+
+test('a listModels failure backs off like a failed ping', async () => {
+  mock.timers.enable({ apis: ['Date'], now: 0 });
+  const f = fake(async function* () { await never(); }, { supportedModels: () => never() });
+  const a = new ClaudeAdapter({ claudePath: 'c', query: f.query, usageTimeoutMs: 30 });
+  try {
+    await assert.rejects(a.listModels());
+    assert.equal(f.calls.length, 1);
+    assert.deepEqual(await a.listModels(), []);
+    assert.equal(f.calls.length, 1, 'not recreated inside the backoff');
+  } finally { mock.timers.reset(); await a.dispose(); }
+});

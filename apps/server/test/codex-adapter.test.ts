@@ -573,3 +573,19 @@ test('threads run in Auto mode: workspace-write sandbox with on-request approval
     }
   } finally { await m.adapter.dispose(); }
 });
+
+test('listModels does not respawn a crash-looping app-server inside the ping backoff or after giving up', async () => {
+  mock.timers.enable({ apis: ['Date'], now: 0 });
+  const { adapter, procs } = make('dieonaccount');
+  try {
+    assert.equal((await adapter.ping()).ok, false);
+    assert.equal(procs.length, 1);
+    await new Promise((r) => setTimeout(r, 50));
+    assert.deepEqual(await adapter.listModels(), []);
+    assert.equal(procs.length, 1, 'no respawn inside the backoff');
+    (adapter as any).gaveUp = true;
+    mock.timers.tick(10 * 60_000);
+    assert.deepEqual(await adapter.listModels(), []);
+    assert.equal(procs.length, 1, 'no respawn after giving up');
+  } finally { mock.timers.reset(); await adapter.dispose(); }
+});

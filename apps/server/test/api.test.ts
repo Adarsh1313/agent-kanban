@@ -296,7 +296,7 @@ test('PATCH /api/chats/:id round-trips pin, title and snooze, and broadcasts', a
     r = await patch({ title: '  New name  ', snoozedUntil: '2026-02-01T00:00:00Z' });
     const c = (await r.json()) as Chat;
     assert.equal(c.title, 'New name');
-    assert.equal(c.snoozedUntil, '2026-02-01T00:00:00Z');
+    assert.equal(c.snoozedUntil, '2026-02-01T00:00:00.000Z');
     assert.equal(((await (await patch({ snoozedUntil: null })).json()) as Chat).snoozedUntil, null);
     assert.equal(events.length, 3);
     assert.equal((await patch({ title: 'x' }, 'nope')).status, 404);
@@ -326,5 +326,37 @@ test('GET /api/models lists each provider, empty for a missing adapter or a fail
     const r = await s.f('/api/models');
     assert.equal(r.status, 200);
     assert.deepEqual(await r.json(), { claude: [{ id: 'default', label: 'Default', isDefault: true }], codex: [], antigravity: [] });
+  } finally { s.close(); }
+});
+
+test('GET /api/models caches a provider list that came back non-empty; an empty one is asked again', async () => {
+  let claudeCalls = 0;
+  let codexCalls = 0;
+  const adapters = {
+    get: (id: string) => id === 'claude' ? { listModels: async () => { claudeCalls++; return [{ id: 'default', label: 'Default', isDefault: true }]; } }
+      : id === 'codex' ? { listModels: async () => { codexCalls++; return []; } } : undefined,
+  };
+  const s = await setup({}, undefined, { adapters });
+  try {
+    await (await s.f('/api/models')).json();
+    const second = await (await s.f('/api/models')).json() as Record<string, unknown[]>;
+    assert.equal(second.claude!.length, 1);
+    assert.equal(claudeCalls, 1, 'served from the cache');
+    assert.equal(codexCalls, 2, 'an empty list is not cached');
+  } finally { s.close(); }
+});
+
+test('PATCH /api/chats/:id trims the title before checking it, normalises snoozedUntil, and says why a bad snooze fails', async () => {
+  let got: any = null;
+  const s = await setup({ patch: (_id: string, p: object) => { got = p; return chat(); } });
+  const patch = (body: unknown) => s.f('/api/chats/c1', { method: 'PATCH', body: JSON.stringify(body) });
+  try {
+    assert.equal((await patch({ title: `   ${'x'.repeat(200)}   ` })).status, 200);
+    assert.equal(got.title, 'x'.repeat(200));
+    assert.equal((await patch({ snoozedUntil: '2026-02-01T05:30:00+05:30' })).status, 200);
+    assert.equal(got.snoozedUntil, '2026-02-01T00:00:00.000Z');
+    const bad = await patch({ snoozedUntil: 'tomorrow' });
+    assert.equal(bad.status, 400);
+    assert.equal(((await bad.json()) as { error: string }).error, 'Snooze time must be a date.');
   } finally { s.close(); }
 });

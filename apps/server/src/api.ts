@@ -19,6 +19,7 @@ const MAX_DRAIN = 16_000_000; // past this, an oversized upload is cut off rathe
 const DRAIN_MS = 5_000;
 const PING_MS = 30_000;
 const MODELS_MS = 15_000;
+const MODELS_CACHE_MS = 5 * 60_000;
 const MAX_BUFFERED = 4_000_000;
 
 class HttpError extends Error {
@@ -125,14 +126,20 @@ export function createApi(opts: {
 
   const usageBody = (readings: ReturnType<UsageService['latest']>) => ({ readings, suggested: suggest(readings, PROVIDERS) });
 
+  // A provider's model list rarely changes: a non-empty answer is reused for 5 minutes (an empty one is asked again).
+  const modelCache = new Map<ProviderId, { at: number; models: ModelOption[] }>();
   async function models(): Promise<Record<ProviderId, ModelOption[]>> {
     const one = async (id: ProviderId): Promise<ModelOption[]> => {
       const a = opts.adapters?.get(id);
       if (!a) return [];
+      const hit = modelCache.get(id);
+      if (hit && Date.now() - hit.at < MODELS_CACHE_MS) return hit.models;
       let timer: NodeJS.Timeout | undefined;
       try {
         const timeout = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('timeout')), MODELS_MS); });
-        return await Promise.race([a.listModels(), timeout]);
+        const list = await Promise.race([a.listModels(), timeout]);
+        if (list.length > 0) modelCache.set(id, { at: Date.now(), models: list });
+        return list;
       } catch { return []; } finally { clearTimeout(timer); }
     };
     const [claude, codex, antigravity] = await Promise.all(PROVIDERS.map(one));
@@ -157,14 +164,18 @@ export function createApi(opts: {
       const patch: { title?: string; pinned?: boolean; snoozedUntil?: string | null } = {};
       for (const [k, v] of Object.entries(b)) {
         if (k === 'title') {
-          if (typeof v !== 'string' || v.trim() === '' || v.length > 200) throw new HttpError(400, 'Title must be 1 to 200 characters.');
-          patch.title = v.trim();
+          const t = typeof v === 'string' ? v.trim() : '';
+          if (t === '' || t.length > 200) throw new HttpError(400, 'Title must be 1 to 200 characters.');
+          patch.title = t;
         } else if (k === 'pinned') {
           if (typeof v !== 'boolean') throw new HttpError(400, 'Pinned must be true or false.');
           patch.pinned = v;
         } else if (k === 'snoozedUntil') {
-          if (v !== null && (typeof v !== 'string' || Number.isNaN(Date.parse(v)))) throw new HttpError(400, 'Snoozed until must be a date or null.');
-          patch.snoozedUntil = v as string | null;
+          if (v === null) patch.snoozedUntil = null;
+          else {
+            if (typeof v !== 'string' || Number.isNaN(Date.parse(v))) throw new HttpError(400, 'Snooze time must be a date.');
+            patch.snoozedUntil = new Date(v).toISOString();
+          }
         } else throw new HttpError(400, `You can't change "${k}".`);
       }
       return { status: 200, body: chats.patch(m[0]!, patch) };
@@ -268,7 +279,8 @@ export function createApi(opts: {
     const wantsHtml = (req.headers.accept ?? '').includes('text/html');
     const sendFile = (file: string, cache: string) => {
       const { body, type } = readStatic(file);
-      res.writeHead(200, { 'Content-Type': type, 'Cache-Control': cache, 'Content-Length': body.length });
+      // The shell's URL can carry ?token=: never send it on as a referrer.
+      res.writeHead(200, { 'Content-Type': type, 'Cache-Control': cache, 'Content-Length': body.length, 'Referrer-Policy': 'no-referrer', 'X-Content-Type-Options': 'nosniff' });
       res.end(req.method === 'HEAD' ? undefined : body);
     };
     const apiPath = url.pathname === '/ws' || url.pathname === '/api' || url.pathname.startsWith('/api/');

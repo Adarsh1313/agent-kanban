@@ -94,3 +94,13 @@ test('GET /api/projects and /api/projects/info (known paths only)', async () => 
     assert.equal((await f('/api/projects', 'bad')).status, 401);
   } finally { api.close(); api.server.closeAllConnections(); api.server.close(); }
 });
+
+test('one project per folder however it is spelled (drive case, trailing separator, slashes)', () => {
+  const ps = buildProjects(
+    [chat({ id: '1', cwd: 'C:\\a' }), chat({ id: '2', cwd: 'c:\\a\\' })],
+    [h({ sessionRef: 'x', cwd: 'C:/a' })],
+  );
+  assert.equal(ps.length, 1);
+  assert.equal(ps[0]!.providers[0]!.chats, 2);
+  assert.equal(ps[0]!.historyOnly, 1);
+});

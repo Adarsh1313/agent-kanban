@@ -159,14 +159,17 @@ export class ChatService {
   archive(chatId: string): Chat {
     this.mustGet(chatId);
     const chat = this.store.updateChat(chatId, { archived: true });
+    this.partials.delete(chatId);
     this.broadcast({ type: 'chat.updated', chat });
     return chat;
   }
 
   /** Rename, pin or snooze a chat. */
   patch(chatId: string, patch: { title?: string; pinned?: boolean; snoozedUntil?: string | null }): Chat {
-    this.mustGet(chatId);
-    const chat = this.store.updateChat(chatId, patch);
+    const current = this.mustGet(chatId);
+    if (Object.values(patch).every((v) => v === undefined)) return current;
+    // Not activity: the card keeps its place and its "5m ago".
+    const chat = this.store.updateChat(chatId, patch, { touch: false });
     this.broadcast({ type: 'chat.updated', chat });
     return chat;
   }

@@ -605,3 +605,27 @@ test('a completed message is not announced again when the turn settles', async (
   adapter.emit({ type: 'turn.completed', sessionRef: 's1' });
   assert.equal(events.filter((e) => e.type === 'message.completed' && e.message.text === 'Hi').length, 1);
 });
+
+test('pin, rename and snooze do not bump updatedAt; an empty patch returns the chat unchanged without a broadcast', async () => {
+  const { store, events, svc } = setup();
+  const chat = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+  const before = store.getChat(chat.id)!.updatedAt;
+  await new Promise((r) => setTimeout(r, 5));
+  const after = svc.patch(chat.id, { pinned: true, title: 'Renamed', snoozedUntil: '2026-02-01T00:00:00.000Z' });
+  assert.equal(after.pinned, true);
+  assert.equal(after.title, 'Renamed');
+  assert.equal(after.updatedAt, before);
+  const n = events.length;
+  const same = svc.patch(chat.id, {});
+  assert.deepEqual(same, store.getChat(chat.id));
+  assert.equal(events.length, n, 'nothing broadcast for an empty patch');
+});
+
+test('archive forgets the chat\'s streaming partials', async () => {
+  const { adapter, svc } = setup();
+  const chat = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+  adapter.emit({ type: 'message.delta', sessionRef: 's1', messageId: 'm1', text: 'Hel' });
+  assert.equal((svc as any).partials.has(chat.id), true);
+  svc.archive(chat.id);
+  assert.equal((svc as any).partials.has(chat.id), false);
+});

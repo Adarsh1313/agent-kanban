@@ -325,6 +325,8 @@ export class CodexAdapter implements ProviderAdapter {
   }
 
   async listModels(): Promise<ModelOption[]> {
+    // Like the usage poll, the model list does not respawn a crash-looping app-server.
+    if (this.inBackoff()) return [];
     const p = await this.ensureProcess();
     type Model = { id: string; model?: string; displayName?: string; isDefault?: boolean; hidden?: boolean };
     const out: ModelOption[] = [];
@@ -341,7 +343,7 @@ export class CodexAdapter implements ProviderAdapter {
   async readUsage(): Promise<UsageReading> {
     const failed: UsageReading = { provider: 'codex', status: 'error', windows: [], readAt: new Date().toISOString(), message: "Couldn't read Codex usage." };
     // A crash-looping app-server is not respawned by the usage poll: it waits for the ping backoff (or a manual check).
-    if (!this.proc && !this.starting && (this.gaveUp || Date.now() < this.retryAt)) return failed;
+    if (this.inBackoff()) return failed;
     try {
       const p = await this.ensureProcess();
       const r = await p.request<{ rateLimits: any; rateLimitsByLimitId?: any }>('account/rateLimits/read', undefined);
@@ -349,6 +351,11 @@ export class CodexAdapter implements ProviderAdapter {
     } catch {
       return failed;
     }
+  }
+
+  /** No app-server is running or starting, and the ping backoff (or giving up) says not to spawn one for background reads. */
+  private inBackoff(): boolean {
+    return !this.proc && !this.starting && (this.gaveUp || Date.now() < this.retryAt);
   }
 
   private noteFailure(): void {

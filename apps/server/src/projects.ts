@@ -2,15 +2,15 @@ import { execFile } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import type { Chat, Column, HistoryChat, Project, ProjectInfo, ProviderId } from '@agent-kanban/shared';
+import { folderKey } from '@agent-kanban/shared';
 
-const key = (cwd: string): string => (process.platform === 'win32' ? cwd.toLowerCase() : cwd);
 const COLUMNS: Column[] = ['running', 'needs_you', 'review', 'done'];
 
 /** Group chats on the board and history-only chats by folder. Newest activity first. */
 export function buildProjects(chats: Chat[], history: HistoryChat[]): Project[] {
   const map = new Map<string, Project & { models: Map<ProviderId, { at: string; model: string }> }>();
   const get = (cwd: string) => {
-    const k = key(cwd);
+    const k = folderKey(cwd);
     let p = map.get(k);
     if (!p) {
       p = { id: cwd, name: basename(cwd) || cwd, path: cwd, providers: [], columns: { running: 0, needs_you: 0, review: 0, done: 0 }, historyOnly: 0, lastActivityAt: '', models: new Map() };

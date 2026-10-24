@@ -81,3 +81,15 @@ test('paths outside dist are never served as files', async () => {
     assert.doesNotMatch(await r.text(), /secret/);
   } finally { s.close(); }
 });
+
+test('the SPA shell is sent with no-referrer and nosniff (its URL can carry ?token=)', async () => {
+  const s = await setup(true);
+  try {
+    for (const path of ['/?token=tok', '/board/chat-1']) {
+      const r = await s.get(path, HTML);
+      assert.equal(r.status, 200);
+      assert.equal(r.headers.get('referrer-policy'), 'no-referrer', path);
+      assert.equal(r.headers.get('x-content-type-options'), 'nosniff', path);
+    }
+  } finally { s.close(); }
+});

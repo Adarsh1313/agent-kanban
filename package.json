@@ -10,7 +10,7 @@
     "packages/*"
   ],
   "scripts": {
-    "test": "node --test --disable-warning=ExperimentalWarning \"apps/server/test/**/*.test.ts\" && npm test -w apps/web",
+    "test": "node scripts/test.mjs",
     "typecheck": "tsc -p tsconfig.json",
     "typecheck:web": "tsc -p apps/web/tsconfig.json",
     "dev:web": "npm run dev -w apps/web",
