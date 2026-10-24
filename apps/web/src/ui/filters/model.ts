@@ -1,4 +1,5 @@
 import type { Column, ProviderId } from '@agent-kanban/shared';
+import { folderKey } from '@agent-kanban/shared';
 import type { AppState, Filters } from '../../state/reducer.ts';
 import { isArchived, projectLabel, providerCounts } from '../../state/selectors.ts';
 import { PROVIDER_IDS, providerName, type IconName } from '../primitives/index.ts';
@@ -70,10 +71,14 @@ export function filterOptions(s: AppState, key: FilterKey): FilterOption[] {
       const present = PROVIDER_IDS.filter((p) => counts[p] > 0 || chosen?.includes(p));
       return (present.length ? present : PROVIDER_IDS).map((p) => ({ v: p, label: providerName(p), provider: p }));
     }
-    case 'project':
-      return fromData([...chats.map((c) => c.cwd), ...s.history.map((h) => h.cwd)], chosen)
+    case 'project': {
+      // One option per folder however it is spelled (the first spelling seen is the value).
+      const byKey = new Map<string, string>();
+      for (const cwd of fromData([...chats.map((c) => c.cwd), ...s.history.map((h) => h.cwd)], chosen)) if (!byKey.has(folderKey(cwd))) byKey.set(folderKey(cwd), cwd);
+      return [...byKey.values()]
         .map((cwd) => ({ v: cwd, label: projectLabel(s, cwd) }))
         .sort((a, b) => a.label.localeCompare(b.label));
+    }
     case 'status':
       return STATUS.map(([v, label]) => ({ v, label, status: v }));
     case 'model': {

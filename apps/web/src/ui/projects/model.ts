@@ -1,4 +1,5 @@
 import type { Chat, Column, NeedsReason, Project, ProjectInfo, ProviderId } from '@agent-kanban/shared';
+import { folderKey } from '@agent-kanban/shared';
 import { api } from '../../api/client.ts';
 import type { AppState } from '../../state/reducer.ts';
 import { isArchived, isSnoozed, memoState } from '../../state/selectors.ts';
@@ -7,14 +8,8 @@ import { relativeTime } from '../board/format.ts';
 /** The file each provider reads its project instructions from. */
 export const INSTRUCTION_FILE: Record<ProviderId, string> = { claude: 'CLAUDE.md', codex: 'AGENTS.md', antigravity: 'GEMINI.md' };
 
-/**
- * One folder, however a chat spelled it: no trailing separator, and Windows drive paths compare
- * case-insensitively with backslashes (the server groups projects the same way).
- */
-export function folderKey(path: string): string {
-  const t = path.trim().replace(/[\\/]+$/, '');
-  return /^[a-z]:/i.test(t) || t.startsWith('\\\\') ? t.replace(/\//g, '\\').toLowerCase() : t;
-}
+/** One folder, however a chat spelled it (shared with the server, which groups projects the same way). */
+export { folderKey };
 
 /** A chat in a project: on the board (chatId set) or only in the provider's own history. */
 export interface ProjectChat {

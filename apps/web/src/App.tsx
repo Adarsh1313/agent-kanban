@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { api, readToken } from './api/client.ts';
 import { connectSocket } from './api/socket.ts';
 import { applyEvent } from './state/reducer.ts';
-import { loadAll, refetchGaps, syncMissing, useStoreInstance } from './state/store.ts';
+import { loadAll, noteChatFolder, refetchGaps, syncMissing, useStoreInstance } from './state/store.ts';
 import { Shell } from './ui/shell/Shell.tsx';
 
 export function App() {
@@ -11,7 +11,7 @@ export function App() {
 
   useEffect(() => {
     if (!token) {
-      store.setState((s) => ({ ...s, socket: 'unauthorized' }));
+      store.setState((s) => ({ ...s, socket: 'no_token' }));
       return;
     }
     const resync = () => {
@@ -26,6 +26,8 @@ export function App() {
         // Only events that name a chat can refer to one the store lacks.
         if ('chatId' in e) void syncMissing(store, api).catch(() => {});
         if (e.type === 'message.delta') void refetchGaps(store, api).catch(() => {});
+        // A chat in a folder the project list does not have yet (a new folder): refetch the list.
+        if (e.type === 'chat.updated') noteChatFolder(store, api, e.chat);
       },
       // Every open (the first too) loads everything, so events between the fetch and the subscribe cannot be lost.
       onStatus: (socket) => {

@@ -3,7 +3,7 @@ import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from
 import { api } from '../../api/client.ts';
 import { closePanelIn, isChatLoaded, mergeChats, openChatIn, openHistoryIn, type HistoryRef } from '../../state/reducer.ts';
 import { isArchived, projectLabel } from '../../state/selectors.ts';
-import { loadChat, useStore, useStoreInstance } from '../../state/store.ts';
+import { loadChat, noteChatFolder, refreshHistory, useStore, useStoreInstance } from '../../state/store.ts';
 import { setHistoryHandler, setRowMenuHandler } from '../actions.ts';
 import { errorText, RESUME_TEXT } from '../board/Card.tsx';
 import { relativeTime } from '../board/format.ts';
@@ -196,6 +196,9 @@ export function ChatPanel() {
       const created = await api.continueHistory({ provider: ref.provider, sessionRef: ref.sessionRef, text });
       refocus.current = true;
       store.setState((s) => openChatIn(mergeChats(s, [created]), created.id));
+      // The history list and projects still count it as history-only until they are asked again.
+      void refreshHistory(store, api).catch(() => {});
+      noteChatFolder(store, api, created);
       return true;
     } catch (err) {
       toast(errorText(err));

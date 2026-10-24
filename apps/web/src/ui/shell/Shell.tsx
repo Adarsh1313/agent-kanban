@@ -18,8 +18,17 @@ import { applySavedTheme } from './theme.ts';
 const UNAUTHORIZED_TEXT = 'The server restarted. Open Agent Kanban again from the link it printed.';
 const CLOCK_MS = 30_000;
 
-const bannerText = (socket: AppState['socket']) =>
-  socket === 'live' ? null : socket === 'reconnecting' ? 'Reconnecting…' : UNAUTHORIZED_TEXT;
+const NO_TOKEN_TEXT = 'Open Agent Kanban from the link the server printed.';
+
+const bannerText = (socket: AppState['socket']): string | null => {
+  switch (socket) {
+    case 'live':
+    case 'connecting': return null;
+    case 'reconnecting': return 'Reconnecting…';
+    case 'no_token': return NO_TOKEN_TEXT;
+    case 'unauthorized': return UNAUTHORIZED_TEXT;
+  }
+};
 
 /** `ui.view` / `ui.projectId` follow the address-bar hash. */
 function useHashRoute(store: Store) {

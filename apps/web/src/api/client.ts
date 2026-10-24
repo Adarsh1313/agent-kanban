@@ -14,22 +14,41 @@ import type {
 
 const TOKEN_KEY = 'agent-kanban.token';
 
-/** Reads the token from `?token=` (then stores it and strips it from the address bar), else from sessionStorage. */
+/** The token once known, so every request does not reread storage (and a blocked sessionStorage still works). */
+let cachedToken: string | null = null;
+
+/**
+ * Reads the token from `?token=` (stripping it from the address bar first, whatever storage does), else from
+ * sessionStorage. The result is kept in memory.
+ */
 export function readToken(): string | null {
+  let fromUrl: string | null = null;
   try {
     const url = new URL(location.href);
-    const fromUrl = url.searchParams.get('token');
+    fromUrl = url.searchParams.get('token');
     if (fromUrl) {
-      sessionStorage.setItem(TOKEN_KEY, fromUrl);
       url.searchParams.delete('token');
       history.replaceState(null, '', url.pathname + url.search + url.hash);
-      return fromUrl;
     }
-    return sessionStorage.getItem(TOKEN_KEY);
   } catch {
-    return null;
+    // no usable location/history: fall through to storage
   }
+  if (fromUrl) {
+    cachedToken = fromUrl;
+    try { sessionStorage.setItem(TOKEN_KEY, fromUrl); } catch { /* storage blocked: the in-memory copy is enough for this page */ }
+    return fromUrl;
+  }
+  if (cachedToken) return cachedToken;
+  try {
+    cachedToken = sessionStorage.getItem(TOKEN_KEY);
+  } catch {
+    cachedToken = null;
+  }
+  return cachedToken;
 }
+
+/** Tests start without a remembered token. */
+export const resetTokenCache = () => { cachedToken = null; };
 
 export class ApiError extends Error {
   status: number;

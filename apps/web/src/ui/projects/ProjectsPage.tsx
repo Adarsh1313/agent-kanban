@@ -133,7 +133,7 @@ function ProjectList() {
             {sortButton('name', 'Project')}<span>Worked on with</span><span>Chats</span>{sortButton('activity', 'Last activity')}<span />
           </div>
           <ul className="plist-rows" aria-label="Projects"
-            onAnimationEnd={(e) => { if (animate && (e.target as Element).closest('li') === e.currentTarget.lastElementChild) setStagger(false); }}>
+            onAnimationEnd={(e) => { if (animate && e.target === e.currentTarget.lastElementChild?.firstElementChild) setStagger(false); }}>
             {rows.map((row, i) => <ProjectRow key={row.project.id} row={row} now={now} stagger={animate ? i : null} />)}
           </ul>
         </div>

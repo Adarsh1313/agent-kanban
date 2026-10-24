@@ -30,7 +30,8 @@ export function openNotification(store: Store, n: AppNotification): void {
 
 /** Marks every notification read (here and in other tabs). */
 export function markAllRead(store: Store): void {
-  const latest = Math.max(Date.now(), ...store.getState().notifications.map((n) => Date.parse(n.at)));
+  // A notification with an unreadable time must not turn the relayed cut-off into NaN.
+  const latest = Math.max(Date.now(), ...store.getState().notifications.map((n) => Date.parse(n.at)).filter(Number.isFinite));
   store.setState((s) => markAllNotificationsRead(s));
   relay(store, { type: 'all', until: latest + RELAY_SLACK_MS });
 }

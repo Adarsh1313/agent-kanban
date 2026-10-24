@@ -82,7 +82,8 @@ export interface AppState {
   refetch: Record<string, true>;
   /** Bookkeeping that lets a fetch tell which items an event wrote while it was in flight. */
   sync: SyncState;
-  socket: 'live' | 'reconnecting' | 'unauthorized';
+  /** 'connecting' before the first open (no banner); 'no_token' when the page was opened without one. */
+  socket: 'connecting' | 'live' | 'reconnecting' | 'unauthorized' | 'no_token';
   /** True once the first snapshot has been applied (before that the board is loading, not empty). */
   loaded: boolean;
   /** Wall clock (ms), bumped by the shell every 30 s so snooze checks re-evaluate without any event. */
@@ -120,7 +121,7 @@ export function initialState(): AppState {
     pendingDeltas: {},
     refetch: {},
     sync: { seq: 0, inflight: 0, touched: {} },
-    socket: 'reconnecting',
+    socket: 'connecting',
     loaded: false,
     now: Date.now(),
     ui: {

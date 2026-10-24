@@ -83,8 +83,11 @@ html, body { overflow: hidden; }
 }
 
 /* Usage (design/board.html keeps .refresh .spinning inline) */
-.refresh .icon.spinning { animation: spin 700ms var(--ease-out) infinite; }
-.btn.refresh:disabled { opacity: 1; cursor: progress; }
+/* A continuous turn while checking: the sweep token (linear and continuous). */
+.refresh .icon.spinning { animation: spin var(--duration-sweep) linear infinite; }
+.btn.refresh:disabled, .btn.refresh[aria-disabled="true"] { opacity: 1; cursor: progress; }
+/* Connection card names are headings, styled as the design's bold name. */
+.conn-head h4.conn-name { margin: 0; display: block; font-size: var(--text-title); font-weight: var(--weight-semibold); letter-spacing: var(--tracking-tight); }
 .usage-chip[data-dim], .usage-focus[data-dim] .m, .prov-block[data-status="error"] .meter, .prov-block[data-status="error"] .model-toggle { opacity: .55; }
 .prov-block[data-status="error"] .unavailable { color: var(--color-needs-text); }
 .usage-chip .pct, .usage-focus .m, .usage-area .link-btn { white-space: nowrap; }
@@ -139,3 +142,15 @@ a.prow { color: inherit; text-decoration: none; }
 @media (prefers-reduced-motion: reduce) { .chat-list.swapped .crow { animation: none; } }
 /* A narrow card wraps "New Claude Code chat" instead of spilling out. */
 .know .btn { max-width: 100%; height: auto; min-height: var(--space-6); padding-block: var(--space-1); text-align: left; }
+
+/* Project detail: the chat rows are a list (one item per chat); rows after the first keep the design's divider. */
+.chat-rows { list-style: none; margin: 0; padding: 0; }
+.chat-rows li + li .crow { border-top: 1px solid var(--color-border); }
+
+/* Popovers are portalled to <body> and placed with inline fixed coordinates (Popover's place()). Fixed, a closed one
+   adds no scroll range wherever it was last placed; hidden after its exit fade, it cannot be reached either. */
+.popover { position: fixed; top: 0; left: 0; }
+.popover[data-state="closed"] {
+  visibility: hidden;
+  transition: opacity var(--duration-exit) var(--ease-out), transform var(--duration-exit) var(--ease-out), visibility 0s linear var(--duration-exit);
+}

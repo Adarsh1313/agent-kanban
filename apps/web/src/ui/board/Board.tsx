@@ -93,7 +93,8 @@ export function Board() {
           }
         }
         setLayout(next);
-        if (arrivals.size > 0) setFresh(arrivals);
+        // Added to the cards still tinting (each leaves on its own animationend).
+        if (arrivals.size > 0) setFresh((cur) => new Set([...cur, ...arrivals]));
       };
       if (cards.length === 0 || (moved.length === 0 && !shifted)) {
         commit();

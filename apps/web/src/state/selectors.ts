@@ -1,4 +1,5 @@
 import type { Chat, Column, ProviderId } from '@agent-kanban/shared';
+import { folderKey } from '@agent-kanban/shared';
 import type { AppState, Filters } from './reducer.ts';
 
 const MINUTE = 60_000;
@@ -49,7 +50,7 @@ interface Filterable {
 
 function passes(c: Filterable, f: Filters, now: number): boolean {
   if (f.provider && !f.provider.includes(c.provider)) return false;
-  if (f.project && !f.project.includes(c.cwd)) return false;
+  if (f.project && !f.project.some((p) => folderKey(p) === folderKey(c.cwd))) return false;
   if (f.status && !(c.column && f.status.includes(c.column))) return false;
   if (f.model && !(c.model !== null && f.model.includes(c.model))) return false;
   if (f.reason && !(c.needsReason !== null && (f.reason as string[]).includes(c.needsReason))) return false;
@@ -104,18 +105,24 @@ export function recentChatsByProject(
   /** Projects whose chats are all listed (the sidebar's "N more"). */
   expanded: ReadonlySet<string> = new Set(),
 ): ProjectGroup[] {
-  const byProject = new Map<string, SidebarChat[]>();
+  // One group per folder however it is spelled; named and linked by the server's project when there is one.
+  const known = new Map<string, { id: string; name: string }>();
+  for (const p of s.projects) if (!known.has(folderKey(p.id))) known.set(folderKey(p.id), { id: p.id, name: p.name });
+  const byProject = new Map<string, { projectId: string; name: string; list: SidebarChat[] }>();
   for (const c of sidebarChats(s, now)) {
-    const list = byProject.get(c.cwd);
-    if (list) list.push(c);
-    else byProject.set(c.cwd, [c]);
+    const k = folderKey(c.cwd);
+    const g = byProject.get(k);
+    if (g) g.list.push(c);
+    else {
+      const p = known.get(k);
+      byProject.set(k, { projectId: p?.id ?? c.cwd, name: p?.name ?? baseName(c.cwd), list: [c] });
+    }
   }
-  const names = new Map(s.projects.map((p) => [p.id, p.name]));
-  return [...byProject.entries()]
-    .map(([projectId, list]) => ({ projectId, list: list.sort(byRecent) }))
+  return [...byProject.values()]
+    .map(({ projectId, name, list }) => ({ projectId, name, list: list.sort(byRecent) }))
     .sort((a, b) => byRecent(a.list[0]!, b.list[0]!))
     .slice(0, limits.projects)
-    .map(({ projectId, list }) => ({ projectId, name: names.get(projectId) ?? baseName(projectId), chats: expanded.has(projectId) ? list : list.slice(0, limits.chats), total: list.length }));
+    .map(({ projectId, name, list }) => ({ projectId, name, chats: expanded.has(projectId) ? list : list.slice(0, limits.chats), total: list.length }));
 }
 
 /** The provider to preselect in New chat: the server's suggestion if allowed, else the first allowed one. */
@@ -147,15 +154,16 @@ function countProviders(s: AppState): Record<ProviderId, number> {
   const known = new Set<string>();
   for (const c of Object.values(s.chats)) {
     if (c.sessionRef) known.add(`${c.provider}\u0000${c.sessionRef}`);
-    if (!c.archived) counts[c.provider] += 1;
+    if (!isArchived(s, c)) counts[c.provider] += 1;
   }
   for (const h of s.history) if (!known.has(`${h.provider}\u0000${h.sessionRef}`)) counts[h.provider] += 1;
   return counts;
 }
 
-export const providerCounts = memoState((s) => [s.chats, s.history], countProviders);
+export const providerCounts = memoState((s) => [s.chats, s.history, s.ui.archiving], countProviders);
 
 /** The name to show for a project folder: the server's project name when known, else the folder's last part. */
 export function projectLabel(s: AppState, projectId: string): string {
-  return s.projects.find((p) => p.id === projectId)?.name ?? baseName(projectId);
+  const k = folderKey(projectId);
+  return (s.projects.find((p) => p.id === projectId) ?? s.projects.find((p) => folderKey(p.id) === k))?.name ?? baseName(projectId);
 }

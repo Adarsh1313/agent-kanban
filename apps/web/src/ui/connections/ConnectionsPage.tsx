@@ -73,7 +73,7 @@ function ConnectionCard({ id }: { id: ProviderId }) {
     <section className="conn" data-conn={id} data-state={state || undefined} aria-label={name}>
       <div className="conn-head">
         <ProviderLogo id={id} />
-        <div className="t"><b>{name}</b><small>{VENDOR[id]}</small></div>
+        <div className="t"><h4 className="conn-name">{name}</h4><small>{VENDOR[id]}</small></div>
         <span className="conn-state" role="status"><i /><span>{word}</span></span>
       </div>
       <div className="conn-body">
@@ -96,8 +96,9 @@ function ConnectionCard({ id }: { id: ProviderId }) {
       <div className="conn-foot">
         <small className="conn-checked">{health ? `Checked ${agoLabel(health.checkedAt, now)}` : ''}</small>
         <span className="grow" />
-        <button className="btn ghost refresh" type="button" onClick={check} disabled={checking} aria-busy={checking} aria-label={`Check ${name} now`}>
-          <Icon name="refresh" size="sm" className={checking ? 'spinning' : undefined} />Check now
+        {/* aria-disabled, not disabled, while checking: focus stays on the button (check() ignores repeat presses). */}
+        <button className="btn ghost refresh" type="button" onClick={check} aria-disabled={checking || undefined} aria-busy={checking || undefined}>
+          <Icon name="refresh" size="sm" className={checking ? 'spinning' : undefined} />Check now{' '}<span className="sr-only">for {name}</span>
         </button>
       </div>
     </section>

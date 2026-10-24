@@ -2,6 +2,17 @@ import type { ServerEvent } from '@agent-kanban/shared';
 
 export type SocketStatus = 'live' | 'reconnecting' | 'unauthorized';
 
+const PROBE_MS = 5000;
+
+/** A timeout signal for the 401 probe, where the browser has AbortSignal.timeout (else no timeout). */
+function probeSignal(): AbortSignal | undefined {
+  try {
+    return typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function' ? AbortSignal.timeout(PROBE_MS) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export interface SocketOptions {
   token: string;
   onEvent: (e: ServerEvent) => void;
@@ -46,7 +57,8 @@ export function connectSocket(opts: SocketOptions): { close(): void } {
   const afterDrop = async () => {
     let unauthorized = false;
     try {
-      const res = await fetch('/api/chats', { headers: { authorization: `Bearer ${opts.token}` } });
+      // A hung server must not stall reconnecting: give the probe 5 s, then retry as if unreachable.
+      const res = await fetch('/api/chats', { headers: { authorization: `Bearer ${opts.token}` }, signal: probeSignal() });
       unauthorized = res.status === 401;
     } catch {
       // server unreachable: just retry

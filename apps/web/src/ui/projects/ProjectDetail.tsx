@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
 import type { Project, ProjectInfo, ProviderId } from '@agent-kanban/shared';
 import { openChatIn, type AppState } from '../../state/reducer.ts';
+import { baseName } from '../../state/selectors.ts';
 import { useStore, useStoreInstance } from '../../state/store.ts';
 import { openHistoryChat, openNewChat } from '../actions.ts';
 import { ReasonBadge, errorText } from '../board/Card.tsx';
@@ -218,9 +219,23 @@ function About({ project, now }: { project: Project; now: number }) {
   );
 }
 
+/**
+ * A folder whose chats are on the board before /api/projects lists it (a chat just started there) still gets a page,
+ * built from those chats, until the refetched list arrives.
+ */
+function fromChats(chats: ProjectChat[]): Project | undefined {
+  const first = chats[0];
+  if (!first) return undefined;
+  return {
+    id: first.cwd, name: baseName(first.cwd), path: first.cwd, providers: [],
+    columns: { running: 0, needs_you: 0, review: 0, done: 0 }, historyOnly: 0, lastActivityAt: chats.reduce((a, c) => (c.updatedAt > a ? c.updatedAt : a), ''),
+  };
+}
+
 const detailState = (id: string) => (s: AppState) => {
-  const project = findByFolder(s.projects, id);
-  return { project, chats: project ? chatsByFolder(s)[folderKey(project.id)] ?? [] : [], now: s.now, loaded: s.loaded };
+  const found = findByFolder(s.projects, id);
+  const chats = chatsByFolder(s)[folderKey(found?.id ?? id)] ?? [];
+  return { project: found ?? fromChats(chats), chats, now: s.now, loaded: s.loaded };
 };
 
 export function ProjectDetail({ projectId }: { projectId: string }) {
@@ -288,7 +303,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
           <div className={`chat-list${swapped > 0 ? ' swapped' : ''}`} key={swapped} ref={listRef}>
             {visible.length === 0
               ? <div className="page-empty chats-empty">{chats.length === 0 ? 'No chats in this project yet.' : 'No chats from this provider yet.'}</div>
-              : visible.map((c, i) => <ChatRow key={c.key} c={c} now={now} index={i} swapped={swapped > 0} />)}
+              : <ul className="chat-rows" aria-label="Chats">{visible.map((c, i) => <li key={c.key}><ChatRow c={c} now={now} index={i} swapped={swapped > 0} /></li>)}</ul>}
             {list.length > visible.length && (
               <button className="chats-more" type="button" onClick={() => { focusRevealed.current = true; setShowAll(true); }}>Show {list.length - visible.length} more</button>
             )}

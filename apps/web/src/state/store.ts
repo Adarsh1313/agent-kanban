@@ -1,3 +1,5 @@
+import type { Chat } from '@agent-kanban/shared';
+import { folderKey } from '@agent-kanban/shared';
 import { createContext, createElement, useContext, useRef, useSyncExternalStore, type ReactNode } from 'react';
 import type { api as realApi } from '../api/client.ts';
 import { applySnapshot, beginSync, endSync, mergeChats, mergeFetched, missingChats, type AppState, type FetchedThread, type Snapshot } from './reducer.ts';
@@ -152,4 +154,42 @@ export async function refetchGaps(store: Store, api: Api): Promise<void> {
       busy.delete(id);
     }
   }));
+}
+
+const PROJECTS_DEBOUNCE_MS = 500;
+const projectRefresh = new WeakMap<Store, { timer: ReturnType<typeof setTimeout> | null; inFlight: boolean; again: boolean }>();
+
+/** Refetches /api/projects into the store: debounced, and at most one request at a time (a call meanwhile runs once more after it). */
+export function refreshProjectsSoon(store: Store, api: Api, delayMs = PROJECTS_DEBOUNCE_MS): void {
+  let st = projectRefresh.get(store);
+  if (!st) projectRefresh.set(store, (st = { timer: null, inFlight: false, again: false }));
+  const state = st;
+  if (state.inFlight) { state.again = true; return; }
+  if (state.timer) return;
+  state.timer = setTimeout(() => {
+    state.timer = null;
+    state.inFlight = true;
+    api.projects().then(
+      (projects) => store.setState((s) => ({ ...s, projects })),
+      () => { /* offline: the next unknown folder or resync asks again */ },
+    ).finally(() => {
+      state.inFlight = false;
+      if (state.again) { state.again = false; refreshProjectsSoon(store, api, delayMs); }
+    });
+  }, delayMs);
+}
+
+/** A chat event names a folder: when the store has no project for it (a new folder), the project list is refetched. */
+export function noteChatFolder(store: Store, api: Api, chat: Chat): void {
+  const s = store.getState();
+  if (!s.loaded || chat.archived) return;
+  const k = folderKey(chat.cwd);
+  if (s.projects.some((p) => folderKey(p.id) === k || folderKey(p.path) === k)) return;
+  refreshProjectsSoon(store, api);
+}
+
+/** Refetches the provider-history list (e.g. after a history-only chat was continued and is now on the board). */
+export async function refreshHistory(store: Store, api: Api): Promise<void> {
+  const history = await api.history();
+  store.setState((s) => ({ ...s, history }));
 }
