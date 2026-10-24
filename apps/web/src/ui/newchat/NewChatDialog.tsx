@@ -72,15 +72,12 @@ function defaultHint(list: ModelOption[], provider: ProviderId | null): string {
   return d ? `Uses ${d.label}` : `Uses ${provider ? providerName(provider) : 'the provider'}'s own default`;
 }
 
-/** Providers the server can't start chats on yet (Antigravity until Plan 3), with the reason shown on their row. */
-export const UNSUPPORTED: Partial<Record<ProviderId, string>> = { antigravity: "Antigravity chats aren't supported yet." };
-
 /**
- * Providers New chat can start on for a folder: connected, supported ones that have worked in it (any connected,
- * supported one for a new folder).
+ * Providers New chat can start on for a folder: connected ones that have worked in it (any connected one for a
+ * new folder).
  */
 export function allowedProviders(s: Pick<AppState, 'connections'>, project: Project | undefined): ProviderId[] {
-  const connected = PROVIDER_IDS.filter((id) => !UNSUPPORTED[id] && isConnected(s.connections[id]));
+  const connected = PROVIDER_IDS.filter((id) => isConnected(s.connections[id]));
   if (!project) return connected;
   const worked = new Set(project.providers.map((p) => p.provider));
   return connected.filter((id) => worked.has(id));
@@ -315,13 +312,9 @@ export function NewChatDialog() {
   let note: string | null = null;
   if (!st.loaded) note = null; // connections and projects are still loading
   else if (allowed.length === 0) {
-    const connectedIds = PROVIDER_IDS.filter((id) => isConnected(st.connections[id]));
-    const onlyUnsupported = connectedIds.length > 0 && connectedIds.every((id) => UNSUPPORTED[id]);
-    note = onlyUnsupported
-      ? "Antigravity chats aren't supported yet. Connect Claude Code or Codex on the Connections page."
-      : project
-        ? `None of your connected providers has worked on ${projectName} yet. Choose another folder to start fresh.`
-        : 'No provider is connected yet. Connect one on the Connections page.';
+    note = project
+      ? `None of your connected providers has worked on ${projectName} yet. Choose another folder to start fresh.`
+      : 'No provider is connected yet. Connect one on the Connections page.';
   } else if (project && allowed.length < PROVIDER_IDS.length) {
     const worked = PROVIDER_IDS.filter((id) => project.providers.some((p) => p.provider === id));
     if (worked.length < PROVIDER_IDS.length) {
@@ -432,7 +425,7 @@ export function NewChatDialog() {
           {PROVIDER_IDS.map((id) => {
             const conn = st.connections[id];
             const ok = allowed.includes(id);
-            const reason = UNSUPPORTED[id] ?? (!isConnected(conn) ? (conn ? STATUS_TEXT[conn.status] : 'Not connected') : `Hasn’t worked on ${projectName} yet`);
+            const reason = !isConnected(conn) ? (conn ? STATUS_TEXT[conn.status] : 'Not connected') : `Hasn’t worked on ${projectName} yet`;
             return (
               <button key={id} className="pick-row" type="button" role="option" aria-selected={provider === id} aria-disabled={ok ? undefined : true}
                 onClick={() => { if (!ok) return; setChosen(id); setPicker(null); promptRef.current?.focus(); }}>
