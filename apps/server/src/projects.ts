@@ -1,10 +1,13 @@
 import { execFile } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { basename, join } from 'node:path';
+import { join } from 'node:path';
 import type { Chat, Column, HistoryChat, Project, ProjectInfo, ProviderId } from '@agent-kanban/shared';
 import { folderKey } from '@agent-kanban/shared';
 
 const COLUMNS: Column[] = ['running', 'needs_you', 'review', 'done'];
+
+/** Last folder name of a path written with either separator (history can hold Windows paths on any OS). */
+const folderName = (p: string) => p.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || p;
 
 /** Group chats on the board and history-only chats by folder. Newest activity first. */
 export function buildProjects(chats: Chat[], history: HistoryChat[]): Project[] {
@@ -13,7 +16,7 @@ export function buildProjects(chats: Chat[], history: HistoryChat[]): Project[] 
     const k = folderKey(cwd);
     let p = map.get(k);
     if (!p) {
-      p = { id: cwd, name: basename(cwd) || cwd, path: cwd, providers: [], columns: { running: 0, needs_you: 0, review: 0, done: 0 }, historyOnly: 0, lastActivityAt: '', models: new Map() };
+      p = { id: cwd, name: folderName(cwd), path: cwd, providers: [], columns: { running: 0, needs_you: 0, review: 0, done: 0 }, historyOnly: 0, lastActivityAt: '', models: new Map() };
       map.set(k, p);
     }
     return p;
