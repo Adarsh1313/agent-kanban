@@ -1,5 +1,8 @@
 // Fake ACP agent (like agy_acp_server) speaking line-delimited JSON-RPC 2.0 on stdio.
-// FAKE_SCENARIO: ready | signin | turn | permission | crash | cancel
+// FAKE_SCENARIO: ready | signin | turn | permission | crash | cancel | permcancel | unknownreq | badstop
+//   permcancel: like permission, but after session/cancel the turn ends 'cancelled' once the permission answer arrives
+//   unknownreq: sends an fs/read_text_file request and reports the error code it got back
+//   badstop: ends the turn with no stopReason
 // FAKE_AUTH_URL overrides the URL printed by the signin scenario.
 // Strict about framing: any incoming message without "jsonrpc":"2.0" is rejected (requests) or ignored.
 import { createInterface } from 'node:readline';
@@ -15,13 +18,20 @@ const GOOGLE_URL = 'https://accounts.google.com/o/oauth2/v2/auth?client_id=fake&
 let authenticated = scenario !== 'signin';
 const sessions = new Set<string>();
 let pendingPrompt: { id: unknown; sessionId: string } | null = null;
+let cancelRequested = false;
 const PERM_ID = 'perm-1';
 
 function onPrompt(id: unknown, sessionId: string) {
   if (!sessions.has(sessionId)) return fail(id, -32602, 'unknown session');
   if (scenario === 'crash') { chunk(sessionId, 'Starting'); process.exit(1); }
   if (scenario === 'cancel') { chunk(sessionId, 'Working'); pendingPrompt = { id, sessionId }; return; }
-  if (scenario === 'permission') {
+  if (scenario === 'badstop') return reply(id, {});
+  if (scenario === 'unknownreq') {
+    pendingPrompt = { id, sessionId };
+    send({ id: 'u1', method: 'fs/read_text_file', params: { sessionId, path: '/etc/passwd' } });
+    return;
+  }
+  if (scenario === 'permission' || scenario === 'permcancel') {
     pendingPrompt = { id, sessionId };
     send({ id: PERM_ID, method: 'session/request_permission', params: {
       sessionId,
@@ -53,6 +63,11 @@ createInterface({ input: process.stdin }).on('line', (line) => {
       const o = m.result?.outcome;
       const picked = o?.outcome === 'selected' ? o.optionId : 'cancelled';
       chunk(pendingPrompt.sessionId, `permission: ${picked}`);
+      reply(pendingPrompt.id, { stopReason: cancelRequested ? 'cancelled' : 'end_turn' });
+      pendingPrompt = null;
+    }
+    if (m.id === 'u1' && pendingPrompt) {
+      chunk(pendingPrompt.sessionId, `error: ${m.error?.code}`);
       reply(pendingPrompt.id, { stopReason: 'end_turn' });
       pendingPrompt = null;
     }
@@ -88,6 +103,7 @@ createInterface({ input: process.stdin }).on('line', (line) => {
       return reply(m.id, null);
     case 'session/prompt': return onPrompt(m.id, p.sessionId);
     case 'session/cancel':
+      if (scenario === 'permcancel') { cancelRequested = true; return; }
       if (pendingPrompt && pendingPrompt.sessionId === p.sessionId) {
         reply(pendingPrompt.id, { stopReason: 'cancelled' });
         pendingPrompt = null;

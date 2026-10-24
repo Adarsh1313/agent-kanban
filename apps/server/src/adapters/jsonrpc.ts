@@ -10,6 +10,7 @@ const CLOSE_CAP_MS = 5_000;
 const KILL_ESCALATE_MS = 3_000;
 const EXIT_GRACE_MS = 100;
 const STDERR_LINES = 20;
+const MAX_LINE_CHARS = 1024 * 1024; // stdout lines longer than this are dropped unparsed
 
 /**
  * Line-delimited JSON-RPC over a child process's stdio. By default messages are sent without "jsonrpc" (Codex);
@@ -33,6 +34,7 @@ export class JsonRpcProcess {
   private taskkill: ((pid: number) => ChildProcess) | undefined;
   private jsonrpc: '2.0' | undefined;
   private textLineFns: Array<(line: string) => void> = [];
+  private warnedLongLine = false;
 
   constructor(command: string, args: string[], opts: { cwd?: string; env?: NodeJS.ProcessEnv; requestTimeoutMs?: number; taskkill?: (pid: number) => ChildProcess; jsonrpc?: '2.0' } = {}) {
     this.taskkill = opts.taskkill;
@@ -129,12 +131,16 @@ export class JsonRpcProcess {
 
   private onLine(line: string): void {
     if (!line.trim()) return;
+    if (line.length > MAX_LINE_CHARS) {
+      if (!this.warnedLongLine) { this.warnedLongLine = true; console.warn(`[jsonrpc] dropped a stdout line over ${MAX_LINE_CHARS} characters`); }
+      return;
+    }
     let m: any;
     try { m = JSON.parse(line); } catch { m = undefined; }
     if (m === null || typeof m !== 'object') { this.emitText(line); return; }
     if (typeof m.method === 'string') {
       if (m.id !== undefined) void this.handleServerRequest(m.id, m.method, m.params);
-      else { this.lastNoteAt = Date.now(); this.timedOut = false; for (const fn of this.notificationFns) fn(m.method, m.params); }
+      else { this.lastNoteAt = Date.now(); this.timedOut = false; for (const fn of this.notificationFns) { try { fn(m.method, m.params); } catch { /* a listener's bug must not break framing */ } } }
       return;
     }
     if (m.id === undefined) return;
@@ -157,7 +163,8 @@ export class JsonRpcProcess {
       const result = await this.requestFn(method, params, id);
       if (!this.exited) this.write({ id, result });
     } catch (e) {
-      if (!this.exited) this.write({ id, error: { code: -32603, message: e instanceof Error ? e.message : 'failed' } });
+      const code = typeof (e as any)?.code === 'number' ? (e as any).code : -32603;
+      if (!this.exited) this.write({ id, error: { code, message: e instanceof Error ? e.message : 'failed' } });
     }
   }
 

@@ -83,21 +83,41 @@ for (const [name, url] of [
 test('parseAuthUrl is strict', () => {
   assert.equal(parseAuthUrl(GOOD), GOOD);
   assert.equal(parseAuthUrl(`  ${GOOD}  `), GOOD);
+  const v1 = 'https://accounts.google.com/o/oauth2/auth?client_id=x&scope=openid+email&redirect_uri=http%3A%2F%2F127.0.0.1%3A8080%2F&state=abc%3D';
+  assert.equal(parseAuthUrl(v1), new URL(v1).href);
+  // the normalised href is returned, not the raw text
+  assert.equal(parseAuthUrl('HTTPS://accounts.google.com/o/oauth2/auth?redirect_uri=http%3A%2F%2F127.0.0.1%3A1%2F'), null, 'raw must start with the exact origin');
+  assert.equal(parseAuthUrl('https://accounts.google.com/o/oauth2/./auth?redirect_uri=http%3A%2F%2F127.0.0.1%3A1%2F'), 'https://accounts.google.com/o/oauth2/auth?redirect_uri=http%3A%2F%2F127.0.0.1%3A1%2F');
   const bad = [
-    'http://accounts.google.com/auth?redirect_uri=http%3A%2F%2F127.0.0.1%3A1%2F',
-    'https://evil.example/auth?redirect_uri=http%3A%2F%2F127.0.0.1%3A1%2F',
-    'https://user@accounts.google.com/auth?redirect_uri=http%3A%2F%2F127.0.0.1%3A1%2F',
-    'https://accounts.google.com:444/auth?redirect_uri=http%3A%2F%2F127.0.0.1%3A1%2F',
-    'https://accounts.google.com/auth',
-    'https://accounts.google.com/auth?redirect_uri=http%3A%2F%2F127.0.0.1%3A1%2F&redirect_uri=http%3A%2F%2F127.0.0.1%3A1%2F',
-    'https://accounts.google.com/auth?redirect_uri=http%3A%2F%2F127.0.0.1%2F',
-    'https://accounts.google.com/auth?redirect_uri=http%3A%2F%2F127.0.0.1%3A1%2Fcb',
-    'https://accounts.google.com/auth?redirect_uri=http%3A%2F%2F127.0.0.1%3Aabc%2F',
-    'https://accounts.google.com/auth?redirect_uri=https%3A%2F%2F127.0.0.1%3A1%2F',
-    'https://accounts.google.com/auth?redirect_uri=http%3A%2F%2Flocalhost%3A1%2F',
-    'https://accounts.google.com/auth?redirect_uri=http%3A%2F%2F127.0.0.1%3A99999%2F',
+    'http://accounts.google.com/o/oauth2/auth?redirect_uri=http%3A%2F%2F127.0.0.1%3A1%2F',
+    'https://evil.example/o/oauth2/auth?redirect_uri=http%3A%2F%2F127.0.0.1%3A1%2F',
+    'https://user@accounts.google.com/o/oauth2/auth?redirect_uri=http%3A%2F%2F127.0.0.1%3A1%2F',
+    'https://accounts.google.com:444/o/oauth2/auth?redirect_uri=http%3A%2F%2F127.0.0.1%3A1%2F',
+    'https://accounts.google.com/o/oauth2/auth',
+    'https://accounts.google.com/o/oauth2/auth?redirect_uri=http%3A%2F%2F127.0.0.1%3A1%2F&redirect_uri=http%3A%2F%2F127.0.0.1%3A1%2F',
+    'https://accounts.google.com/o/oauth2/auth?redirect_uri=http%3A%2F%2F127.0.0.1%2F',
+    'https://accounts.google.com/o/oauth2/auth?redirect_uri=http%3A%2F%2F127.0.0.1%3A1%2Fcb',
+    'https://accounts.google.com/o/oauth2/auth?redirect_uri=http%3A%2F%2F127.0.0.1%3Aabc%2F',
+    'https://accounts.google.com/o/oauth2/auth?redirect_uri=https%3A%2F%2F127.0.0.1%3A1%2F',
+    'https://accounts.google.com/o/oauth2/auth?redirect_uri=http%3A%2F%2Flocalhost%3A1%2F',
+    'https://accounts.google.com/o/oauth2/auth?redirect_uri=http%3A%2F%2F127.0.0.1%3A99999%2F',
     `${GOOD} trailing`,
     'not a url',
+    // outside the allowed path list
+    'https://accounts.google.com/signin?redirect_uri=http%3A%2F%2F127.0.0.1%3A1%2F',
+    'https://accounts.google.com/o/oauth2/v2/auth/extra?redirect_uri=http%3A%2F%2F127.0.0.1%3A1%2F',
+    // shell metacharacters and non-printable / non-ASCII characters
+    `${GOOD}&state="x"`,
+    `${GOOD}&state=a^b`,
+    `${GOOD}&calc`,
+    `${GOOD}&state=%calc%`,
+    `${GOOD}&state=a|b`,
+    `${GOOD}&state=a<b`,
+    `${GOOD}&state=a\\b`,
+    `${GOOD}&state=a\u0000b`,
+    `${GOOD}&state=a\u001bb`,
+    `${GOOD}&state=a‮b`,
+    `https://accounts.google.com/o/oauth2/auth‮?redirect_uri=http%3A%2F%2F127.0.0.1%3A1%2F`,
   ];
   for (const u of bad) assert.equal(parseAuthUrl(u), null, u);
 });
@@ -175,5 +195,65 @@ test('a crash mid-turn rejects the prompt', async () => {
     const sid = await acp.newSession(process.cwd());
     await assert.rejects(acp.prompt(sid, 'hi'), /exited/);
     assert.equal(exitCode, 1);
+  } finally { await proc.close(); }
+});
+
+test('cancel answers an unanswered permission request with cancelled and the turn ends cancelled', async () => {
+  const { proc, acp } = start('permcancel');
+  const texts: string[] = [];
+  let calls = 0;
+  let asked!: () => void;
+  const heard = new Promise<void>((r) => { asked = r; });
+  acp.onUpdate((_s, u) => { if (u.sessionUpdate === 'agent_message_chunk') texts.push(u.content.text); });
+  acp.onPermission(() => { calls++; asked(); return new Promise(() => {}); }); // the user never answers
+  try {
+    await acp.initialize();
+    const sid = await acp.newSession(process.cwd());
+    const turn = acp.prompt(sid, 'run tests');
+    await heard;
+    acp.cancel(sid);
+    acp.cancel(sid); // a second cancel must not answer twice
+    assert.deepEqual(await turn, { stopReason: 'cancelled' });
+    assert.deepEqual(texts, ['permission: cancelled']);
+    assert.equal(calls, 1);
+  } finally { await proc.close(); }
+});
+
+for (const [name, handler] of [
+  ['throws', async () => { throw new Error('boom'); }],
+  ['returns undefined', async () => undefined],
+] as const) {
+  test(`a permission handler that ${name} is answered cancelled`, async () => {
+    const { proc, acp } = start('permission');
+    const texts: string[] = [];
+    acp.onUpdate((_s, u) => { if (u.sessionUpdate === 'agent_message_chunk') texts.push(u.content.text); });
+    acp.onPermission(handler as any);
+    try {
+      await acp.initialize();
+      const sid = await acp.newSession(process.cwd());
+      assert.equal((await acp.prompt(sid, 'x')).stopReason, 'end_turn');
+      assert.deepEqual(texts, ['permission: cancelled']);
+    } finally { await proc.close(); }
+  });
+}
+
+test('an unknown request from the agent gets -32601', async () => {
+  const { proc, acp } = start('unknownreq');
+  const texts: string[] = [];
+  acp.onUpdate((_s, u) => { if (u.sessionUpdate === 'agent_message_chunk') texts.push(u.content.text); });
+  try {
+    await acp.initialize();
+    const sid = await acp.newSession(process.cwd());
+    await acp.prompt(sid, 'x');
+    assert.deepEqual(texts, ['error: -32601']);
+  } finally { await proc.close(); }
+});
+
+test('a missing stopReason is reported as unknown', async () => {
+  const { proc, acp } = start('badstop');
+  try {
+    await acp.initialize();
+    const sid = await acp.newSession(process.cwd());
+    assert.deepEqual(await acp.prompt(sid, 'x'), { stopReason: 'unknown' });
   } finally { await proc.close(); }
 });

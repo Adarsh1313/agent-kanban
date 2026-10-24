@@ -14,6 +14,10 @@ export type AcpInitializeResult = {
 export type AcpPermissionOption = { optionId: string; name: string; kind: string };
 export type AcpPermissionRequest = { toolCall: any; options: AcpPermissionOption[] };
 export type AcpPermissionDecision = { optionId: string } | 'cancelled';
+export type AcpStopReason = 'end_turn' | 'max_tokens' | 'max_turn_requests' | 'refusal' | 'cancelled' | 'unknown';
+
+const STOP_REASONS: ReadonlySet<string> = new Set(['end_turn', 'max_tokens', 'max_turn_requests', 'refusal', 'cancelled']);
+const CANCELLED = { outcome: { outcome: 'cancelled' } } as const;
 
 const INIT_PARAMS = {
   protocolVersion: 1,
@@ -24,24 +28,35 @@ const INIT_PARAMS = {
 const PROMPT_TIMEOUT_MS = 24 * 60 * 60 * 1000;
 
 const REDIRECT_RE = /^http:\/\/127\.0\.0\.1:(\d{1,5})\/$/;
+// Google's OAuth endpoints. Task 3 confirms which one agy_acp_server prints.
+const AUTH_PATHS: ReadonlySet<string> = new Set(['/o/oauth2/v2/auth', '/o/oauth2/auth']);
+// Printable ASCII, then a narrower allowlist: no quotes, ^, |, <, >, backslash, backtick, braces, spaces or controls.
+const PRINTABLE_ASCII_RE = /^[!-~]+$/;
+const URL_CHARS_RE = /^[A-Za-z0-9\-._~:\/?&=%+,]+$/;
 
 /**
- * Returns the sign-in URL if it is exactly what Antigravity's sign-in prints: https://accounts.google.com/...
- * with one `redirect_uri` of http://127.0.0.1:<port>/. Anything else returns null.
+ * Returns the sign-in URL (normalised) if it is exactly what Antigravity's sign-in prints:
+ * https://accounts.google.com/o/oauth2/(v2/)auth?... with one `redirect_uri` of http://127.0.0.1:<port>/.
+ * Anything else returns null.
  */
 export function parseAuthUrl(raw: string): string | null {
   const text = raw.trim();
-  if (!text.startsWith('https://accounts.google.com/') || /\s/.test(text)) return null;
+  if (!PRINTABLE_ASCII_RE.test(text) || !URL_CHARS_RE.test(text)) return null;
+  if (!text.startsWith('https://accounts.google.com/')) return null;
+  if (/%(?![0-9A-Fa-f]{2})/.test(text)) return null; // every % must be a percent-escape
   let url: URL;
   try { url = new URL(text); } catch { return null; }
   if (url.origin !== 'https://accounts.google.com' || url.username || url.password) return null;
+  if (!AUTH_PATHS.has(url.pathname)) return null;
+  // every query part must be key=value (no bare `&calc`-style parts)
+  if (!url.search || url.search.slice(1).split('&').some((part) => !/^[^=]+=/.test(part))) return null;
   const redirects = url.searchParams.getAll('redirect_uri');
   if (redirects.length !== 1) return null;
   const m = REDIRECT_RE.exec(redirects[0]);
   if (!m) return null;
   const port = Number(m[1]);
   if (port < 1 || port > 65535) return null;
-  return text;
+  return url.href;
 }
 
 function readAuthenticated(result: any, authMethods: unknown[]): boolean {
@@ -56,6 +71,8 @@ export class AcpClient {
   private updateFns: Array<(sessionId: string, update: any) => void> = [];
   private permissionFn: ((sessionId: string, req: AcpPermissionRequest) => Promise<AcpPermissionDecision>) | null = null;
   private authUrlFns: Array<(url: string) => void> = [];
+  // Open session/request_permission requests per session; cancel() answers them with 'cancelled'.
+  private openPermissions = new Map<string, Set<() => void>>();
 
   constructor(proc: JsonRpcProcess) {
     this.proc = proc;
@@ -64,13 +81,8 @@ export class AcpClient {
       for (const fn of this.updateFns) fn(params.sessionId, params.update);
     });
     proc.onRequest(async (method, params) => {
-      if (method !== 'session/request_permission') throw new Error(`unsupported: ${method}`);
-      const req: AcpPermissionRequest = { toolCall: params?.toolCall, options: Array.isArray(params?.options) ? params.options : [] };
-      const decision = this.permissionFn ? await this.permissionFn(String(params?.sessionId ?? ''), req) : 'cancelled';
-      if (decision === 'cancelled' || !req.options.some((o) => o.optionId === decision.optionId)) {
-        return { outcome: { outcome: 'cancelled' } };
-      }
-      return { outcome: { outcome: 'selected', optionId: decision.optionId } };
+      if (method !== 'session/request_permission') throw Object.assign(new Error(`method not found: ${method}`), { code: -32601 });
+      return this.answerPermission(String(params?.sessionId ?? ''), params);
     });
     proc.onTextLine((line) => {
       const trimmed = line.trim();
@@ -78,6 +90,27 @@ export class AcpClient {
       const url = parseAuthUrl(trimmed.slice(AUTH_LINE_PREFIX.length));
       if (url) for (const fn of this.authUrlFns) fn(url);
     });
+  }
+
+  private async answerPermission(sessionId: string, params: any): Promise<unknown> {
+    const req: AcpPermissionRequest = { toolCall: params?.toolCall, options: Array.isArray(params?.options) ? params.options : [] };
+    let release!: () => void;
+    const cancelled = new Promise<'cancelled'>((resolve) => { release = () => resolve('cancelled'); });
+    let open = this.openPermissions.get(sessionId);
+    if (!open) { open = new Set(); this.openPermissions.set(sessionId, open); }
+    open.add(release);
+    try {
+      const asked: Promise<unknown> = this.permissionFn
+        ? Promise.resolve().then(() => this.permissionFn!(sessionId, req)).catch(() => 'cancelled')
+        : Promise.resolve('cancelled');
+      const decision: any = await Promise.race([asked, cancelled]);
+      const optionId = decision && typeof decision === 'object' ? decision.optionId : undefined;
+      if (typeof optionId !== 'string' || !req.options.some((o) => o.optionId === optionId)) return CANCELLED;
+      return { outcome: { outcome: 'selected', optionId } };
+    } finally {
+      open.delete(release);
+      if (open.size === 0 && this.openPermissions.get(sessionId) === open) this.openPermissions.delete(sessionId);
+    }
   }
 
   async initialize(): Promise<AcpInitializeResult> {
@@ -110,13 +143,17 @@ export class AcpClient {
     await this.proc.request('session/load', { sessionId, cwd, mcpServers: [] });
   }
 
-  async prompt(sessionId: string, text: string): Promise<{ stopReason: string }> {
+  async prompt(sessionId: string, text: string): Promise<{ stopReason: AcpStopReason }> {
     const r = await this.proc.request<any>('session/prompt', { sessionId, prompt: [{ type: 'text', text }] }, PROMPT_TIMEOUT_MS);
-    return { stopReason: typeof r?.stopReason === 'string' ? r.stopReason : 'end_turn' };
+    const reason = r?.stopReason;
+    return { stopReason: typeof reason === 'string' && STOP_REASONS.has(reason) ? reason as AcpStopReason : 'unknown' };
   }
 
+  /** Sends session/cancel and answers every open permission request for the session with 'cancelled'. */
   cancel(sessionId: string): void {
     this.proc.notify('session/cancel', { sessionId });
+    const open = this.openPermissions.get(sessionId);
+    if (open) for (const release of [...open]) release();
   }
 
   onUpdate(fn: (sessionId: string, update: any) => void): void { this.updateFns.push(fn); }
