@@ -106,6 +106,25 @@ describe('connectSocket', () => {
     expect(FakeSocket.all.length).toBe(n);
   });
 
+  it('the 401 probe has a 5 s timeout signal; without AbortSignal.timeout it still probes', async () => {
+    const timeout = vi.spyOn(AbortSignal, 'timeout');
+    const { fetchMock } = setup(401);
+    last().drop();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(timeout).toHaveBeenCalledWith(5000);
+    expect(fetchMock.mock.calls[0]![1].signal).toBeInstanceOf(AbortSignal);
+    timeout.mockRestore();
+    const original = AbortSignal.timeout;
+    (AbortSignal as unknown as { timeout?: unknown }).timeout = undefined;
+    try {
+      const again = setup(401);
+      last().drop();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(again.onStatus).toHaveBeenLastCalledWith('unauthorized');
+      expect(again.fetchMock.mock.calls[0]![1].signal).toBeUndefined();
+    } finally { AbortSignal.timeout = original; }
+  });
+
   it('keeps retrying when the probe itself fails (server down)', async () => {
     const { onStatus, fetchMock } = setup();
     fetchMock.mockRejectedValue(new TypeError('network'));

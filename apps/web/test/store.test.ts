@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { OpenRequest } from '@agent-kanban/shared';
 import { applyEvent, initialState, isChatLoaded, type AppState } from '../src/state/reducer.ts';
-import { createStore, loadAll, loadChat, refetchGaps, syncMissing } from '../src/state/store.ts';
+import { createStore, loadAll, loadChat, noteChatFolder, refetchGaps, refreshHistory, syncMissing } from '../src/state/store.ts';
 import type { api as realApi } from '../src/api/client.ts';
 import { chat, message } from './helpers.ts';
 
@@ -182,5 +182,47 @@ describe('refetchGaps (fix round 2)', () => {
     expect(listMessages).toHaveBeenCalledTimes(1);
     expect(store.getState().messages.c1![0]!.text).toBe('Hello world');
     expect(store.getState().refetch.c1).toBeUndefined();
+  });
+});
+
+describe('stale projects and history (final review)', () => {
+  const project = (id: string) => ({ id, name: id, path: id, providers: [], columns: { running: 0, needs_you: 0, review: 0, done: 0 }, historyOnly: 0, lastActivityAt: '' });
+
+  it('a chat in a folder the store has no project for refetches projects once (debounced, one in flight)', async () => {
+    vi.useFakeTimers();
+    try {
+      const store = storeWith({ loaded: true, projects: [project('/known')] });
+      let release!: () => void;
+      const projects = vi.fn(() => new Promise<unknown[]>((r) => { release = () => r([project('/known'), project('/new')]); }));
+      const api = fakeApi({ projects });
+      for (let i = 0; i < 3; i++) noteChatFolder(store, api, chat({ cwd: '/new' }));
+      await vi.advanceTimersByTimeAsync(499);
+      expect(projects).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(projects).toHaveBeenCalledTimes(1);
+      noteChatFolder(store, api, chat({ cwd: '/new' }));
+      await vi.advanceTimersByTimeAsync(600);
+      expect(projects).toHaveBeenCalledTimes(1); // one in flight
+      release();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(store.getState().projects.map((p) => p.id)).toEqual(['/known', '/new']);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('a chat in a known folder (any spelling) does not refetch', async () => {
+    vi.useFakeTimers();
+    try {
+      const store = storeWith({ loaded: true, projects: [project('C:/work/a')] });
+      const projects = vi.fn(async () => []);
+      noteChatFolder(store, fakeApi({ projects }), chat({ cwd: 'c:/work/a/' }));
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(projects).not.toHaveBeenCalled();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('refreshHistory replaces the history list (after a history chat is continued)', async () => {
+    const store = storeWith({ history: [{ provider: 'claude', sessionRef: 'old', title: 't', cwd: '/x', updatedAt: 'x' }] });
+    await refreshHistory(store, fakeApi({ history: async () => [] }));
+    expect(store.getState().history).toEqual([]);
   });
 });

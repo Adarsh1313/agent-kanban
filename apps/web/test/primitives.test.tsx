@@ -32,6 +32,18 @@ function Pop({ label }: { label: string }) {
 const state = (name: string) => screen.getByRole('dialog', { name, hidden: true }).getAttribute('data-state');
 
 describe('Popover', () => {
+  it('a closed popover is hidden and unreachable: fixed (no scroll range), visibility hidden after the exit fade, inert', async () => {
+    const { readFileSync } = await import('node:fs');
+    const css = readFileSync('src/styles/app.css', 'utf8'); // vitest runs from apps/web
+    expect(css).toMatch(/\.popover \{ position: fixed; top: 0; left: 0; \}/);
+    const closedRule = /\.popover\[data-state="closed"\] \{([^}]*)\}/.exec(css)?.[1] ?? '';
+    expect(closedRule).toContain('visibility: hidden');
+    expect(closedRule).toMatch(/visibility 0s linear var\(--duration-exit\)/);
+    render(<Pop label="One" />);
+    const pop = screen.getByRole('dialog', { name: 'One popover', hidden: true });
+    expect(pop.getAttribute('data-state')).toBe('closed');
+    expect(pop.hasAttribute('inert')).toBe(true);
+  });
   it('opens from its trigger and closes on an outside click', () => {
     render(<><Pop label="One" /><button>elsewhere</button></>);
     fireEvent.click(screen.getByText('One'));

@@ -453,6 +453,16 @@ describe('two tabs', () => {
     expect(mine.sent).toEqual([]);
   });
 
+  it('Mark all read relays a finite cut-off even when a notification time is unreadable', () => {
+    const store = seeded({ notifications: [note({ id: 'n1', at: 'not a date' }), note({ id: 'n2', chatId: 'c2' })] });
+    start(store);
+    const got: Array<{ until: number }> = [];
+    otherTab().onmessage = (e) => got.push(e.data as { until: number });
+    act(() => markAllRead(store));
+    expect(got).toHaveLength(1);
+    expect(Number.isFinite(got[0]!.until)).toBe(true);
+  });
+
   it('works without BroadcastChannel', () => {
     vi.stubGlobal('BroadcastChannel', undefined);
     const store = seeded({ notifications: [note({ id: 'n1' })] });

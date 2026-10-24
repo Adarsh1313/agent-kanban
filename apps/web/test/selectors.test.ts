@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { applySnapshot, initialState, type AppState, type Filters } from '../src/state/reducer.ts';
 import { boardColumns, focusedProvider, pinned, projectLabel, providerCounts, recentChatsByProject, suggestFor, unreadCount, visibleChats } from '../src/state/selectors.ts';
+import { filterOptions } from '../src/ui/filters/model.ts';
 import { chat } from './helpers.ts';
 
 const NOW = Date.parse('2026-10-23T12:00:00.000Z');
@@ -142,5 +143,27 @@ describe('sidebar helpers', () => {
   });
   it('projectLabel falls back to the folder name', () => {
     expect(projectLabel(state(), String.raw`C:\Users\me\open-project`)).toBe('open-project');
+  });
+  it('providerCounts leaves out a chat being archived (Undo toast showing)', () => {
+    const s = state([chat({ id: 'a', sessionRef: 'r1' }), chat({ id: 'b', sessionRef: 'r2' })]);
+    expect(providerCounts(s).claude).toBe(2);
+    const archiving = { ...s, ui: { ...s.ui, archiving: { b: true as const } } };
+    expect(providerCounts(archiving).claude).toBe(1);
+  });
+});
+
+describe('one folder, however it is spelled', () => {
+  const spellings = [String.raw`C:\a`, String.raw`c:\a\ `.trim(), 'C:/a'];
+  const s = state(spellings.map((cwd, i) => chat({ id: `c${i}`, sessionRef: `r${i}`, cwd, updatedAt: `2026-10-23T10:0${i}:00.000Z` })));
+  it('the sidebar shows one group', () => {
+    const groups = recentChatsByProject(s, NOW);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]!.total).toBe(3);
+  });
+  it('filtering by any spelling matches every spelling', () => {
+    for (const p of spellings) expect(ids(withFilters(s, { project: [p] }))).toEqual(['c0', 'c1', 'c2']);
+  });
+  it('the Project filter offers one option', () => {
+    expect(filterOptions(s, 'project')).toHaveLength(1);
   });
 });

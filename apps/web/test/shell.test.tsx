@@ -167,6 +167,15 @@ describe('Sidebar: pinned and recent', () => {
     Reflect.deleteProperty(HTMLElement.prototype, 'offsetParent');
   });
 
+  it('the + on a group with no folder opens New chat without one', () => {
+    const handler = vi.fn();
+    setNewChatHandler(handler);
+    mount(seeded([chat({ cwd: '' })]));
+    fireEvent.click(screen.getByRole('button', { name: /^New chat in/ }));
+    expect(handler).toHaveBeenCalledWith(undefined);
+    setNewChatHandler(null);
+  });
+
   it('the + on a project row opens New chat for that project', () => {
     const handler = vi.fn();
     setNewChatHandler(handler);
@@ -203,6 +212,24 @@ describe('Sidebar: pinned and recent', () => {
     expect(document.querySelectorAll('.proj').length).toBe(4);
     expect(document.querySelectorAll('.proj .chat-row').length).toBe(12);
     expect(took).toBeLessThan(200);
+  });
+});
+
+describe('Shell: connection banner', () => {
+  const banner = () => document.querySelector('.conn-banner')?.textContent ?? null;
+  it('connecting (before the first open) shows no banner', () => {
+    expect(initialState().socket).toBe('connecting');
+    mount(seeded([chat()], [], { socket: 'connecting' }), <Shell />);
+    expect(banner()).toBeNull();
+  });
+  it('a page opened without a token says to use the printed link; a 401 after connecting says the server restarted', () => {
+    const store = seeded([chat()], [], { socket: 'no_token' });
+    mount(store, <Shell />);
+    expect(banner()).toBe('Open Agent Kanban from the link the server printed.');
+    act(() => store.setState((s) => ({ ...s, socket: 'unauthorized' })));
+    expect(banner()).toBe('The server restarted. Open Agent Kanban again from the link it printed.');
+    act(() => store.setState((s) => ({ ...s, socket: 'reconnecting' })));
+    expect(banner()).toBe('Reconnecting…');
   });
 });
 

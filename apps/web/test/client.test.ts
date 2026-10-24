@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ApiError, api, readToken } from '../src/api/client.ts';
+import { ApiError, api, readToken, resetTokenCache } from '../src/api/client.ts';
 
 beforeEach(() => {
+  resetTokenCache();
   sessionStorage.clear();
   history.replaceState(null, '', '/');
 });
@@ -25,6 +26,26 @@ describe('readToken', () => {
 
   it('returns null with no token anywhere', () => {
     expect(readToken()).toBeNull();
+  });
+
+  it('strips the token from the address bar even when sessionStorage is blocked, and keeps it in memory', () => {
+    history.replaceState(null, '', '/?token=secret');
+    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('blocked'); });
+    const getItem = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('blocked'); });
+    try {
+      expect(readToken()).toBe('secret');
+      expect(location.href).not.toContain('secret');
+      expect(readToken()).toBe('secret');
+    } finally { setItem.mockRestore(); getItem.mockRestore(); }
+  });
+
+  it('reads sessionStorage once, then answers from memory', () => {
+    sessionStorage.setItem('agent-kanban.token', 'stored');
+    const getItem = vi.spyOn(Storage.prototype, 'getItem');
+    try {
+      readToken(); readToken(); readToken();
+      expect(getItem).toHaveBeenCalledTimes(1);
+    } finally { getItem.mockRestore(); }
   });
 });
 

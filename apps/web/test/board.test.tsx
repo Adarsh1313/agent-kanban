@@ -397,6 +397,21 @@ describe('Board: fix round 1', () => {
     expect(el.classList.contains('new')).toBe(false);
   });
 
+  it('a second arrival does not cut the first card\'s tint short', () => {
+    vi.useFakeTimers({ now: Date.now() });
+    const store = seeded([chat({ id: 'old', title: 'Old', sessionRef: 'o' })]);
+    mount(store);
+    const arrive = (id: string, title: string) => {
+      const at = new Date().toISOString();
+      act(() => store.setState((s) => applyEvent(s, { type: 'chat.updated', chat: chat({ id, title, sessionRef: id, createdAt: at, updatedAt: at }) })));
+    };
+    arrive('n1', 'First new');
+    act(() => { vi.advanceTimersByTime(100); });
+    arrive('n2', 'Second new');
+    expect(card('First new').classList.contains('new')).toBe(true);
+    expect(card('Second new').classList.contains('new')).toBe(true);
+  });
+
   it('running cards offer Mark done too (keyboard path for running to Done)', () => {
     mocked.done.mockResolvedValue(undefined);
     mount(seeded([chat({ title: 'Still going' })]));

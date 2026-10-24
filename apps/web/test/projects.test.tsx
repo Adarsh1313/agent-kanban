@@ -152,6 +152,9 @@ describe('Projects list', () => {
     expect(rows()[0]!.classList.contains('stagger')).toBe(true);
     act(() => store.setState((s) => ({ ...s, now: s.now + 30_000 })));
     expect(rows()[0]!.classList.contains('stagger')).toBe(true);
+    // An animation inside the last row (bubbling up) is not the row's own rise.
+    animationEnd(rows()[1]!.firstElementChild!);
+    expect(rows()[0]!.classList.contains('stagger')).toBe(true);
     animationEnd(rows()[1]!);
     expect(rows()[0]!.classList.contains('stagger')).toBe(false);
     cleanup();
@@ -165,6 +168,20 @@ describe('Project detail', () => {
     mount(seeded([ALPHA], [], [], '/work/gone'));
     expect(screen.getByRole('heading', { name: 'Project not found' })).toBeTruthy();
     expect(screen.getByRole('link', { name: /All projects/ }).getAttribute('href')).toBe('#/projects');
+  });
+
+  it('a folder with a board chat but not yet in the project list still has a page (no "Project not found")', () => {
+    mount(seeded([ALPHA], [chat({ id: 'n', cwd: '/work/new-one', title: 'Fresh chat' })], [], '/work/new-one'));
+    expect(screen.queryByRole('heading', { name: 'Project not found' })).toBeNull();
+    expect(screen.getByRole('heading', { name: /new-one/ })).toBeTruthy();
+    expect(screen.getByText('Fresh chat')).toBeTruthy();
+  });
+
+  it('the chat list is a list: one item per chat', () => {
+    mount(seeded([ALPHA], [chat({ id: 'a', cwd: '/work/alpha' }), chat({ id: 'b', sessionRef: 's2', cwd: '/work/alpha' })], [], '/work/alpha'));
+    const list = document.querySelector('.chat-list ul')!;
+    expect(list).toBeTruthy();
+    expect(within(list as HTMLElement).getAllByRole('listitem')).toHaveLength(2);
   });
 
   it('finds the project however the route spells its folder', () => {

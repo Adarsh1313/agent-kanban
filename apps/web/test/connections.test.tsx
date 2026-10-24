@@ -77,6 +77,13 @@ describe('connections page', () => {
     expect(card('codex').querySelector('.conn-note')!.textContent).toBe('gpt-5.5 isn’t available on your plan, so new chats use gpt-5.4.');
   });
 
+  it('card names are headings; an update_available provider still reads Connected', () => {
+    mount(seeded(ALL()));
+    expect(within(card('codex')).getByRole('heading', { level: 4, name: 'Codex' })).toBeTruthy();
+    expect(card('codex').dataset.state).toBe('connected');
+    expect(within(card('codex')).getByRole('status').textContent).toBe('Connected');
+  });
+
   it('a provider that is not installed or signed out says setup is coming next; Antigravity says chats are coming next', () => {
     mount(seeded([conn('claude', { status: 'signed_out', signedIn: false }), conn('codex'), ALL()[2]!]));
     expect(card('claude').dataset.state).toBe('signedout');
@@ -118,16 +125,23 @@ describe('connections page', () => {
     mocked.checkConnections.mockReturnValue(new Promise((r) => { answer = r; }));
     const store = seeded(ALL());
     mount(store);
-    const btn = within(card('codex')).getByRole('button', { name: 'Check Codex now' }) as HTMLButtonElement;
+    const btn = within(card('codex')).getByRole('button', { name: 'Check now for Codex' }) as HTMLButtonElement;
+    expect(btn.textContent).toContain('Check now'); // the accessible name contains the visible label
+    btn.focus();
     fireEvent.click(btn);
     expect(mocked.checkConnections).toHaveBeenCalledWith('codex');
-    expect(btn.disabled).toBe(true);
+    expect(btn.getAttribute('aria-disabled')).toBe('true');
+    expect(btn.getAttribute('aria-busy')).toBe('true');
+    expect(btn.disabled).toBe(false);
+    expect(document.activeElement).toBe(btn);
     expect(btn.querySelector('.icon.spinning')).toBeTruthy();
     fireEvent.click(btn);
     expect(mocked.checkConnections).toHaveBeenCalledTimes(1);
 
     await act(async () => answer([conn('codex', { version: '0.157.0', checkedAt: new Date(NOW).toISOString() })]));
-    await waitFor(() => expect(btn.disabled).toBe(false));
+    await waitFor(() => expect(btn.getAttribute('aria-disabled')).toBeNull());
+    expect(btn.getAttribute('aria-busy')).toBeNull();
+    expect(document.activeElement).toBe(btn);
     expect(btn.querySelector('.icon.spinning')).toBeNull();
     expect(fact('codex', 'Version')).toBe('0.157.0');
     expect(card('codex').textContent).toContain('Checked just now');
@@ -138,9 +152,9 @@ describe('connections page', () => {
     mocked.checkConnections.mockRejectedValue(new ApiError('Couldn’t check Codex.', 500));
     mount(seeded(ALL()));
     const before = card('codex').innerHTML;
-    fireEvent.click(within(card('codex')).getByRole('button', { name: 'Check Codex now' }));
+    fireEvent.click(within(card('codex')).getByRole('button', { name: 'Check now for Codex' }));
     expect(await screen.findByText('Couldn’t check Codex.')).toBeTruthy();
-    await waitFor(() => expect((within(card('codex')).getByRole('button', { name: 'Check Codex now' }) as HTMLButtonElement).disabled).toBe(false));
+    await waitFor(() => expect(within(card('codex')).getByRole('button', { name: 'Check now for Codex' }).getAttribute('aria-disabled')).toBeNull());
     expect(card('codex').innerHTML).toBe(before);
   });
 
