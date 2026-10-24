@@ -94,6 +94,8 @@ export class AntigravityAdapter implements ProviderAdapter {
   private learned: boolean | null = null;
   /** A crash cut off a running turn since the last ping: the next ping reports it once. */
   private crashedTurn = false;
+  /** Calls in progress (startChat, sendMessage, resume): the agent isn't idle while one runs. */
+  private busy = 0;
 
   constructor(opts: AntigravityAdapterOptions) {
     this.pingTimeoutMs = opts.pingTimeoutMs ?? 15_000;
@@ -122,7 +124,7 @@ export class AntigravityAdapter implements ProviderAdapter {
 
   private ensureProcess(): Promise<Live> {
     if (this.disposed) return Promise.reject(new Error('Antigravity adapter is shut down.'));
-    if (this.live && !this.recycleMarked.has(this.live.proc)) return Promise.resolve(this.live);
+    if (this.live && !this.recycleMarked.has(this.live.proc)) { this.touchIdle(); return Promise.resolve(this.live); }
     if (this.starting) return this.starting;
     const s: Promise<Live> = this.spawnProcess().finally(() => { if (this.starting === s) this.starting = null; });
     this.starting = s;
@@ -153,6 +155,7 @@ export class AntigravityAdapter implements ProviderAdapter {
     try {
       live.init = await acp.initialize();
       if (live.init.agentInfo?.version) this.version = live.init.agentInfo.version;
+      console.log(`[antigravity] agent started (agentInfo ${live.init.agentInfo?.name ?? '?'} ${live.init.agentInfo?.version ?? '?'})`);
       this.agentFlag = live.init.authenticated;
       if (this.disposed) throw new Error('Antigravity adapter is shut down.');
       this.live = live;
@@ -317,35 +320,49 @@ export class AntigravityAdapter implements ProviderAdapter {
     throw err;
   }
 
-  async startChat(input: { cwd: string; prompt: string; model?: string }): Promise<{ sessionRef: string }> {
-    const live = await this.ensureProcess();
-    let sessionId: string;
-    try { sessionId = await live.acp.newSession(input.cwd); } catch (e) { this.rethrow(e); }
-    live.sessions.add(sessionId);
-    this.sessionCwd.set(sessionId, input.cwd);
-    this.emit({ type: 'session.started', sessionRef: sessionId });
-    this.runTurn(live, sessionId, input.prompt);
-    return { sessionRef: sessionId };
+  /** Runs a call that uses the agent: it counts as busy throughout, so the idle stop can't cut it off. */
+  private async held<T>(fn: () => Promise<T>): Promise<T> {
+    this.busy++;
+    this.touchIdle();
+    try { return await fn(); } finally { this.busy--; this.touchIdle(); }
   }
 
-  async sendMessage(sessionRef: string, text: string): Promise<void> {
-    if (this.turns.has(sessionRef)) throw new Error(BUSY);
-    const live = await this.ensureProcess();
-    if (!live.sessions.has(sessionRef)) {
-      const cwd = this.sessionCwd.get(sessionRef);
-      if (!cwd) throw new Error("Antigravity doesn't know this chat's folder. Resume it first.");
-      await this.load(live, sessionRef, cwd);
-    }
-    if (this.turns.has(sessionRef)) throw new Error(BUSY);
-    this.runTurn(live, sessionRef, text);
+  startChat(input: { cwd: string; prompt: string; model?: string }): Promise<{ sessionRef: string }> {
+    return this.held(async () => {
+      const live = await this.ensureProcess();
+      let sessionId: string;
+      try { sessionId = await live.acp.newSession(input.cwd); } catch (e) { this.rethrow(e); }
+      this.learned = true; // the agent accepted a session: signed in (also after signing in elsewhere)
+      live.sessions.add(sessionId);
+      this.sessionCwd.set(sessionId, input.cwd);
+      this.emit({ type: 'session.started', sessionRef: sessionId });
+      this.runTurn(live, sessionId, input.prompt);
+      return { sessionRef: sessionId };
+    });
+  }
+
+  sendMessage(sessionRef: string, text: string): Promise<void> {
+    if (this.turns.has(sessionRef)) return Promise.reject(new Error(BUSY));
+    return this.held(async () => {
+      const live = await this.ensureProcess();
+      if (!live.sessions.has(sessionRef)) {
+        const cwd = this.sessionCwd.get(sessionRef);
+        if (!cwd) throw new Error("Antigravity doesn't know this chat's folder. Resume it first.");
+        await this.load(live, sessionRef, cwd);
+      }
+      if (this.turns.has(sessionRef)) throw new Error(BUSY);
+      this.runTurn(live, sessionRef, text);
+    });
   }
 
   /** Attach an existing Antigravity conversation (session/load); its replayed history is not shown as new messages. */
-  async resume(sessionRef: string, cwd: string): Promise<void> {
+  resume(sessionRef: string, cwd: string): Promise<void> {
     this.sessionCwd.set(sessionRef, cwd);
-    const live = await this.ensureProcess();
-    if (live.sessions.has(sessionRef)) return;
-    await this.load(live, sessionRef, cwd);
+    return this.held(async () => {
+      const live = await this.ensureProcess();
+      if (live.sessions.has(sessionRef)) return;
+      await this.load(live, sessionRef, cwd);
+    });
   }
 
   /** session/load once per session and process, however many callers wait for it. */
@@ -355,6 +372,7 @@ export class AntigravityAdapter implements ProviderAdapter {
     const p = (async () => {
       this.loading.add(sessionId);
       try { await live.acp.loadSession(sessionId, cwd); } catch (e) { this.rethrow(e); } finally { this.loading.delete(sessionId); }
+      this.learned = true; // the agent accepted the session: signed in
       live.sessions.add(sessionId);
     })().finally(() => { live.loads.delete(sessionId); this.touchIdle(); });
     live.loads.set(sessionId, p);
@@ -450,7 +468,7 @@ export class AntigravityAdapter implements ProviderAdapter {
 
   // ---- health ----
 
-  isIdle(): boolean { return this.turns.size === 0 && !this.authUrlFn; }
+  isIdle(): boolean { return this.turns.size === 0 && !this.authUrlFn && this.busy === 0; }
 
   /** Replace the agent process at the next ping or action (e.g. its binary changed). */
   markForRecycle(): void { if (this.live) this.recycleMarked.add(this.live.proc); }

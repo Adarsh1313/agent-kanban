@@ -63,7 +63,7 @@ const chats = new ChatService({ store, adapters, usage, broadcast: (e) => broadc
 const connections = new ConnectionMonitor({
   providers: PROVIDERS,
   findBinary: findProvider,
-  getVersion: makeGetVersion(adapters, () => findInstalledAntigravity(home)?.version ?? null), getLatest, adapters,
+  getVersion: makeGetVersion(() => findInstalledAntigravity(home)?.version ?? null), getLatest, adapters,
   onUpdate: (health) => broadcast({ type: 'connection.updated', health }),
 });
 const api = createApi({ chats, usage, history: () => readAllHistory(home), token, connections, adapters });

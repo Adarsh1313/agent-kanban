@@ -10,6 +10,8 @@
 // FAKE_LOADABLE: comma-separated session ids session/load accepts (default sess_old).
 // FAKE_NEW_SIGNIN=1: session/new prints a sign-in link on stderr and never answers (a selected login that's gone).
 // FAKE_PERM_OPTIONS=always: the permission request offers allow_always (no allow_once) and reject_once.
+// FAKE_NEW_DELAY_MS: session/new answers after this delay.
+// FAKE_VERSION: agentInfo.version (default 1.3.0).
 // FAKE_STOP: the stop reason the default turn ends with (default end_turn).
 // Strict about framing: any incoming message without "jsonrpc":"2.0" is rejected (requests) or ignored.
 import { createInterface } from 'node:readline';
@@ -89,7 +91,7 @@ createInterface({ input: process.stdin }).on('line', (line) => {
       return reply(m.id, {
         protocolVersion: 1,
         agentCapabilities: { loadSession: true },
-        agentInfo: { name: 'fake-agy', version: '1.3.0' },
+        agentInfo: { name: 'fake-agy', version: process.env.FAKE_VERSION ?? '1.3.0' },
         authMethods: [{ id: 'google', name: 'Sign in with Google', description: null }],
         ...(process.env.FAKE_NO_AUTH_FLAG === '1' ? {} : { authenticated }),
       });
@@ -112,6 +114,8 @@ createInterface({ input: process.stdin }).on('line', (line) => {
       if (!authenticated) return fail(m.id, -32000, 'Authentication required');
       const id = `sess_${sessions.size + 1}`;
       sessions.add(id);
+      const delay = Number(process.env.FAKE_NEW_DELAY_MS ?? 0);
+      if (delay > 0) { setTimeout(() => reply(m.id, { sessionId: id }), delay); return; }
       return reply(m.id, { sessionId: id });
     }
     case 'session/load':

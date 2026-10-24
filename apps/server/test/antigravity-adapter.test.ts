@@ -320,7 +320,7 @@ test('health checks never start the agent; signed_out before sign-in and connect
   const monitor = new ConnectionMonitor({
     providers: ['antigravity'],
     findBinary: async () => 'agy',
-    getVersion: makeGetVersion({ get: () => adapter }, () => '1.3.0'),
+    getVersion: makeGetVersion(() => '1.3.0'),
     getLatest: async () => '1.3.0',
     adapters: { ensure: async () => adapter },
     onUpdate: () => {},
@@ -409,4 +409,52 @@ test('allow with no allow-once option answers cancelled', async () => {
     assert.ok(done.type === 'message.completed' && done.text === 'permission: cancelled');
     assert.equal(warn.mock.callCount(), 1);
   } finally { warn.mock.restore(); await adapter.dispose(); }
+});
+
+test('health version stays the installed folder version while a live agent reports a different one', async () => {
+  const { adapter } = make('turn', { FAKE_VERSION: '9.9.9' });
+  const log = mock.method(console, 'log', () => {});
+  const monitor = new ConnectionMonitor({
+    providers: ['antigravity'],
+    findBinary: async () => 'agy',
+    getVersion: makeGetVersion(() => '1.3.0'),
+    getLatest: async () => '1.3.0',
+    adapters: { ensure: async () => adapter },
+    onUpdate: () => {},
+  });
+  try {
+    const [before] = await monitor.check('antigravity');
+    await adapter.startChat({ cwd, prompt: 'hi' });
+    assert.equal(await adapter.agentVersion(), '9.9.9');
+    const [after] = await monitor.check('antigravity');
+    assert.equal(before!.version, '1.3.0');
+    assert.equal(after!.version, '1.3.0');
+    assert.equal(after!.updateAvailable, false);
+  } finally { log.mock.restore(); monitor.stop(); await adapter.dispose(); }
+});
+
+test('a chat started near the idle mark is not cut off while session/new runs', async () => {
+  const { adapter, procs, events, waitFor } = make('turn', { FAKE_NEW_DELAY_MS: '500' }, { idleMs: 150 });
+  try {
+    await adapter.start();
+    await new Promise((r) => setTimeout(r, 100)); // close to the idle stop
+    const r = await adapter.startChat({ cwd, prompt: 'hi' });
+    assert.deepEqual(r, { sessionRef: 'sess_1' });
+    await waitFor((e) => e.type === 'turn.completed');
+    assert.ok(!events.some((e) => e.type === 'error'));
+    assert.equal(procs.length, 1, 'the agent was not recycled mid session/new');
+  } finally { await adapter.dispose(); }
+});
+
+test('a session the agent accepts clears a learned signed-out (signed in elsewhere)', async () => {
+  // first process: signed out; the next one: signed in (the user signed in in another app meanwhile)
+  const { adapter, procs } = make((n) => (n === 0 ? 'signin' : 'ready'), { FAKE_NO_AUTH_FLAG: '1' });
+  try {
+    await assert.rejects(adapter.startChat({ cwd, prompt: 'hi' }), /isn't signed in/);
+    assert.equal((await adapter.ping()).signedIn, false);
+    await adapter.restartIfIdle();
+    await adapter.startChat({ cwd, prompt: 'hi' });
+    assert.equal((await adapter.ping()).signedIn, true);
+    assert.equal(procs.length, 2);
+  } finally { await adapter.dispose(); }
 });

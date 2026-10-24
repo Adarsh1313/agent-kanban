@@ -26,19 +26,12 @@ export function getVersion(_provider: ProviderId, path: string): Promise<string 
 }
 
 /**
- * Reads the installed version without starting anything. Antigravity has no --version: the running agent's
- * ACP agentInfo.version when it is running, else the installed (hash-pinned) version folder. The others run
- * `<path> --version`.
+ * Reads the installed version without starting anything. Antigravity has no --version: it is the installed,
+ * hash-pinned version folder (the running agent's agentInfo.version is only logged), so it can't flip while
+ * the agent starts and stops. The others run `<path> --version`.
  */
-export function makeGetVersion(
-  adapters: Pick<AdapterSource, 'get'>,
-  installedAntigravity: () => string | null,
-): (id: ProviderId, path: string) => Promise<string | null> {
-  return async (id, path) => {
-    if (id !== 'antigravity') return getVersion(id, path);
-    const running = await adapters.get(id)?.agentVersion?.().catch(() => null);
-    return running ?? installedAntigravity();
-  };
+export function makeGetVersion(installedAntigravity: () => string | null): (id: ProviderId, path: string) => Promise<string | null> {
+  return async (id, path) => (id === 'antigravity' ? installedAntigravity() : getVersion(id, path));
 }
 
 /**
