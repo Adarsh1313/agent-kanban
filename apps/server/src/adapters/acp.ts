@@ -8,7 +8,12 @@ export type AcpInitializeResult = {
   protocolVersion: number;
   agentInfo?: { name: string; version: string };
   authMethods: { id: string; name: string }[];
-  authenticated: boolean;
+  /**
+   * The agent's own answer when it gives one. null when it doesn't say but offers sign-in methods:
+   * the real agy_acp_server 1.3.0 sends no flag and always lists its auth methods, and only
+   * session/new (-32000 "Authentication required") tells.
+   */
+  authenticated: boolean | null;
 };
 
 export type AcpPermissionOption = { optionId: string; name: string; kind: string };
@@ -28,7 +33,7 @@ const INIT_PARAMS = {
 const PROMPT_TIMEOUT_MS = 24 * 60 * 60 * 1000;
 
 const REDIRECT_RE = /^http:\/\/127\.0\.0\.1:(\d{1,5})\/$/;
-// Google's OAuth endpoints. Task 3 confirms which one agy_acp_server prints.
+// Google's OAuth endpoints. agy_acp_server 1.3.0 uses /o/oauth2/v2/auth (its credential_manager's auth URI).
 const AUTH_PATHS: ReadonlySet<string> = new Set(['/o/oauth2/v2/auth', '/o/oauth2/auth']);
 // Printable ASCII, then a narrower allowlist: no quotes, ^, |, <, >, backslash, backtick, braces, spaces or controls.
 const PRINTABLE_ASCII_RE = /^[!-~]+$/;
@@ -59,12 +64,15 @@ export function parseAuthUrl(raw: string): string | null {
   return url.href;
 }
 
-function readAuthenticated(result: any, authMethods: unknown[]): boolean {
-  // Prefer an explicit flag from the agent; otherwise an agent that offers no auth methods needs no sign-in.
+function readAuthenticated(result: any, authMethods: unknown[]): boolean | null {
+  // Prefer an explicit flag from the agent; an agent that offers no auth methods needs no sign-in; otherwise unknown.
   if (typeof result?.authenticated === 'boolean') return result.authenticated;
   if (typeof result?._meta?.authenticated === 'boolean') return result._meta.authenticated;
-  return authMethods.length === 0;
+  return authMethods.length === 0 ? true : null;
 }
+
+/** JSON-RPC error code the agent uses for "Authentication required". */
+export const AUTH_REQUIRED_CODE = -32000;
 
 export class AcpClient {
   private proc: JsonRpcProcess;
@@ -84,12 +92,15 @@ export class AcpClient {
       if (method !== 'session/request_permission') throw Object.assign(new Error(`method not found: ${method}`), { code: -32601 });
       return this.answerPermission(String(params?.sessionId ?? ''), params);
     });
-    proc.onTextLine((line) => {
+    // agy_acp_server 1.3.0 prints the link on stderr (stdout carries only JSON-RPC); both are watched.
+    const onLine = (line: string) => {
       const trimmed = line.trim();
       if (!trimmed.startsWith(AUTH_LINE_PREFIX)) return;
       const url = parseAuthUrl(trimmed.slice(AUTH_LINE_PREFIX.length));
       if (url) for (const fn of this.authUrlFns) fn(url);
-    });
+    };
+    proc.onTextLine(onLine);
+    proc.onStderrLine(onLine);
   }
 
   private async answerPermission(sessionId: string, params: any): Promise<unknown> {

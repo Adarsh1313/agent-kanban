@@ -4,6 +4,12 @@
 //   unknownreq: sends an fs/read_text_file request and reports the error code it got back
 //   badstop: ends the turn with no stopReason
 // FAKE_AUTH_URL overrides the URL printed by the signin scenario.
+// FAKE_AUTH_STREAM=stderr prints the sign-in line on stderr (like the real agy_acp_server 1.3.0).
+// FAKE_AUTH_HANG=1: authenticate prints the link and never answers (the user hasn't finished in the browser).
+// FAKE_NO_AUTH_FLAG=1: initialize sends no "authenticated" flag (like the real server).
+// FAKE_LOADABLE: comma-separated session ids session/load accepts (default sess_old).
+// FAKE_NEW_SIGNIN=1: session/new prints a sign-in link on stderr and never answers (a selected login that's gone).
+// FAKE_STOP: the stop reason the default turn ends with (default end_turn).
 // Strict about framing: any incoming message without "jsonrpc":"2.0" is rejected (requests) or ignored.
 import { createInterface } from 'node:readline';
 
@@ -47,7 +53,7 @@ function onPrompt(id: unknown, sessionId: string) {
   chunk(sessionId, 'world');
   update(sessionId, { sessionUpdate: 'tool_call', toolCallId: 'call_1', title: 'Read a.txt', kind: 'read', status: 'pending' });
   update(sessionId, { sessionUpdate: 'tool_call_update', toolCallId: 'call_1', status: 'completed' });
-  reply(id, { stopReason: 'end_turn' });
+  reply(id, { stopReason: process.env.FAKE_STOP ?? 'end_turn' });
 }
 
 createInterface({ input: process.stdin }).on('line', (line) => {
@@ -82,22 +88,31 @@ createInterface({ input: process.stdin }).on('line', (line) => {
         agentCapabilities: { loadSession: true },
         agentInfo: { name: 'fake-agy', version: '1.3.0' },
         authMethods: [{ id: 'google', name: 'Sign in with Google', description: null }],
-        authenticated,
+        ...(process.env.FAKE_NO_AUTH_FLAG === '1' ? {} : { authenticated }),
       });
     case 'authenticate':
       if (p.methodId !== 'google') return fail(m.id, -32602, 'unknown auth method');
-      process.stdout.write('Starting sign-in...\n');
-      process.stdout.write(`Open the following link to authenticate the ACP server: ${process.env.FAKE_AUTH_URL ?? GOOGLE_URL}\n`);
+      {
+        const out = process.env.FAKE_AUTH_STREAM === 'stderr' ? process.stderr : process.stdout;
+        out.write('Starting sign-in...\n');
+        out.write(`Open the following link to authenticate the ACP server: ${process.env.FAKE_AUTH_URL ?? GOOGLE_URL}\n`);
+      }
+      if (process.env.FAKE_AUTH_HANG === '1') return;
       authenticated = true;
       return reply(m.id, {});
     case 'session/new': {
+      if (process.env.FAKE_NEW_SIGNIN === '1') {
+        process.stderr.write(`Open the following link to authenticate the ACP server: ${GOOGLE_URL}
+`);
+        return;
+      }
       if (!authenticated) return fail(m.id, -32000, 'Authentication required');
       const id = `sess_${sessions.size + 1}`;
       sessions.add(id);
       return reply(m.id, { sessionId: id });
     }
     case 'session/load':
-      if (p.sessionId !== 'sess_old') return fail(m.id, -32002, 'session not found');
+      if (!(process.env.FAKE_LOADABLE ?? 'sess_old').split(',').includes(p.sessionId)) return fail(m.id, -32002, 'session not found');
       sessions.add(p.sessionId);
       chunk(p.sessionId, 'replayed');
       return reply(m.id, null);

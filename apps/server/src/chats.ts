@@ -34,6 +34,16 @@ export class ActiveElsewhereError extends Error {
   }
 }
 
+/** The provider refused to reopen a conversation from its history (the API answers 409). */
+export class CantContinueError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'CantContinueError';
+  }
+}
+
+export const ANTIGRAVITY_CANT_CONTINUE = "This Antigravity chat can't be continued here yet. Start a new chat in the same folder.";
+
 type Decision = 'allow' | 'deny' | { reply: string };
 type LiveRequest = { kind: 'permission' | 'question'; summary: string };
 
@@ -197,7 +207,20 @@ export class ChatService {
       return this.store.getChat(existing.id)!;
     }
     if (h.provider === 'claude' && this.isActiveElsewhere(h.sessionRef)) throw new ActiveElsewhereError();
+    // Antigravity: reopen the conversation (session/load) before making a card, so a refusal leaves nothing behind.
+    let attached: ProviderAdapter | undefined;
+    if (h.provider === 'antigravity') {
+      attached = await this.adapters.ensure('antigravity');
+      if (attached) {
+        try { await attached.resume(h.sessionRef, h.cwd); } catch (err) {
+          // Signed out: make the card anyway, so it says to sign in (the send below fails the same way).
+          if (!/isn't signed in/.test(err instanceof Error ? err.message : '')) throw new CantContinueError(ANTIGRAVITY_CANT_CONTINUE);
+          attached = undefined;
+        }
+      }
+    }
     const chat = this.store.createChat({ provider: h.provider, cwd: h.cwd, title: h.title, sessionRef: h.sessionRef });
+    if (attached && this.adapters.get('antigravity') === attached) this.live.add(chat.id);
     this.addMessage(chat.id, 'user', text);
     this.broadcast({ type: 'chat.updated', chat });
     this.replayBuffered(h.provider, h.sessionRef, chat.id);

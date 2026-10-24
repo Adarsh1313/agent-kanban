@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AdapterEvent, HistoryChat, ProviderId, ServerEvent } from '@agent-kanban/shared';
 import { Store } from '../src/store.ts';
-import { ChatService, ActiveElsewhereError } from '../src/chats.ts';
+import { ChatService, ActiveElsewhereError, CantContinueError } from '../src/chats.ts';
 import type { ProviderAdapter } from '../src/adapters/adapter.ts';
 import { AdapterRegistry } from '../src/adapters/registry.ts';
 
@@ -628,4 +628,37 @@ test('archive forgets the chat\'s streaming partials', async () => {
   assert.equal((svc as any).partials.has(chat.id), true);
   svc.archive(chat.id);
   assert.equal((svc as any).partials.has(chat.id), false);
+});
+
+test('Antigravity history continue loads the conversation first, then sends (no second load)', async () => {
+  const { store, adapter, svc } = setup('antigravity');
+  const h = { provider: 'antigravity', sessionRef: 'conv1', cwd: '/w', title: 'Old chat', updatedAt: '2026-01-01T00:00:00Z' } as HistoryChat;
+  const chat = await svc.continueHistory(h, 'go on');
+  assert.deepEqual(adapter.calls, ['resume:conv1:/w', 'send:conv1:go on']);
+  assert.equal(store.getChat(chat.id)!.sessionRef, 'conv1');
+});
+
+test('Antigravity history continue that the agent refuses throws CantContinueError and makes no card', async () => {
+  const { store, adapter, svc } = setup('antigravity');
+  adapter.resumeError = Object.assign(new Error('session not found'), { code: -32002 });
+  const h = { provider: 'antigravity', sessionRef: 'conv1', cwd: '/w', title: 'Old chat', updatedAt: '2026-01-01T00:00:00Z' } as HistoryChat;
+  await assert.rejects(svc.continueHistory(h, 'go on'), (e: Error) =>
+    e instanceof CantContinueError && e.message === "This Antigravity chat can't be continued here yet. Start a new chat in the same folder.");
+  assert.equal(store.listChats().length, 0);
+});
+
+test('Antigravity history continue while signed out makes a card that says to sign in', async () => {
+  const { store, adapter, svc } = setup('antigravity');
+  adapter.resumeError = new Error("Antigravity isn't signed in.");
+  const h = { provider: 'antigravity', sessionRef: 'conv1', cwd: '/w', title: 'Old chat', updatedAt: '2026-01-01T00:00:00Z' } as HistoryChat;
+  const chat = await svc.continueHistory(h, 'go on');
+  const msgs = store.listMessages(chat.id);
+  assert.equal(msgs.at(-1)!.text, "Antigravity isn't signed in. Open Connections to sign in.");
+});
+
+test('Antigravity crash mid-turn shows "Antigravity stopped unexpectedly. Resume to try again."', async () => {
+  const { store, adapter, svc } = setup('antigravity');
+  const chat = await svc.start({ provider: 'antigravity', cwd: '/w', prompt: 'hi' });
+  adapter.emit({ type: 'error', sessionRef: 's1', message: 'Antigravity stopped unexpectedly.' });
+  assert.equal(store.listMessages(chat.id).at(-1)!.text, 'Antigravity stopped unexpectedly. Resume to try again.');
 });

@@ -62,6 +62,29 @@ test('sign-in: the auth line fires onAuthUrl and framing keeps working', async (
   } finally { await proc.close(); }
 });
 
+test('sign-in: an auth line on stderr fires onAuthUrl too (the real agy_acp_server prints it there)', async () => {
+  const { proc, acp } = start('signin', { FAKE_AUTH_STREAM: 'stderr' });
+  const urls: string[] = [];
+  acp.onAuthUrl((u) => urls.push(u));
+  try {
+    await acp.initialize();
+    await acp.authenticate('google');
+    // stderr is read separately from stdout: give its last line a moment
+    for (let i = 0; i < 100 && urls.length === 0; i++) await new Promise((r) => setTimeout(r, 10));
+    assert.equal(urls.length, 1);
+    assert.match(urls[0], /^https:\/\/accounts\.google\.com\/o\/oauth2\/v2\/auth\?/);
+  } finally { await proc.close(); }
+});
+
+test('initialize without an authenticated flag but with auth methods reports null (unknown)', async () => {
+  const { proc, acp } = start('ready', { FAKE_NO_AUTH_FLAG: '1' });
+  try {
+    const r = await acp.initialize();
+    assert.equal(r.authenticated, null);
+    assert.equal(r.authMethods.length, 1);
+  } finally { await proc.close(); }
+});
+
 for (const [name, url] of [
   ['non-Google origin', 'https://accounts.google.com.evil.example/o/oauth2/auth?redirect_uri=http%3A%2F%2F127.0.0.1%3A51234%2F'],
   ['extra redirect_uri', `${GOOD}&redirect_uri=https%3A%2F%2Fevil.example%2F`],

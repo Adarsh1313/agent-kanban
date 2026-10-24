@@ -10,11 +10,12 @@ import { UsageService, notInstalledReading } from './usage/service.ts';
 import { readAllHistory } from './history/index.ts';
 import { ClaudeAdapter } from './adapters/claude.ts';
 import { CodexAdapter } from './adapters/codex.ts';
-
+import { AntigravityAdapter } from './adapters/antigravity.ts';
+import { findInstalledAntigravity } from './connect/antigravity-install.ts';
 import { AdapterRegistry } from './adapters/registry.ts';
 import { findBinary } from './binaries.ts';
 import { createApi } from './api.ts';
-import { ConnectionMonitor, getLatest, getVersion } from './health.ts';
+import { ConnectionMonitor, getLatest, makeGetVersion } from './health.ts';
 import { acquireLock, releaseLock } from './lock.ts';
 
 // Last resort: a stray rejection is logged, never allowed to take the server (and every chat) down.
@@ -32,17 +33,23 @@ process.on('exit', () => releaseLock(lockPath));
 const store = new Store(join(dataDir, 'agent-kanban.db'));
 const token = randomBytes(24).toString('hex');
 
-const findProvider = (id: ProviderId) => (id === 'claude' || id === 'codex' ? findBinary(id) : Promise.resolve(null));
+const PROVIDERS: ProviderId[] = ['claude', 'codex', 'antigravity'];
+// Antigravity is Google's pinned release, installed by Agent Kanban under ~/.agent-kanban/providers/antigravity.
+const findProvider = (id: ProviderId) =>
+  id === 'antigravity' ? Promise.resolve(findInstalledAntigravity(home)?.path ?? null) : findBinary(id);
 // Adapters are created when a provider's binary is first found, so installing one later needs no restart.
 const adapters = new AdapterRegistry({
   findBinary: findProvider,
-  create: (id, path) => (id === 'claude' ? new ClaudeAdapter({ claudePath: path }) : id === 'codex' ? new CodexAdapter({ codexPath: path }) : undefined),
+  create: (id, path) => (id === 'claude' ? new ClaudeAdapter({ claudePath: path })
+    : id === 'codex' ? new CodexAdapter({ codexPath: path })
+      : new AntigravityAdapter({ exePath: path })),
 });
-await Promise.all([adapters.ensure('claude'), adapters.ensure('codex')]);
+// Creating an adapter starts nothing: the Antigravity agent (slow to start) is launched by the first check or chat.
+await Promise.all(PROVIDERS.map((id) => adapters.ensure(id)));
 
 let broadcast: (e: ServerEvent) => void = () => {};
 const readers: Partial<Record<ProviderId, () => Promise<UsageReading>>> = {};
-for (const id of ['claude', 'codex'] as const) {
+for (const id of PROVIDERS) {
   readers[id] = async () => {
     const a = await adapters.ensure(id);
     if (!a) return notInstalledReading(id);
@@ -54,9 +61,9 @@ const usage = new UsageService({
 });
 const chats = new ChatService({ store, adapters, usage, broadcast: (e) => broadcast(e), claudeHome: join(home, '.claude') });
 const connections = new ConnectionMonitor({
-  providers: ['claude', 'codex'],
+  providers: PROVIDERS,
   findBinary: findProvider,
-  getVersion, getLatest, adapters,
+  getVersion: makeGetVersion(adapters), getLatest, adapters,
   onUpdate: (health) => broadcast({ type: 'connection.updated', health }),
 });
 const api = createApi({ chats, usage, history: () => readAllHistory(home), token, connections, adapters });

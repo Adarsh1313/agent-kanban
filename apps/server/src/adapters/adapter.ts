@@ -28,5 +28,7 @@ export interface ProviderAdapter {
   restartIfIdle?(): Promise<boolean>;
   /** True when no chat is running on this adapter (so it can be replaced without cutting anything off). */
   isIdle?(): boolean;
+  /** The provider's own version when it reports one over its protocol (Antigravity: ACP agentInfo.version). */
+  agentVersion?(): Promise<string | null>;
   dispose(): Promise<void>;
 }

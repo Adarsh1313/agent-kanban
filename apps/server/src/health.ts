@@ -3,6 +3,7 @@ import type { ConnectionHealth, ProviderId } from '@agent-kanban/shared';
 import type { AdapterSource } from './adapters/registry.ts';
 import type { PingResult } from './adapters/adapter.ts';
 import { resolveSpawnTarget } from './adapters/spawn-target.ts';
+import { ANTIGRAVITY_RELEASE_VERSION } from './connect/antigravity-release.ts';
 
 const NAMES: Record<ProviderId, string> = { claude: 'Claude Code', codex: 'Codex', antigravity: 'Antigravity' };
 const NPM_PACKAGE: Partial<Record<ProviderId, string>> = { claude: '@anthropic-ai/claude-code', codex: '@openai/codex' };
@@ -24,8 +25,24 @@ export function getVersion(_provider: ProviderId, path: string): Promise<string 
   });
 }
 
-/** The newest published version on npm. Offline, slow or odd responses give null, never an error. */
+/**
+ * Reads the installed version: Antigravity has no --version, so it is the agent's ACP agentInfo.version;
+ * the others run `<path> --version`.
+ */
+export function makeGetVersion(adapters: Pick<AdapterSource, 'ensure'>): (id: ProviderId, path: string) => Promise<string | null> {
+  return async (id, path) => {
+    if (id !== 'antigravity') return getVersion(id, path);
+    const a = await adapters.ensure(id, path).catch(() => undefined);
+    return a?.agentVersion ? a.agentVersion().catch(() => null) : null;
+  };
+}
+
+/**
+ * The version to compare against: Antigravity's is the release Agent Kanban pins (installed from Google);
+ * the others are the newest published on npm. Offline, slow or odd responses give null, never an error.
+ */
 export async function getLatest(provider: ProviderId): Promise<string | null> {
+  if (provider === 'antigravity') return ANTIGRAVITY_RELEASE_VERSION;
   const pkg = NPM_PACKAGE[provider];
   if (!pkg) return null;
   try {
@@ -182,7 +199,8 @@ export class ConnectionMonitor {
     if (ping?.gaveUp) this.gaveUp.add(id); else this.gaveUp.delete(id);
     await latestPromise;
     const latestVersion = this.latestVersions.get(id) ?? null;
-    const updateAvailable = !!(version && latestVersion && newer(latestVersion, version));
+    // Antigravity is pinned: any other installed version (older or newer) is replaced by the pinned one.
+    const updateAvailable = !!(version && latestVersion && (id === 'antigravity' ? latestVersion !== version : newer(latestVersion, version)));
 
     const common = { ...base, installed: true, path, version, latestVersion, updateAvailable };
     if (!ping?.ok) {

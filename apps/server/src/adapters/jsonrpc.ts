@@ -34,6 +34,7 @@ export class JsonRpcProcess {
   private taskkill: ((pid: number) => ChildProcess) | undefined;
   private jsonrpc: '2.0' | undefined;
   private textLineFns: Array<(line: string) => void> = [];
+  private stderrLineFns: Array<(line: string) => void> = [];
   private warnedLongLine = false;
 
   constructor(command: string, args: string[], opts: { cwd?: string; env?: NodeJS.ProcessEnv; requestTimeoutMs?: number; taskkill?: (pid: number) => ChildProcess; jsonrpc?: '2.0' } = {}) {
@@ -47,6 +48,7 @@ export class JsonRpcProcess {
       if (!line.trim()) return;
       this.stderrRing.push(line);
       if (this.stderrRing.length > STDERR_LINES) this.stderrRing.shift();
+      for (const fn of this.stderrLineFns) { try { fn(line); } catch { /* a listener's bug must not break reading */ } }
     });
     this.child.stdin!.on('error', () => {});
     this.child.on('error', () => this.handleExit(null));
@@ -87,6 +89,8 @@ export class JsonRpcProcess {
   onRequest(fn: (method: string, params: any, id: number | string) => Promise<unknown>): void { this.requestFn = fn; }
   /** Called with each non-empty stdout line that is not a JSON object (e.g. a sign-in link printed as plain text). */
   onTextLine(fn: (line: string) => void): void { this.textLineFns.push(fn); }
+  /** Called with each non-empty stderr line (Antigravity prints its sign-in link there). */
+  onStderrLine(fn: (line: string) => void): void { this.stderrLineFns.push(fn); }
   onExit(fn: (code: number | null) => void): void {
     if (this.exited) fn(this.exitCode);
     else this.exitFns.push(fn);

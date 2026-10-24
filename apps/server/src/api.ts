@@ -7,7 +7,7 @@ import { statSync } from 'node:fs';
 import { timingSafeEqual } from 'node:crypto';
 import { WebSocketServer, WebSocket } from 'ws';
 import type { ConnectionHealth, HistoryChat, ModelOption, ProviderId, ServerEvent } from '@agent-kanban/shared';
-import { ActiveElsewhereError } from './chats.ts';
+import { ActiveElsewhereError, CantContinueError } from './chats.ts';
 import type { ChatService } from './chats.ts';
 import type { UsageService } from './usage/service.ts';
 // suggest() lives in shared so the web app can recompute "Most room" from usage.updated events.
@@ -75,12 +75,6 @@ function provider(body: Record<string, unknown>): ProviderId {
   return v as ProviderId;
 }
 
-/** A provider the app can run chats on (Antigravity history is listed, but chats can't be started or continued yet). */
-function chatProvider(body: Record<string, unknown>): ProviderId {
-  const p = provider(body);
-  if (p === 'antigravity') throw new HttpError(400, "Antigravity chats aren't supported yet.");
-  return p;
-}
 
 function existingFolder(cwd: string): string {
   let ok = false;
@@ -191,7 +185,7 @@ export function createApi(opts: {
     if (match('POST', '/api/chats')) {
       const b = await readJson(req);
       const input: { provider: ProviderId; cwd: string; prompt: string; model?: string } = {
-        provider: chatProvider(b), cwd: str(b, 'cwd'), prompt: str(b, 'prompt'),
+        provider: provider(b), cwd: str(b, 'cwd'), prompt: str(b, 'prompt'),
       };
       if (b.model !== undefined) {
         if (typeof b.model !== 'string' || b.model.trim() === '') throw new HttpError(400, 'Model must be a non-empty string.');
@@ -222,7 +216,7 @@ export function createApi(opts: {
     if (match('GET', '/api/history')) return { status: 200, body: await history() };
     if (match('POST', '/api/history/continue')) {
       const b = await readJson(req);
-      const p = chatProvider(b); const ref = str(b, 'sessionRef'); const text = str(b, 'text');
+      const p = provider(b); const ref = str(b, 'sessionRef'); const text = str(b, 'text');
       const h = (await history()).find((x) => x.provider === p && x.sessionRef === ref);
       if (!h) throw new HttpError(404, 'Chat not found.');
       return { status: 200, body: await chats.continueHistory(h, text) };
@@ -312,7 +306,7 @@ export function createApi(opts: {
           return send(err.status, { error: err.message });
         }
         const msg = err instanceof Error ? err.message : '';
-        if (err instanceof ActiveElsewhereError) return send(409, { error: msg });
+        if (err instanceof ActiveElsewhereError || err instanceof CantContinueError) return send(409, { error: msg });
         if (msg === 'That request is no longer open.') return send(409, { error: msg });
         if (msg === 'Chat not found.') return send(404, { error: msg });
         console.error(err);
