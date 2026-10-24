@@ -1,20 +1,22 @@
 // Downloads Google's pinned agy-acp-server release, checks its size and SHA-256 while it
-// streams to disk, unpacks it into a temp folder and renames that into place. Anything
-// half-done (the .partial archive, the temp folder) is deleted on failure or cancel.
-import { createHash } from 'node:crypto';
-import { spawn } from 'node:child_process';
+// streams to disk, unpacks the two pinned files into a temp folder and renames that into
+// place. Anything half-done (the .partial archive, the temp folder) is deleted on failure
+// or cancel, and leftovers from a crashed run are swept before the next download.
+import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream, createWriteStream, readdirSync, statSync } from 'node:fs';
-import { chmod, mkdir, mkdtemp, open, readdir, rename, rm } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, open, readdir, rename, rm, stat } from 'node:fs/promises';
 import type { FileHandle } from 'node:fs/promises';
-import { join, dirname } from 'node:path';
+import { join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { Readable, Transform } from 'node:stream';
+import type { ReadableStream as WebReadableStream } from 'node:stream/web';
 import { createInflateRaw, crc32 } from 'node:zlib';
 import { resolveAntigravityRelease } from './antigravity-release.ts';
 import type { AntigravityRelease } from './antigravity-release.ts';
 
 export const DOWNLOAD_FAILED = "The download didn't finish. Try again.";
 export const UNSUPPORTED_PLATFORM = "Google doesn't publish Antigravity for this computer.";
+const DOWNLOAD_ORIGIN = 'https://dl.google.com';
 
 export type InstallPhase = 'download' | 'verify' | 'extract';
 export interface InstallProgress { phase: InstallPhase; fraction: number }
@@ -28,6 +30,8 @@ export interface InstallOptions {
   /** Overrides for tests; production uses the pinned table for this computer. */
   release?: AntigravityRelease;
   platform?: NodeJS.Platform;
+  /** Origin the download must finally come from (after redirects). Tests only; default https://dl.google.com. */
+  allowedOrigin?: string;
 }
 
 interface PlatformOpts { platform?: NodeJS.Platform; arch?: string; release?: AntigravityRelease | null }
@@ -55,7 +59,7 @@ function compareVersions(a: string, b: string): number {
   return 0;
 }
 
-/** The pinned version if it's installed, else the newest other installed version, else null. */
+/** The pinned version if it's installed, else the newest older installed version, else null. */
 export function findInstalledAntigravity(home: string, opts: PlatformOpts = {}): InstalledAntigravity | null {
   const release = releaseFor(opts);
   if (!release) return null;
@@ -65,7 +69,7 @@ export function findInstalledAntigravity(home: string, opts: PlatformOpts = {}):
   let names: string[];
   try { names = readdirSync(root); } catch { return null; }
   const found = names
-    .filter((n) => VERSION_DIR.test(n) && isFile(join(root, n, release.executable)))
+    .filter((n) => VERSION_DIR.test(n) && compareVersions(n, release.version) <= 0 && isFile(join(root, n, release.executable)))
     .sort(compareVersions);
   const best = found.at(-1);
   return best ? { path: join(root, best, release.executable), version: best } : null;
@@ -79,48 +83,70 @@ function abortError(signal: AbortSignal): Error {
   return e;
 }
 
+const failed = (why: string): Error => new Error(DOWNLOAD_FAILED, { cause: new Error(why) });
+
+/** One install per version folder at a time: a second call gets the first call's promise. */
+const inFlight = new Map<string, Promise<InstalledAntigravity>>();
+
 /** Download, verify and unpack the pinned release. Resolves with the executable's path. */
-export async function installAntigravity(opts: InstallOptions): Promise<InstalledAntigravity> {
-  const platform = opts.platform ?? process.platform;
-  const release = opts.release ?? resolveAntigravityRelease(platform, process.arch);
-  if (!release) throw new Error(UNSUPPORTED_PLATFORM);
+export function installAntigravity(opts: InstallOptions): Promise<InstalledAntigravity> {
+  const release = opts.release ?? resolveAntigravityRelease(opts.platform ?? process.platform, process.arch);
+  if (!release) return Promise.reject(new Error(UNSUPPORTED_PLATFORM));
+  const dir = join(antigravityRoot(opts.home), release.version);
+  const running = inFlight.get(dir);
+  if (running) return running;
+  const p = runInstall(opts, release, dir).finally(() => inFlight.delete(dir));
+  inFlight.set(dir, p);
+  return p;
+}
+
+async function runInstall(opts: InstallOptions, release: AntigravityRelease, dir: string): Promise<InstalledAntigravity> {
   const existing = findInstalledAntigravity(opts.home, { release });
   if (existing && existing.version === release.version) return existing;
 
   const { signal, onProgress } = opts;
+  const platform = opts.platform ?? process.platform;
   const root = antigravityRoot(opts.home);
-  const dir = join(root, release.version);
-  const partial = `${dir}.partial`;
+  const partial = `${dir}.${randomUUID()}.partial`;
   let temp: string | null = null;
+  const remove = (p: string) => rm(p, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }).catch(() => {});
   const cleanup = async () => {
-    await rm(partial, { force: true }).catch(() => {});
-    if (temp) await rm(temp, { recursive: true, force: true }).catch(() => {});
+    await remove(partial);
+    if (temp) await remove(temp);
   };
 
   try {
     signal.throwIfAborted();
     await mkdir(root, { recursive: true });
-    // A version folder without its executable is a broken earlier install: start over.
-    await rm(dir, { recursive: true, force: true });
-    await cleanup();
+    // A version folder without its executable is a broken earlier install; a crashed run
+    // may also have left a .partial download or an .extract-* folder. Start clean.
+    await remove(dir);
+    for (const n of await readdir(root)) {
+      if (n.startsWith(`${release.version}.`) && (n.endsWith('.partial') || n.startsWith(`${release.version}.extract-`))) {
+        await remove(join(root, n));
+      }
+    }
 
-    const digest = await download(opts.fetch ?? fetch, release, partial, signal, onProgress);
+    const digest = await download(opts.fetch ?? fetch, release, partial, signal, onProgress, opts.allowedOrigin ?? DOWNLOAD_ORIGIN);
 
     onProgress({ phase: 'verify', fraction: 0 });
-    if (digest !== release.sha256) throw new Error(DOWNLOAD_FAILED, { cause: new Error('SHA-256 mismatch') });
+    if (digest !== release.sha256) throw failed('SHA-256 mismatch');
+    if ((await stat(partial)).size !== release.archiveBytes) throw failed('Archive on disk has the wrong size');
     onProgress({ phase: 'verify', fraction: 1 });
 
     signal.throwIfAborted();
     onProgress({ phase: 'extract', fraction: 0 });
     temp = await mkdtemp(`${dir}.extract-`);
-    await extractArchive(partial, temp, platform, signal, (f) => onProgress({ phase: 'extract', fraction: f }));
-    const exe = join(temp, release.executable);
-    if (!isFile(exe)) throw new Error(DOWNLOAD_FAILED, { cause: new Error(`${release.executable} missing from the archive`) });
-    if (platform !== 'win32') await makeExecutable(temp);
+    const members = [
+      { name: release.executable, bytes: release.executableBytes },
+      { name: release.harness.name, bytes: release.harness.bytes },
+    ];
+    await extractZip(partial, temp, members, signal, (f) => onProgress({ phase: 'extract', fraction: Math.min(f, 0.99) }));
+    if (platform !== 'win32') for (const m of members) await chmod(join(temp, m.name), 0o755);
     signal.throwIfAborted();
     await rename(temp, dir);
     temp = null;
-    await rm(partial, { force: true });
+    await remove(partial); // never turns a finished install into a failure
     onProgress({ phase: 'extract', fraction: 1 });
     return { path: join(dir, release.executable), version: release.version };
   } catch (err) {
@@ -137,90 +163,56 @@ async function download(
   partial: string,
   signal: AbortSignal,
   onProgress: (p: InstallProgress) => void,
+  allowedOrigin: string,
 ): Promise<string> {
   onProgress({ phase: 'download', fraction: 0 });
   const res = await fetchImpl(release.url, { signal });
-  if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+  const discard = () => res.body?.cancel().catch(() => {});
+  if (!res.ok || !res.body) { await discard(); throw new Error(`HTTP ${res.status}`); }
+  let origin = '';
+  try { origin = new URL(res.url).origin; } catch { /* empty or invalid url */ }
+  if (origin !== allowedOrigin) { await discard(); throw new Error(`Download came from an unexpected place: ${origin || '(none)'}`); }
   // fetch decodes gzip itself, so content-length only means the archive size for identity bodies.
   const encoding = res.headers.get('content-encoding')?.trim().toLowerCase();
   const length = res.headers.get('content-length');
   if ((!encoding || encoding === 'identity') && length !== null && Number(length) !== release.archiveBytes) {
+    await discard();
     throw new Error('Download size does not match the pinned release');
   }
   const hash = createHash('sha256');
-  const fh = await open(partial, 'w', 0o600);
   let bytes = 0;
   let reported = 0;
-  try {
-    for await (const chunk of res.body as AsyncIterable<Uint8Array>) {
-      bytes += chunk.byteLength;
-      if (bytes > release.archiveBytes) throw new Error('Download is larger than the pinned release');
+  const meter = new Transform({
+    transform(chunk: Buffer, _enc, cb) {
+      bytes += chunk.length;
+      if (bytes > release.archiveBytes) { cb(new Error('Download is larger than the pinned release')); return; }
       hash.update(chunk);
-      await fh.write(chunk);
       const f = bytes / release.archiveBytes;
       if (f - reported >= 0.01 || bytes === release.archiveBytes) {
         reported = f;
         onProgress({ phase: 'download', fraction: f });
       }
-    }
-  } finally {
-    await fh.close();
-  }
+      cb(null, chunk);
+    },
+  });
+  await pipeline(
+    Readable.fromWeb(res.body as WebReadableStream<Uint8Array>),
+    meter,
+    createWriteStream(partial, { flags: 'wx', mode: 0o600 }),
+    { signal },
+  );
   if (bytes !== release.archiveBytes) throw new Error('Download ended early');
   return hash.digest('hex');
 }
 
-async function makeExecutable(folder: string): Promise<void> {
-  for (const e of await readdir(folder, { withFileTypes: true })) {
-    if (e.isFile()) await chmod(join(folder, e.name), 0o755);
-  }
-}
+// ---- Zip reader: extracts only an allowlist of top-level files at exact sizes ----
+// Stored + deflate; zip64 records/extra fields understood; encryption, other methods and
+// non-regular entries rejected for the allowlisted names; everything else is skipped.
 
-/**
- * Windows 10+ and macOS ship bsdtar, which reads zip archives. GNU tar on Linux can't, and
- * `unzip` isn't always installed, so Linux uses the small zip reader below.
- */
-async function extractArchive(
-  archive: string,
-  dest: string,
-  platform: NodeJS.Platform,
-  signal: AbortSignal,
-  onFraction: (f: number) => void,
-): Promise<void> {
-  if (platform === 'win32' || platform === 'darwin') {
-    await runTar(systemTar(platform), ['-xf', archive, '-C', dest], signal);
-  } else {
-    await extractZip(archive, dest, signal, onFraction);
-  }
-}
+export interface ZipMember { name: string; bytes: number }
+interface ZipEntry { name: string; flags: number; method: number; crc: number; compSize: number; size: number; localOffset: number; external: number }
 
-function systemTar(platform: NodeJS.Platform): string {
-  // Use the OS's own bsdtar by full path: Git for Windows puts GNU tar (no zip support) on PATH.
-  if (platform === 'win32') return join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe');
-  return '/usr/bin/tar';
-}
-
-function runTar(cmd: string, args: string[], signal: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(cmd, args, { shell: false, windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'], signal });
-    let stderr = '';
-    child.stderr.setEncoding('utf8').on('data', (d: string) => { if (stderr.length < 4096) stderr += d; });
-    child.on('error', reject);
-    child.on('close', (code) => {
-      if (code === 0) resolve();
-      else reject(new Error(`tar exited with ${code}: ${stderr.trim()}`));
-    });
-  });
-}
-
-// ---- Minimal zip reader (stored + deflate, no zip64, no encryption) ----
-
-interface ZipEntry { name: string; method: number; crc: number; compSize: number; size: number; localOffset: number; mode: number; dir: boolean }
-
-function safeEntryName(name: string): boolean {
-  if (!name || name.includes('\\') || name.includes('\0') || name.startsWith('/') || /^[a-zA-Z]:/.test(name)) return false;
-  return name.split('/').every((seg, i, all) => seg !== '..' && seg !== '.' && (seg !== '' || i === all.length - 1));
-}
+const MAX32 = 0xffffffff;
 
 async function readAt(fh: FileHandle, pos: number, len: number): Promise<Buffer> {
   const buf = Buffer.alloc(len);
@@ -229,81 +221,129 @@ async function readAt(fh: FileHandle, pos: number, len: number): Promise<Buffer>
   return buf;
 }
 
-async function readEntries(archive: string): Promise<ZipEntry[]> {
-  const fh = await open(archive, 'r');
-  try {
-    const size = (await fh.stat()).size;
-    const tailLen = Math.min(size, 22 + 0xffff);
-    const tail = await readAt(fh, size - tailLen, tailLen);
-    let eocd = -1;
-    for (let i = tail.length - 22; i >= 0; i--) if (tail.readUInt32LE(i) === 0x06054b50) { eocd = i; break; }
-    if (eocd < 0) throw new Error('Not a zip archive');
-    const count = tail.readUInt16LE(eocd + 10);
-    const cdSize = tail.readUInt32LE(eocd + 12);
-    const cdOffset = tail.readUInt32LE(eocd + 16);
-    if (count === 0xffff || cdSize === 0xffffffff || cdOffset === 0xffffffff) throw new Error('Zip64 archives are not supported');
-    const cd = await readAt(fh, cdOffset, cdSize);
-    const entries: ZipEntry[] = [];
-    let p = 0;
-    for (let n = 0; n < count; n++) {
-      if (cd.readUInt32LE(p) !== 0x02014b50) throw new Error('Bad zip central directory');
-      const flags = cd.readUInt16LE(p + 8);
-      const method = cd.readUInt16LE(p + 10);
-      const crc = cd.readUInt32LE(p + 16);
-      const compSize = cd.readUInt32LE(p + 20);
-      const size = cd.readUInt32LE(p + 24);
-      const nameLen = cd.readUInt16LE(p + 28), extraLen = cd.readUInt16LE(p + 30), commentLen = cd.readUInt16LE(p + 32);
-      const external = cd.readUInt32LE(p + 38);
-      const localOffset = cd.readUInt32LE(p + 42);
-      const name = cd.toString('utf8', p + 46, p + 46 + nameLen);
-      p += 46 + nameLen + extraLen + commentLen;
-      const unixType = (external >>> 16) & 0o170000;
-      const dir = name.endsWith('/');
-      if (!safeEntryName(name)) throw new Error(`Unsafe zip entry: ${name}`);
-      if (flags & 1) throw new Error('Encrypted zip entries are not supported');
-      if (!dir && method !== 0 && method !== 8) throw new Error(`Unsupported zip compression ${method}`);
-      if (unixType !== 0 && unixType !== 0o100000 && unixType !== 0o040000) throw new Error(`Unsupported zip entry type: ${name}`);
-      if (compSize === 0xffffffff || size === 0xffffffff || localOffset === 0xffffffff) throw new Error('Zip64 archives are not supported');
-      entries.push({ name, method, crc, compSize, size, localOffset, mode: (external >>> 16) & 0o777, dir });
+function u64(buf: Buffer, at: number): number {
+  const n = buf.readBigUInt64LE(at);
+  if (n > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error('Zip value too large');
+  return Number(n);
+}
+
+async function readEntries(fh: FileHandle): Promise<ZipEntry[]> {
+  const size = (await fh.stat()).size;
+  const tailLen = Math.min(size, 22 + 0xffff);
+  const tailStart = size - tailLen;
+  const tail = await readAt(fh, tailStart, tailLen);
+  let eocd = -1;
+  for (let i = tail.length - 22; i >= 0; i--) if (tail.readUInt32LE(i) === 0x06054b50) { eocd = i; break; }
+  if (eocd < 0) throw new Error('Not a zip archive');
+  let count = tail.readUInt16LE(eocd + 10);
+  let cdSize = tail.readUInt32LE(eocd + 12);
+  let cdOffset = tail.readUInt32LE(eocd + 16);
+  // Zip64 end-of-central-directory locator sits right before the classic record.
+  if (eocd >= 20 && tail.readUInt32LE(eocd - 20) === 0x07064b50) {
+    const recOffset = u64(tail, eocd - 20 + 8);
+    const rec = await readAt(fh, recOffset, 56);
+    if (rec.readUInt32LE(0) !== 0x06064b50) throw new Error('Bad zip64 end record');
+    count = u64(rec, 32);
+    cdSize = u64(rec, 40);
+    cdOffset = u64(rec, 48);
+  } else if (count === 0xffff || cdSize === MAX32 || cdOffset === MAX32) {
+    throw new Error('Zip64 archive without its locator');
+  }
+  if (cdOffset + cdSize > size) throw new Error('Zip central directory is out of range');
+  const cd = await readAt(fh, cdOffset, cdSize);
+  const entries: ZipEntry[] = [];
+  let p = 0;
+  for (let n = 0; n < count; n++) {
+    if (p + 46 > cd.length || cd.readUInt32LE(p) !== 0x02014b50) throw new Error('Bad zip central directory');
+    const nameLen = cd.readUInt16LE(p + 28), extraLen = cd.readUInt16LE(p + 30), commentLen = cd.readUInt16LE(p + 32);
+    const e: ZipEntry = {
+      flags: cd.readUInt16LE(p + 8),
+      method: cd.readUInt16LE(p + 10),
+      crc: cd.readUInt32LE(p + 16),
+      compSize: cd.readUInt32LE(p + 20),
+      size: cd.readUInt32LE(p + 24),
+      external: cd.readUInt32LE(p + 38),
+      localOffset: cd.readUInt32LE(p + 42),
+      name: cd.toString('utf8', p + 46, p + 46 + nameLen),
+    };
+    // Zip64 extended information: 8-byte values for exactly the fields that are saturated, in this order.
+    let x = p + 46 + nameLen;
+    const xEnd = x + extraLen;
+    while (x + 4 <= xEnd) {
+      const id = cd.readUInt16LE(x), len = cd.readUInt16LE(x + 2);
+      if (id === 0x0001) {
+        let q = x + 4;
+        const take = () => { if (q + 8 > x + 4 + len) throw new Error('Bad zip64 extra field'); const v = u64(cd, q); q += 8; return v; };
+        if (e.size === MAX32) e.size = take();
+        if (e.compSize === MAX32) e.compSize = take();
+        if (e.localOffset === MAX32) e.localOffset = take();
+      }
+      x += 4 + len;
     }
-    // Resolve each entry's data offset from its local header.
-    for (const e of entries) {
+    entries.push(e);
+    p = xEnd + commentLen;
+  }
+  return entries;
+}
+
+/**
+ * Unpack exactly `members` (top-level names, exact sizes) from a zip into dest, checking
+ * each one's size and CRC-32. Other entries are skipped. Settles only after the file
+ * being written is closed, so a cancel never leaves an open handle behind.
+ */
+export async function extractZip(
+  archive: string,
+  dest: string,
+  members: ZipMember[],
+  signal: AbortSignal,
+  onFraction: (f: number) => void = () => {},
+): Promise<void> {
+  const fh = await open(archive, 'r');
+  let plan: { e: ZipEntry; m: ZipMember; dataStart: number }[];
+  try {
+    const entries = await readEntries(fh);
+    plan = [];
+    for (const m of members) {
+      const hits = entries.filter((e) => e.name === m.name);
+      if (hits.length !== 1) throw new Error(`Zip must contain ${m.name} exactly once`);
+      const e = hits[0];
+      const unixType = (e.external >>> 16) & 0o170000;
+      if (e.flags & 0x41) throw new Error(`Encrypted zip entry: ${e.name}`);
+      if (e.method !== 0 && e.method !== 8) throw new Error(`Unsupported zip compression ${e.method}`);
+      if ((unixType !== 0 && unixType !== 0o100000) || (e.external & 0x10)) throw new Error(`Not a regular file: ${e.name}`);
+      if (e.size !== m.bytes) throw new Error(`${e.name} has the wrong size`);
       const lh = await readAt(fh, e.localOffset, 30);
       if (lh.readUInt32LE(0) !== 0x04034b50) throw new Error('Bad zip local header');
-      e.localOffset = e.localOffset + 30 + lh.readUInt16LE(26) + lh.readUInt16LE(28);
+      plan.push({ e, m, dataStart: e.localOffset + 30 + lh.readUInt16LE(26) + lh.readUInt16LE(28) });
     }
-    return entries;
   } finally {
     await fh.close();
   }
-}
 
-/** Unpack a zip into dest, checking each member's size and CRC-32. */
-export async function extractZip(archive: string, dest: string, signal: AbortSignal, onFraction: (f: number) => void = () => {}): Promise<void> {
-  const entries = await readEntries(archive);
-  const total = entries.reduce((s, e) => s + e.compSize, 0) || 1;
+  const total = members.reduce((s, m) => s + m.bytes, 0) || 1;
   let done = 0;
-  for (const e of entries) {
+  let reported = 0;
+  for (const { e, m, dataStart } of plan) {
     signal.throwIfAborted();
-    const target = join(dest, ...e.name.split('/').filter(Boolean));
-    if (e.dir) { await mkdir(target, { recursive: true }); continue; }
-    await mkdir(dirname(target), { recursive: true });
     let crc = 0, size = 0;
     const check = new Transform({
       transform(chunk: Buffer, _enc, cb) {
         size += chunk.length;
-        if (size > e.size) { cb(new Error(`Zip entry ${e.name} is larger than recorded`)); return; }
+        if (size > m.bytes) { cb(new Error(`${e.name} is larger than recorded`)); return; }
         crc = crc32(chunk, crc);
+        const f = (done + size) / total;
+        if (f - reported >= 0.01) { reported = f; onFraction(f); }
         cb(null, chunk);
       },
     });
     const source = e.compSize > 0
-      ? createReadStream(archive, { start: e.localOffset, end: e.localOffset + e.compSize - 1 })
+      ? createReadStream(archive, { start: dataStart, end: dataStart + e.compSize - 1 })
       : Readable.from([]);
     const stages: NodeJS.ReadWriteStream[] = e.method === 8 && e.compSize > 0 ? [createInflateRaw()] : [];
-    await pipeline([source, ...stages, check, createWriteStream(target, { mode: e.mode || 0o644 })], { signal });
-    if (size !== e.size || (crc >>> 0) !== e.crc) throw new Error(`Zip entry ${e.name} is corrupt`);
-    done += e.compSize;
-    onFraction(done / total);
+    // pipeline waits for every stream to close before it settles, including on abort.
+    await pipeline([source, ...stages, check, createWriteStream(join(dest, m.name), { flags: 'wx', mode: 0o644 })], { signal });
+    if (size !== m.bytes || (crc >>> 0) !== e.crc) throw new Error(`${e.name} is corrupt`);
+    done += m.bytes;
   }
+  onFraction(1);
 }
