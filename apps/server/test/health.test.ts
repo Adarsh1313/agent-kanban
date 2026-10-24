@@ -393,10 +393,12 @@ test('Antigravity: latest is the pinned release, and any other installed version
   }
 });
 
-test('makeGetVersion asks the Antigravity adapter for its ACP version and runs --version for the others', async () => {
-  const get = makeGetVersion({ ensure: async () => ({ agentVersion: async () => '1.3.0' }) as never });
-  assert.equal(await get('antigravity', 'agy'), '1.3.0');
-  assert.equal(await get('codex', process.execPath), process.versions.node);
-  const none = makeGetVersion({ ensure: async () => undefined });
+test('makeGetVersion: Antigravity is the running agent version, else the installed folder (never starts it); others run --version', async () => {
+  const running = makeGetVersion({ get: () => ({ agentVersion: async () => '1.3.1' }) as never }, () => '1.3.0');
+  assert.equal(await running('antigravity', 'agy'), '1.3.1');
+  const stopped = makeGetVersion({ get: () => ({ agentVersion: async () => null }) as never }, () => '1.3.0');
+  assert.equal(await stopped('antigravity', 'agy'), '1.3.0');
+  const none = makeGetVersion({ get: () => undefined }, () => null);
   assert.equal(await none('antigravity', 'agy'), null);
+  assert.equal(await none('codex', process.execPath), process.versions.node);
 });

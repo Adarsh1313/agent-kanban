@@ -44,7 +44,7 @@ const adapters = new AdapterRegistry({
     : id === 'codex' ? new CodexAdapter({ codexPath: path })
       : new AntigravityAdapter({ exePath: path })),
 });
-// Creating an adapter starts nothing: the Antigravity agent (slow to start) is launched by the first check or chat.
+// Creating an adapter starts nothing: the Antigravity agent (slow to start) is launched only by a chat or sign-in.
 await Promise.all(PROVIDERS.map((id) => adapters.ensure(id)));
 
 let broadcast: (e: ServerEvent) => void = () => {};
@@ -63,7 +63,7 @@ const chats = new ChatService({ store, adapters, usage, broadcast: (e) => broadc
 const connections = new ConnectionMonitor({
   providers: PROVIDERS,
   findBinary: findProvider,
-  getVersion: makeGetVersion(adapters), getLatest, adapters,
+  getVersion: makeGetVersion(adapters, () => findInstalledAntigravity(home)?.version ?? null), getLatest, adapters,
   onUpdate: (health) => broadcast({ type: 'connection.updated', health }),
 });
 const api = createApi({ chats, usage, history: () => readAllHistory(home), token, connections, adapters });

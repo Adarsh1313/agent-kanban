@@ -368,11 +368,16 @@ describe('New chat: fix round 1', () => {
     expect(mocked.startChat).toHaveBeenCalledWith(expect.objectContaining({ provider: 'antigravity', cwd: '/elsewhere/new', prompt: 'Go' }));
   });
 
-  it('when only Antigravity is connected, a new chat starts on it', () => {
+  it('when only Antigravity is connected, a new chat starts on it', async () => {
+    mocked.startChat.mockResolvedValue({ id: 'c9' } as never);
     mount(seeded({ connections: [conn('antigravity')] }));
     act(() => openNewChat({ cwd: '/elsewhere/new' }));
     expect(chip(/^Provider: Antigravity$/)).toBeTruthy();
     expect(within(dialog()).queryByText(/aren't supported yet/)).toBeNull();
+    fireEvent.change(promptBox(), { target: { value: 'Go' } });
+    fireEvent.click(start());
+    await flush();
+    expect(mocked.startChat).toHaveBeenCalledWith(expect.objectContaining({ provider: 'antigravity', cwd: '/elsewhere/new', prompt: 'Go' }));
   });
 
   it("a known project's missing folder switches to the path field, prefilled, with the error inline and the prompt kept", async () => {

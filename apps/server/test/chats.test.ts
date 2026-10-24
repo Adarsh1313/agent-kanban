@@ -8,6 +8,7 @@ import { Store } from '../src/store.ts';
 import { ChatService, ActiveElsewhereError, CantContinueError } from '../src/chats.ts';
 import type { ProviderAdapter } from '../src/adapters/adapter.ts';
 import { AdapterRegistry } from '../src/adapters/registry.ts';
+import { ANTIGRAVITY_SIGNED_OUT } from '../src/adapters/antigravity.ts';
 
 class FakeAdapter implements ProviderAdapter {
   id: ProviderId;
@@ -649,7 +650,7 @@ test('Antigravity history continue that the agent refuses throws CantContinueErr
 
 test('Antigravity history continue while signed out makes a card that says to sign in', async () => {
   const { store, adapter, svc } = setup('antigravity');
-  adapter.resumeError = new Error("Antigravity isn't signed in.");
+  adapter.resumeError = new Error(ANTIGRAVITY_SIGNED_OUT);
   const h = { provider: 'antigravity', sessionRef: 'conv1', cwd: '/w', title: 'Old chat', updatedAt: '2026-01-01T00:00:00Z' } as HistoryChat;
   const chat = await svc.continueHistory(h, 'go on');
   const msgs = store.listMessages(chat.id);
@@ -661,4 +662,12 @@ test('Antigravity crash mid-turn shows "Antigravity stopped unexpectedly. Resume
   const chat = await svc.start({ provider: 'antigravity', cwd: '/w', prompt: 'hi' });
   adapter.emit({ type: 'error', sessionRef: 's1', message: 'Antigravity stopped unexpectedly.' });
   assert.equal(store.listMessages(chat.id).at(-1)!.text, 'Antigravity stopped unexpectedly. Resume to try again.');
+});
+
+test('Antigravity history continue: a failure that is not the agent answering (spawn failure, timeout) is rethrown, not a 409', async () => {
+  const { store, adapter, svc } = setup('antigravity');
+  adapter.resumeError = new Error('session/load timed out');
+  const h = { provider: 'antigravity', sessionRef: 'conv1', cwd: '/w', title: 'Old chat', updatedAt: '2026-01-01T00:00:00Z' } as HistoryChat;
+  await assert.rejects(svc.continueHistory(h, 'go on'), (e: Error) => !(e instanceof CantContinueError) && /timed out/.test(e.message));
+  assert.equal(store.listChats().length, 0);
 });

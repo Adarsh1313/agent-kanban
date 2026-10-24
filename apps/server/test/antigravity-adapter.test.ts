@@ -1,29 +1,52 @@
-import { test } from 'node:test';
+import { test, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AdapterEvent } from '@agent-kanban/shared';
-import { AntigravityAdapter } from '../src/adapters/antigravity.ts';
+import { AntigravityAdapter, pickOption } from '../src/adapters/antigravity.ts';
 import { JsonRpcProcess } from '../src/adapters/jsonrpc.ts';
-import { ConnectionMonitor } from '../src/health.ts';
+import { ConnectionMonitor, makeGetVersion } from '../src/health.ts';
 
 const fake = fileURLToPath(new URL('./fixtures/fake-acp-server.ts', import.meta.url));
 const cwd = process.cwd();
 const noSettings = mkdtempSync(join(tmpdir(), 'ak-gemini-none-'));
 
-function make(scenario: string | ((n: number) => string), env: Record<string, string> = {}, opts: { geminiHome?: string; pingTimeoutMs?: number } = {}) {
+/** session/load requests each fake process received. */
+const loads = new WeakMap<JsonRpcProcess, string[]>();
+
+function writeSettings(home: string, text: string) {
+  mkdirSync(join(home, 'antigravity-acp'), { recursive: true });
+  writeFileSync(join(home, 'antigravity-acp', 'settings.json'), text);
+}
+
+async function waitExit(p: JsonRpcProcess) {
+  let exited = false;
+  p.onExit(() => { exited = true; });
+  for (let i = 0; i < 500 && !exited; i++) await new Promise((r) => setTimeout(r, 10));
+  assert.ok(exited, 'the agent process exited');
+}
+
+function make(scenario: string | ((n: number) => string), env: Record<string, string> = {}, opts: { geminiHome?: string; pingTimeoutMs?: number; idleMs?: number } = {}) {
   const procs: JsonRpcProcess[] = [];
   const adapter = new AntigravityAdapter({
     exePath: 'unused',
     geminiHome: opts.geminiHome ?? noSettings,
     pingTimeoutMs: opts.pingTimeoutMs ?? 5_000,
+    ...(opts.idleMs ? { idleMs: opts.idleMs } : {}),
     spawn: () => {
       const sc = typeof scenario === 'string' ? scenario : scenario(procs.length);
       const p = new JsonRpcProcess(process.execPath, ['--disable-warning=ExperimentalWarning', fake], {
         env: { ...process.env, FAKE_SCENARIO: sc, ...env }, jsonrpc: '2.0', requestTimeoutMs: 10_000,
       });
+      const seen: string[] = [];
+      loads.set(p, seen);
+      const request = p.request.bind(p);
+      p.request = ((method: string, params: any, t?: number) => {
+        if (method === 'session/load') seen.push(params.sessionId);
+        return request(method, params, t);
+      }) as typeof p.request;
       procs.push(p);
       return p;
     },
@@ -172,7 +195,7 @@ test('sending while a turn runs is refused', async () => {
   } finally { await adapter.dispose(); }
 });
 
-test('startChat when signed out rejects with "isn\'t signed in"', async () => {
+test('startChat when signed out rejects with the signed-out message', async () => {
   const { adapter } = make('signin');
   try {
     await assert.rejects(adapter.startChat({ cwd, prompt: 'hi' }), /Antigravity isn't signed in\./);
@@ -212,16 +235,28 @@ test('cancelling signIn stops the agent process; the next action starts a new on
   try {
     const p = adapter.signIn(() => ac.abort(), ac.signal);
     await assert.rejects(p, (e: any) => e.name === 'AbortError');
-    let exited = false;
-    procs[0]!.onExit(() => { exited = true; });
-    for (let i = 0; i < 500 && !exited; i++) await new Promise((r) => setTimeout(r, 10));
-    assert.ok(exited, 'the sign-in process was stopped');
-    assert.equal((await adapter.ping({ manual: true })).ok, true);
+    await waitExit(procs[0]!);
+    assert.equal(adapter.running, false);
+    await assert.rejects(adapter.startChat({ cwd, prompt: 'hi' }), /isn't signed in/);
     assert.equal(procs.length, 2);
   } finally { await adapter.dispose(); }
 });
 
-test('signIn when already signed in resolves at once without a link', async () => {
+test('cancelling signIn while the agent is still starting stops the agent it started', async () => {
+  const { adapter, procs } = make('signin', { FAKE_AUTH_HANG: '1' });
+  const ac = new AbortController();
+  try {
+    const p = adapter.signIn(() => {}, ac.signal);
+    ac.abort();
+    await assert.rejects(p, (e: any) => e.name === 'AbortError');
+    for (let i = 0; i < 500 && procs.length === 0; i++) await new Promise((r) => setTimeout(r, 10));
+    await waitExit(procs[0]!);
+    for (let i = 0; i < 500 && adapter.running; i++) await new Promise((r) => setTimeout(r, 10));
+    assert.equal(adapter.running, false);
+  } finally { await adapter.dispose(); }
+});
+
+test('signIn when the agent itself says signed in resolves at once without a link', async () => {
   const { adapter } = make('ready');
   try {
     const urls: string[] = [];
@@ -235,20 +270,26 @@ test('without an authenticated flag (real agent), signed in follows settings.jso
   const { adapter } = make('ready', { FAKE_NO_AUTH_FLAG: '1' }, { geminiHome: home });
   try {
     assert.equal((await adapter.ping()).signedIn, false);
-    mkdirSync(join(home, 'antigravity-acp'), { recursive: true });
-    writeFileSync(join(home, 'antigravity-acp', 'settings.json'), JSON.stringify({ auth: { type: 'oauth-personal' } }));
+    writeSettings(home, JSON.stringify({ auth: { type: 'oauth-personal' } }));
     assert.equal((await adapter.ping()).signedIn, true);
+    writeSettings(home, JSON.stringify({ auth: { type: 'oauth-personal' }, pad: 'x'.repeat(70 * 1024) }));
+    assert.equal((await adapter.ping()).signedIn, false, 'an oversized settings.json is not read');
   } finally { await adapter.dispose(); }
 });
 
-test('a sign-in link nobody asked for (the login is gone): startChat says signed out and the agent is restarted', async () => {
-  const { adapter, procs } = make('ready', { FAKE_NEW_SIGNIN: '1' });
+test('a revoked login (auth.type set, session/new starts a sign-in): signed out sticks, and signIn runs authenticate', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'ak-gemini-'));
+  writeSettings(home, JSON.stringify({ auth: { type: 'oauth-personal' } }));
+  const { adapter, procs } = make('ready', { FAKE_NEW_SIGNIN: '1', FAKE_NO_AUTH_FLAG: '1' }, { geminiHome: home });
   try {
+    assert.equal((await adapter.ping()).signedIn, true, 'the settings.json guess before anything is known');
     await assert.rejects(adapter.startChat({ cwd, prompt: 'hi' }), /Antigravity isn't signed in\./);
-    let exited = false;
-    procs[0]!.onExit(() => { exited = true; });
-    for (let i = 0; i < 500 && !exited; i++) await new Promise((r) => setTimeout(r, 10));
-    assert.ok(exited, 'the agent running the unasked sign-in was stopped');
+    await waitExit(procs[0]!);
+    assert.deepEqual(await adapter.ping(), { ok: true, signedIn: false });
+    const urls: string[] = [];
+    await adapter.signIn((u) => urls.push(u), new AbortController().signal);
+    assert.equal(urls.length, 1, 'authenticate ran');
+    assert.deepEqual(await adapter.ping(), { ok: true, signedIn: true });
   } finally { await adapter.dispose(); }
 });
 
@@ -264,17 +305,22 @@ test('readUsage is unavailable with the plan copy, listModels is empty, and neit
   } finally { await adapter.dispose(); }
 });
 
-test('agentVersion is the ACP agentInfo.version', async () => {
-  const { adapter } = make('ready');
-  try { assert.equal(await adapter.agentVersion(), '1.3.0'); } finally { await adapter.dispose(); }
+test('agentVersion is the running agent ACP agentInfo.version, null when not running (never starts it)', async () => {
+  const { adapter, procs } = make('turn');
+  try {
+    assert.equal(await adapter.agentVersion(), null);
+    assert.equal(procs.length, 0);
+    await adapter.startChat({ cwd, prompt: 'hi' });
+    assert.equal(await adapter.agentVersion(), '1.3.0');
+  } finally { await adapter.dispose(); }
 });
 
-test('health shows signed_out before sign-in and connected after', async () => {
-  const { adapter } = make('signin');
+test('health checks never start the agent; signed_out before sign-in and connected after', async () => {
+  const { adapter, procs } = make('signin');
   const monitor = new ConnectionMonitor({
     providers: ['antigravity'],
     findBinary: async () => 'agy',
-    getVersion: async () => adapter.agentVersion(),
+    getVersion: makeGetVersion({ get: () => adapter }, () => '1.3.0'),
     getLatest: async () => '1.3.0',
     adapters: { ensure: async () => adapter },
     onUpdate: () => {},
@@ -282,9 +328,85 @@ test('health shows signed_out before sign-in and connected after', async () => {
   try {
     const [before] = await monitor.check('antigravity');
     assert.equal(before!.status, 'signed_out');
-    assert.equal(before!.version, '1.3.0');
+    assert.equal(before!.version, '1.3.0', 'from the installed folder');
+    assert.equal(procs.length, 0, 'the check started nothing');
     await adapter.signIn(() => {}, new AbortController().signal);
     const [after] = await monitor.check('antigravity');
     assert.equal(after!.status, 'connected');
   } finally { monitor.stop(); await adapter.dispose(); }
+});
+
+test('a crash that cut off a turn is reported by the next ping once; an idle exit is just not running', async () => {
+  const { adapter, procs, waitFor } = make((n) => (n === 0 ? 'crash' : 'turn'), {}, { idleMs: 200 });
+  try {
+    await adapter.startChat({ cwd, prompt: 'hi' });
+    await waitFor((e) => e.type === 'error');
+    assert.deepEqual(await adapter.ping(), { ok: false, signedIn: null, message: 'Antigravity stopped unexpectedly.' });
+    assert.equal((await adapter.ping()).ok, true);
+    await adapter.startChat({ cwd, prompt: 'hi' });
+    await waitFor((e) => e.type === 'turn.completed');
+    await waitExit(procs[1]!); // idle shutdown
+    assert.equal((await adapter.ping()).ok, true);
+    assert.equal(procs.length, 2);
+  } finally { await adapter.dispose(); }
+});
+
+test('idle shutdown: the agent stops after idleMs with nothing running, and the next send re-attaches with session/load', async () => {
+  const { adapter, procs, events, waitFor } = make('turn', { FAKE_LOADABLE: 'sess_1' }, { idleMs: 300 });
+  try {
+    await adapter.startChat({ cwd, prompt: 'hi' });
+    await waitFor((e) => e.type === 'turn.completed');
+    assert.equal(adapter.running, true);
+    await waitExit(procs[0]!);
+    assert.equal(adapter.running, false);
+    assert.ok(!events.some((e) => e.type === 'error'), 'an idle stop is not an error');
+    const n = events.length;
+    await adapter.sendMessage('sess_1', 'again');
+    await waitFor((e) => e.type === 'turn.completed', n);
+    assert.equal(procs.length, 2);
+    assert.deepEqual(loads.get(procs[1]!), ['sess_1']);
+  } finally { await adapter.dispose(); }
+});
+
+test('the idle countdown waits for a running turn', async () => {
+  const { adapter, procs, waitFor } = make('cancel', {}, { idleMs: 150 });
+  try {
+    await adapter.startChat({ cwd, prompt: 'long job' });
+    await waitFor((e) => e.type === 'message.delta');
+    await new Promise((r) => setTimeout(r, 500));
+    assert.equal(adapter.running, true, 'not stopped mid-turn');
+    await adapter.stop('sess_1');
+    await waitFor((e) => e.type === 'stopped');
+    await waitExit(procs[0]!);
+  } finally { await adapter.dispose(); }
+});
+
+test('concurrent resumes of one session send session/load once', async () => {
+  const { adapter, procs } = make('turn');
+  try {
+    await Promise.all([adapter.resume('sess_old', cwd), adapter.resume('sess_old', cwd)]);
+    assert.deepEqual(loads.get(procs[0]!), ['sess_old']);
+  } finally { await adapter.dispose(); }
+});
+
+test('pickOption: allow is only allow_once (never allow_always); reject falls back to any reject', () => {
+  const o = (optionId: string, kind: string) => ({ optionId, name: optionId, kind });
+  assert.equal(pickOption([o('a', 'allow_always'), o('r', 'reject_once')], 'allow'), undefined);
+  assert.equal(pickOption([o('x', 'allow_always'), o('allow_once', 'other')], 'allow')?.optionId, 'allow_once');
+  assert.equal(pickOption([o('a1', 'allow_once'), o('a2', 'allow_always')], 'allow')?.optionId, 'a1');
+  assert.equal(pickOption([o('a', 'allow_once'), o('ra', 'reject_always')], 'reject')?.optionId, 'ra');
+});
+
+test('allow with no allow-once option answers cancelled', async () => {
+  const { adapter, waitFor } = make('permission', { FAKE_PERM_OPTIONS: 'always' });
+  const warn = mock.method(console, 'warn', () => {});
+  try {
+    await adapter.startChat({ cwd, prompt: 'run tests' });
+    const req = await waitFor((e) => e.type === 'request.opened');
+    assert.ok(req.type === 'request.opened');
+    await adapter.respondToRequest('sess_1', req.requestId, 'allow');
+    const done = await waitFor((e) => e.type === 'message.completed');
+    assert.ok(done.type === 'message.completed' && done.text === 'permission: cancelled');
+    assert.equal(warn.mock.callCount(), 1);
+  } finally { warn.mock.restore(); await adapter.dispose(); }
 });

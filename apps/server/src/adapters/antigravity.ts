@@ -2,15 +2,16 @@
 //
 // What the real agy_acp_server 1.3.0 does (checked on Windows, Task 3):
 // - It is a PyInstaller one-file bundle: every launch unpacks ~200-330 MB into the temp folder and takes
-//   ~40 s before it answers `initialize`; a force kill leaves that folder behind. So one long-lived process
-//   is kept, pings never respawn a crash-looping one, and the temp folder is ours and swept (see spawnAntigravity).
+//   ~40 s before it answers `initialize`; a force kill leaves that folder behind. So the agent is started
+//   only by a user action (chat, resume, sign-in), never by a health check, and is stopped again after
+//   10 idle minutes; its temp folder is ours and swept (see spawnAntigravity).
 // - stdout carries only JSON-RPC; its logs, and the sign-in link, go to stderr.
 // - `initialize` sends no "authenticated" flag and always lists its auth methods ("oauth-personal" first).
 //   Whether a sign-in method is selected is in <GEMINI_HOME>/antigravity-acp/settings.json `auth.type`
 //   (the agent writes it after `authenticate`); without one, session/new fails -32000 "Authentication required".
 //   If a method is selected but its login is gone, session/new starts the browser sign-in instead: the
 //   adapter treats an unasked-for sign-in link as "signed out" and restarts the process to end that flow.
-import { mkdirSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -25,11 +26,12 @@ type SpawnFn = (cmd: string, args: string[]) => JsonRpcProcess;
 
 export const ANTIGRAVITY_CRASHED = 'Antigravity stopped unexpectedly.';
 const RESTARTED = 'Antigravity stopped responding and was restarted. Resume to continue.';
-const GAVE_UP = 'Antigravity keeps stopping. Use Check now to try again.';
 export const ANTIGRAVITY_SIGNED_OUT = "Antigravity isn't signed in.";
 const BUSY = 'Antigravity is still working on the last message. Wait for it to finish, or stop it first.';
 const NO_LIMITS = "Antigravity doesn't report its limits.";
 const QUIET_MS = 120_000;
+const IDLE_MS = 10 * 60_000;
+const SETTINGS_MAX_BYTES = 64 * 1024;
 // Startup is slow (see above): requests get a generous default; pings their own short timeout.
 const REQUEST_TIMEOUT_MS = 180_000;
 
@@ -39,8 +41,8 @@ interface Live {
   init: AcpInitializeResult;
   /** Sessions this process knows (created or loaded on it). */
   sessions: Set<string>;
-  /** Learned on this process: true after a sign-in, false after "Authentication required". */
-  authed: boolean | null;
+  /** session/load calls in flight on this process, so concurrent sends load once. */
+  loads: Map<string, Promise<void>>;
 }
 
 interface Turn { live: Live; messageId: string; text: string[]; started: boolean }
@@ -51,6 +53,8 @@ export interface AntigravityAdapterOptions {
   /** Tests: start a fake agent instead. */
   spawn?: SpawnFn;
   pingTimeoutMs?: number;
+  /** Stop the agent this long after the last turn, permission answer, load or sign-in ends (default 10 minutes). */
+  idleMs?: number;
   /** Where the agent keeps settings.json (default $GEMINI_HOME or ~/.gemini). */
   geminiHome?: string;
   /** The temp folder the agent unpacks into (default <install root>/tmp). */
@@ -65,6 +69,8 @@ export class AntigravityAdapter implements ProviderAdapter {
   private startingProc: JsonRpcProcess | null = null;
   private makeProcess: () => JsonRpcProcess;
   private pingTimeoutMs: number;
+  private idleMs: number;
+  private idleTimer: NodeJS.Timeout | null = null;
   private geminiHome: string;
   private disposed = false;
   private turns = new Map<string, Turn>(); // sessionId -> running turn
@@ -78,15 +84,20 @@ export class AntigravityAdapter implements ProviderAdapter {
   private recycleMarked = new WeakSet<JsonRpcProcess>();
   private authUrlFn: ((url: string) => void) | null = null;
   private signInLive: Live | null = null;
-  private lastVersion: string | null = null;
-  // Keep-alive state for automatic (ping-driven) respawns, as in the Codex adapter.
-  private failures = 0;
-  private retryAt = 0;
-  private gaveUp = false;
-  private crashed = false;
+  private version: string | null = null;
+  /** The agent's own `authenticated` flag from the last initialize (null: it sends none, like the real one). */
+  private agentFlag: boolean | null = null;
+  /**
+   * Learned from the agent itself: false after "Authentication required" or an unasked-for sign-in link,
+   * true after `authenticate` succeeded. It overrides the settings.json inference.
+   */
+  private learned: boolean | null = null;
+  /** A crash cut off a running turn since the last ping: the next ping reports it once. */
+  private crashedTurn = false;
 
   constructor(opts: AntigravityAdapterOptions) {
     this.pingTimeoutMs = opts.pingTimeoutMs ?? 15_000;
+    this.idleMs = opts.idleMs ?? IDLE_MS;
     this.geminiHome = opts.geminiHome ?? (process.env.GEMINI_HOME || join(homedir(), '.gemini'));
     const tempDir = opts.tempDir ?? join(dirname(dirname(opts.exePath)), 'tmp');
     this.makeProcess = opts.spawn ? () => opts.spawn!(opts.exePath, []) : () => spawnAntigravity(opts.exePath, tempDir);
@@ -100,6 +111,12 @@ export class AntigravityAdapter implements ProviderAdapter {
   private emit(e: AdapterEvent): void {
     for (const l of [...this.listeners]) { try { l(e); } catch { /* a listener's bug must not break the adapter */ } }
   }
+
+  /** The version the running agent reported (ACP agentInfo.version); null when it isn't running. */
+  get lastVersion(): string | null { return this.live ? this.version : null; }
+
+  /** True while an agent process is running or starting. */
+  get running(): boolean { return !!this.live || !!this.starting; }
 
   // ---- process lifecycle ----
 
@@ -125,7 +142,7 @@ export class AntigravityAdapter implements ProviderAdapter {
     const proc = this.makeProcess();
     this.startingProc = proc;
     const acp = new AcpClient(proc);
-    const live: Live = { proc, acp, init: { protocolVersion: 1, authMethods: [], authenticated: null }, sessions: new Set(), authed: null };
+    const live: Live = { proc, acp, init: { protocolVersion: 1, authMethods: [], authenticated: null }, sessions: new Set(), loads: new Map() };
     acp.onUpdate((sid, u) => this.onUpdate(sid, u));
     acp.onPermission((sid, req) => this.onPermission(sid, req));
     acp.onAuthUrl((url) => {
@@ -135,9 +152,11 @@ export class AntigravityAdapter implements ProviderAdapter {
     proc.onExit(() => this.onProcessExit(live));
     try {
       live.init = await acp.initialize();
-      if (live.init.agentInfo?.version) this.lastVersion = live.init.agentInfo.version;
+      if (live.init.agentInfo?.version) this.version = live.init.agentInfo.version;
+      this.agentFlag = live.init.authenticated;
       if (this.disposed) throw new Error('Antigravity adapter is shut down.');
       this.live = live;
+      this.touchIdle();
       return live;
     } catch (e) {
       this.closingByUs.add(proc);
@@ -148,9 +167,24 @@ export class AntigravityAdapter implements ProviderAdapter {
     }
   }
 
+  /** (Re)starts the idle countdown: the agent is stopped once nothing has used it for `idleMs`. */
+  private touchIdle(): void {
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    this.idleTimer = null;
+    if (this.disposed || !this.live) return;
+    this.idleTimer = setTimeout(() => {
+      this.idleTimer = null;
+      const live = this.live;
+      if (!live || this.starting) return;
+      if (!this.isIdle() || this.perms.size > 0 || live.loads.size > 0) { this.touchIdle(); return; }
+      void this.recycle(live).catch(() => {}); // chats re-attach with session/load on their next message
+    }, this.idleMs);
+    this.idleTimer.unref?.();
+  }
+
   /** A sign-in link nobody asked for: the selected login is gone and session/new started a browser sign-in. */
   private unaskedSignIn(live: Live): void {
-    live.authed = false;
+    this.learned = false;
     void this.recycle(live).catch(() => {});
   }
 
@@ -158,28 +192,35 @@ export class AntigravityAdapter implements ProviderAdapter {
     if (this.live === live) this.live = null;
     if (this.disposed) return;
     const deliberate = this.closingByUs.has(live.proc);
-    if (!deliberate) this.crashed = true;
     for (const [sid, turn] of [...this.turns]) {
       if (turn.live !== live) continue;
       this.turns.delete(sid);
       this.settlePerms(sid);
-      // An unasked-for sign-in is reported by the call that triggered it, not as a crash.
-      if (live.authed === false && deliberate) this.emit({ type: 'error', sessionRef: sid, message: ANTIGRAVITY_SIGNED_OUT });
+      if (!deliberate) this.crashedTurn = true; // an exit with nothing running is just "not running"
+      // An unasked-for sign-in is reported as signed out, not as a crash.
+      if (this.learned === false && deliberate) this.emit({ type: 'error', sessionRef: sid, message: ANTIGRAVITY_SIGNED_OUT });
       else this.emit({ type: 'error', sessionRef: sid, message: deliberate ? RESTARTED : ANTIGRAVITY_CRASHED });
     }
   }
 
-  /** Signed in? The agent's flag if it gives one, what this process learned, else the selected sign-in method. */
-  private signedInOf(live: Live): boolean | null {
-    if (live.authed !== null) return live.authed;
-    if (live.init.authenticated !== null) return live.init.authenticated;
+  /**
+   * Signed in? What the agent itself told us wins (signed out after "Authentication required" or an
+   * unasked-for sign-in, its own flag, signed in after a sign-in); otherwise whether settings.json selects
+   * a sign-in method.
+   */
+  private signedInOf(): boolean {
+    if (this.learned === false) return false;
+    if (this.learned === true) return true;
+    if (this.agentFlag !== null) return this.agentFlag;
     return this.authTypeSelected();
   }
 
   /** Reads only `auth.type` from the agent's settings.json (never its credential store). */
   private authTypeSelected(): boolean {
     try {
-      const s = JSON.parse(readFileSync(join(this.geminiHome, 'antigravity-acp', 'settings.json'), 'utf8'));
+      const file = join(this.geminiHome, 'antigravity-acp', 'settings.json');
+      if (statSync(file).size > SETTINGS_MAX_BYTES) return false;
+      const s = JSON.parse(readFileSync(file, 'utf8'));
       return typeof s?.auth?.type === 'string' && s.auth.type.trim() !== '';
     } catch { return false; }
   }
@@ -256,28 +297,30 @@ export class AntigravityAdapter implements ProviderAdapter {
     }
     if (stopReason === 'cancelled') this.emit({ type: 'stopped', sessionRef: sessionId });
     else this.emit({ type: 'turn.completed', sessionRef: sessionId });
+    this.touchIdle();
   }
 
   private failTurn(sessionId: string, turn: Turn, err: unknown): void {
     if (this.turns.get(sessionId) !== turn) return; // a process exit already reported it
     this.turns.delete(sessionId);
     this.settlePerms(sessionId);
-    if (isAuthRequired(err)) turn.live.authed = false;
+    if (isAuthRequired(err)) this.learned = false;
     const message = isAuthRequired(err) ? ANTIGRAVITY_SIGNED_OUT : err instanceof Error ? err.message : String(err);
     this.emit({ type: 'error', sessionRef: sessionId, message });
+    this.touchIdle();
   }
 
   /** A call failed: say "isn't signed in" when that is why, so the chat points at Connections. */
-  private rethrow(live: Live, err: unknown): never {
-    if (isAuthRequired(err)) { live.authed = false; throw new Error(ANTIGRAVITY_SIGNED_OUT); }
-    if (live.authed === false) throw new Error(ANTIGRAVITY_SIGNED_OUT);
+  private rethrow(err: unknown): never {
+    if (isAuthRequired(err)) { this.learned = false; throw new Error(ANTIGRAVITY_SIGNED_OUT); }
+    if (this.learned === false) throw new Error(ANTIGRAVITY_SIGNED_OUT);
     throw err;
   }
 
   async startChat(input: { cwd: string; prompt: string; model?: string }): Promise<{ sessionRef: string }> {
     const live = await this.ensureProcess();
     let sessionId: string;
-    try { sessionId = await live.acp.newSession(input.cwd); } catch (e) { this.rethrow(live, e); }
+    try { sessionId = await live.acp.newSession(input.cwd); } catch (e) { this.rethrow(e); }
     live.sessions.add(sessionId);
     this.sessionCwd.set(sessionId, input.cwd);
     this.emit({ type: 'session.started', sessionRef: sessionId });
@@ -305,10 +348,17 @@ export class AntigravityAdapter implements ProviderAdapter {
     await this.load(live, sessionRef, cwd);
   }
 
-  private async load(live: Live, sessionId: string, cwd: string): Promise<void> {
-    this.loading.add(sessionId);
-    try { await live.acp.loadSession(sessionId, cwd); } catch (e) { this.rethrow(live, e); } finally { this.loading.delete(sessionId); }
-    live.sessions.add(sessionId);
+  /** session/load once per session and process, however many callers wait for it. */
+  private load(live: Live, sessionId: string, cwd: string): Promise<void> {
+    const running = live.loads.get(sessionId);
+    if (running) return running;
+    const p = (async () => {
+      this.loading.add(sessionId);
+      try { await live.acp.loadSession(sessionId, cwd); } catch (e) { this.rethrow(e); } finally { this.loading.delete(sessionId); }
+      live.sessions.add(sessionId);
+    })().finally(() => { live.loads.delete(sessionId); this.touchIdle(); });
+    live.loads.set(sessionId, p);
+    return p;
   }
 
   async respondToRequest(_sessionRef: string, requestId: string, decision: 'allow' | 'deny' | { reply: string }): Promise<void> {
@@ -316,8 +366,13 @@ export class AntigravityAdapter implements ProviderAdapter {
     if (!p) return;
     this.perms.delete(requestId);
     // ACP permissions have no reply text: { reply } is a plain "reject once".
-    const option = decision === 'allow' ? pickOption(p.options, 'allow') : pickOption(p.options, 'reject');
+    const want = decision === 'allow' ? 'allow' : 'reject';
+    const option = pickOption(p.options, want);
+    if (!option) {
+      console.warn(`[antigravity] no ${want === 'allow' ? 'allow-once' : 'reject'} option was offered (${p.options.map((o) => o.kind).join(', ')}); answered cancelled.`);
+    }
     p.resolve(option ? { optionId: option.optionId } : 'cancelled');
+    this.touchIdle();
   }
 
   async stop(sessionRef: string): Promise<void> {
@@ -334,28 +389,36 @@ export class AntigravityAdapter implements ProviderAdapter {
     return { provider: 'antigravity', status: 'unavailable', windows: [], readAt: new Date().toISOString(), message: NO_LIMITS };
   }
 
-  /** What the running agent answered to `initialize` (null before it has started). */
+  /** Starts the agent if it isn't running (a user action, e.g. opening its sign-in); resolves with its `initialize` answer. */
+  async start(): Promise<AcpInitializeResult> { return (await this.ensureProcess()).init; }
+
+  /** What the running agent answered to `initialize` (null when it isn't running). */
   get initializeResult(): AcpInitializeResult | null { return this.live?.init ?? null; }
 
-  /** The running agent's version (ACP agentInfo.version). Starts it unless it is crash-looping. */
-  async agentVersion(): Promise<string | null> {
-    if (this.inBackoff()) return this.lastVersion;
-    try {
-      const live = await this.ensureProcess();
-      return live.init.agentInfo?.version || this.lastVersion;
-    } catch { return this.lastVersion; }
-  }
+  /** The running agent's ACP agentInfo.version, or null when it isn't running. Never starts it. */
+  async agentVersion(): Promise<string | null> { return this.lastVersion; }
 
   /**
    * Runs the agent's own sign-in with its first auth method ("Log in with Google"). `onUrl` gets each sign-in
    * link it prints (the agent also tries to open the browser itself). Resolves once the agent reports the
-   * sign-in finished; aborting stops the agent process, which ends its sign-in listener.
+   * sign-in finished; aborting stops the agent process, which ends its sign-in listener. The caller bounds
+   * how long it waits, through `signal`.
    */
   async signIn(onUrl: (url: string) => void, signal: AbortSignal): Promise<void> {
     signal.throwIfAborted();
     if (this.authUrlFn) throw new Error('Antigravity sign-in is already running.');
-    const live = await abortable(this.ensureProcess(), signal);
-    if (this.signedInOf(live) === true) return;
+    const startedHere = !this.live && !this.starting;
+    const starting = this.ensureProcess();
+    let live: Live;
+    try {
+      live = await abortable(starting, signal);
+    } catch (e) {
+      // Cancelled while the agent was still starting for this sign-in: don't leave it running.
+      if (signal.aborted && startedHere) starting.then((l) => this.recycle(l)).catch(() => {});
+      throw e;
+    }
+    // Skip only when the agent itself says signed in, never on the settings.json guess.
+    if (this.learned === true || (this.learned === null && this.agentFlag === true)) return;
     const method = live.init.authMethods[0]?.id;
     if (!method) throw new Error("Antigravity didn't offer a way to sign in.");
     const seen = new Set<string>();
@@ -377,24 +440,15 @@ export class AntigravityAdapter implements ProviderAdapter {
           (e) => { signal.removeEventListener('abort', onAbort); reject(e); },
         );
       });
-      live.authed = true;
+      this.learned = true;
     } finally {
       this.authUrlFn = null;
       this.signInLive = null;
+      this.touchIdle();
     }
   }
 
   // ---- health ----
-
-  private inBackoff(): boolean {
-    return !this.live && !this.starting && (this.gaveUp || Date.now() < this.retryAt);
-  }
-
-  private noteFailure(): void {
-    this.failures++;
-    if (this.failures > 3) this.gaveUp = true;
-    this.retryAt = Date.now() + Math.min(1000 * 2 ** (this.failures - 1), 60_000);
-  }
 
   isIdle(): boolean { return this.turns.size === 0 && !this.authUrlFn; }
 
@@ -410,56 +464,45 @@ export class AntigravityAdapter implements ProviderAdapter {
   }
 
   /**
-   * Alive and signed in? Asks the running agent a method it doesn't have and takes any JSON-RPC answer as
-   * a sign of life. Automatic pings respawn a dead agent with backoff and give up after a few failures;
-   * a manual ping always tries once.
+   * Health check. Never starts the agent (manual checks included): not running is fine, and signed-in then
+   * comes from what was learned or settings.json. Only a crash that cut off a turn is reported, once. While it
+   * runs, a call to a method it doesn't have checks that it answers (any JSON-RPC answer is a sign of life).
    */
-  async ping(opts: { manual?: boolean } = {}): Promise<PingResult> {
-    const manual = opts.manual === true;
+  async ping(_opts: { manual?: boolean } = {}): Promise<PingResult> {
     const fail = (message?: string): PingResult => ({ ok: false, signedIn: null, ...(message ? { message } : {}) });
     if (this.disposed) return fail('Antigravity adapter is shut down.');
-    if (manual) { this.failures = 0; this.retryAt = 0; this.gaveUp = false; this.crashed = false; }
     const marked = this.live;
     if (marked && this.recycleMarked.has(marked.proc) && this.isIdle()) await this.recycle(marked);
-    if (this.crashed) {
-      this.crashed = false;
-      const down = !this.live && !this.starting;
-      if (down) this.noteFailure();
-      return fail(down ? ANTIGRAVITY_CRASHED : 'Antigravity stopped unexpectedly and was restarted.');
+    if (this.crashedTurn) {
+      this.crashedTurn = false;
+      if (!this.live && !this.starting) return fail(ANTIGRAVITY_CRASHED);
     }
-    if (!this.live && !this.starting) {
-      if (this.gaveUp) return { ...fail(GAVE_UP), gaveUp: true };
-      if (Date.now() < this.retryAt) return fail('Antigravity is restarting.');
-    }
-    let live: Live | null = null;
-    let wasSuspect = false;
-    let probeAt = 0;
+    const live = this.live;
+    if (!live) return { ok: true, signedIn: this.signedInOf() };
+    const wasSuspect = live.proc.suspect;
+    const probeAt = Date.now();
     try {
-      live = await this.ensureProcess();
-      wasSuspect = live.proc.suspect;
-      probeAt = Date.now();
       await live.proc.request('$/agent_kanban_ping', {}, this.pingTimeoutMs).catch((e: any) => {
         if (typeof e?.code !== 'number') throw e; // an error answer is still an answer
       });
       live.proc.clearSuspect();
-      this.failures = 0; this.retryAt = 0; this.gaveUp = false;
-      return { ok: true, signedIn: this.signedInOf(live) };
+      return { ok: true, signedIn: this.signedInOf() };
     } catch (e) {
-      this.crashed = false;
-      if (live && /timed out/.test(e instanceof Error ? e.message : '')) {
+      if (/timed out/.test(e instanceof Error ? e.message : '')) {
         const heard = live.proc.lastNotificationAt > probeAt;
         if (heard || (this.turns.size > 0 && Date.now() - live.proc.lastNotificationAt < QUIET_MS)) {
-          return { ok: true, signedIn: this.signedInOf(live) };
+          return { ok: true, signedIn: this.signedInOf() };
         }
         if (wasSuspect && this.isIdle()) await this.recycle(live);
       }
-      this.noteFailure();
+      if (!this.live && this.isIdle()) return { ok: true, signedIn: this.signedInOf() }; // not running now
       return fail();
     }
   }
 
   async dispose(): Promise<void> {
     this.disposed = true;
+    if (this.idleTimer) { clearTimeout(this.idleTimer); this.idleTimer = null; }
     this.listeners.clear();
     for (const p of this.perms.values()) p.resolve('cancelled');
     this.perms.clear();
@@ -483,11 +526,11 @@ function toolStatus(status: unknown): 'running' | 'done' | 'failed' {
   return 'running';
 }
 
-/** "allow" -> the allow-once option (else any allow); "reject" -> reject-once (else any reject). */
-function pickOption(options: AcpPermissionOption[], want: 'allow' | 'reject'): AcpPermissionOption | undefined {
-  return options.find((o) => o.kind === `${want}_once`)
-    ?? options.find((o) => o.optionId === `${want}_once`)
-    ?? options.find((o) => typeof o.kind === 'string' && o.kind.startsWith(want));
+/** "allow" -> only the allow-once option (never widened to allow-always); "reject" -> reject-once, else any reject. */
+export function pickOption(options: AcpPermissionOption[], want: 'allow' | 'reject'): AcpPermissionOption | undefined {
+  const once = options.find((o) => o.kind === `${want}_once`) ?? options.find((o) => o.optionId === `${want}_once`);
+  if (once || want === 'allow') return once;
+  return options.find((o) => typeof o.kind === 'string' && o.kind.startsWith('reject'));
 }
 
 function abortReason(signal: AbortSignal): Error {

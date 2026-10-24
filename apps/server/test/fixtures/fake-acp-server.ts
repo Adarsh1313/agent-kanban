@@ -9,6 +9,7 @@
 // FAKE_NO_AUTH_FLAG=1: initialize sends no "authenticated" flag (like the real server).
 // FAKE_LOADABLE: comma-separated session ids session/load accepts (default sess_old).
 // FAKE_NEW_SIGNIN=1: session/new prints a sign-in link on stderr and never answers (a selected login that's gone).
+// FAKE_PERM_OPTIONS=always: the permission request offers allow_always (no allow_once) and reject_once.
 // FAKE_STOP: the stop reason the default turn ends with (default end_turn).
 // Strict about framing: any incoming message without "jsonrpc":"2.0" is rejected (requests) or ignored.
 import { createInterface } from 'node:readline';
@@ -42,10 +43,12 @@ function onPrompt(id: unknown, sessionId: string) {
     send({ id: PERM_ID, method: 'session/request_permission', params: {
       sessionId,
       toolCall: { toolCallId: 'call_1', title: 'Run npm test', kind: 'execute', status: 'pending' },
-      options: [
-        { optionId: 'allow_once', name: 'Allow', kind: 'allow_once' },
-        { optionId: 'reject_once', name: 'Reject', kind: 'reject_once' },
-      ],
+      options: process.env.FAKE_PERM_OPTIONS === 'always'
+        ? [{ optionId: 'allow_always', name: 'Always allow', kind: 'allow_always' }, { optionId: 'reject_once', name: 'Reject', kind: 'reject_once' }]
+        : [
+          { optionId: 'allow_once', name: 'Allow', kind: 'allow_once' },
+          { optionId: 'reject_once', name: 'Reject', kind: 'reject_once' },
+        ],
     } });
     return;
   }

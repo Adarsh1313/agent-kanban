@@ -9,6 +9,7 @@ import type { ProviderAdapter } from './adapters/adapter.ts';
 import { AdapterRegistry } from './adapters/registry.ts';
 import type { AdapterSource } from './adapters/registry.ts';
 import type { UsageService } from './usage/service.ts';
+import { ANTIGRAVITY_SIGNED_OUT } from './adapters/antigravity.ts';
 
 const NAMES: Record<ProviderId, string> = { claude: 'Claude Code', codex: 'Codex', antigravity: 'Antigravity' };
 const ACTIVE_WINDOW_MS = 15_000;
@@ -214,8 +215,10 @@ export class ChatService {
       if (attached) {
         try { await attached.resume(h.sessionRef, h.cwd); } catch (err) {
           // Signed out: make the card anyway, so it says to sign in (the send below fails the same way).
-          if (!/isn't signed in/.test(err instanceof Error ? err.message : '')) throw new CantContinueError(ANTIGRAVITY_CANT_CONTINUE);
-          attached = undefined;
+          if (err instanceof Error && err.message === ANTIGRAVITY_SIGNED_OUT) attached = undefined;
+          // The agent answered with a JSON-RPC error: it refuses this conversation.
+          else if (typeof (err as { code?: unknown } | null)?.code === 'number') throw new CantContinueError(ANTIGRAVITY_CANT_CONTINUE);
+          else throw err; // couldn't start or reach the agent: not a refusal
         }
       }
     }

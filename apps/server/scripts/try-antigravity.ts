@@ -11,7 +11,7 @@
 // (e) with --load <id>: tries session/load on that conversation and prints the result. It never sends a
 //     message into it.
 // --check-only stops after (b). Nothing here reads or prints the agent's stored credentials.
-import { existsSync, mkdtempSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { AntigravityAdapter, spawnAntigravity } from '../src/adapters/antigravity.ts';
@@ -65,11 +65,25 @@ const adapter = new AntigravityAdapter({
 });
 adapter.onEvent((e) => log('[event]', JSON.stringify(e).slice(0, 300)));
 
+// Ctrl+C: cancel a running sign-in and stop the agent (once), then leave.
+const cancel = new AbortController();
+let chatDir: string | null = null;
+let disposing: Promise<void> | null = null;
+const shutdown = () => (disposing ??= adapter.dispose());
+process.once('SIGINT', () => {
+  log('Ctrl+C: stopping…');
+  cancel.abort(new Error('Cancelled.'));
+  void shutdown().finally(() => {
+    if (chatDir) rmSync(chatDir, { recursive: true, force: true });
+    process.exit(130);
+  });
+});
+
 let exitCode = 0;
 try {
   log('starting the agent (it unpacks itself first; ~40 s on Windows)…');
+  const init = await adapter.start();
   const ping = await adapter.ping({ manual: true });
-  const init = adapter.initializeResult;
   log('initialize agentInfo:', JSON.stringify(init?.agentInfo ?? null));
   log('initialize authMethods:', JSON.stringify(init?.authMethods ?? []));
   log('initialize authenticated flag:', JSON.stringify(init?.authenticated ?? null), '(null = the agent sent none)');
@@ -80,7 +94,7 @@ try {
   if (ping.signedIn !== true) {
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(new Error('Sign-in didn\'t finish within 5 minutes.')), 5 * 60_000);
-    process.once('SIGINT', () => ac.abort(new Error('Cancelled.')));
+    cancel.signal.addEventListener('abort', () => ac.abort(cancel.signal.reason), { once: true });
     log('not signed in: starting the agent\'s Google sign-in (the agent may also open your browser itself)…');
     try {
       await adapter.signIn((url) => {
@@ -93,6 +107,7 @@ try {
 
   // (d) a chat in a fresh temp folder
   const cwd = mkdtempSync(join(tmpdir(), 'try-antigravity-'));
+  chatDir = cwd;
   log('chat folder:', cwd);
   const done = new Promise<void>((resolve) => adapter.onEvent((e) => {
     if (e.type === 'request.opened') { log('denying a permission request (this check runs no tools)'); void adapter.respondToRequest(e.sessionRef, e.requestId, 'deny'); }
@@ -113,7 +128,8 @@ try {
 } catch (e) {
   if (!(e as any)?.quiet) { exitCode = 1; log('failed:', e instanceof Error ? e.message : String(e)); }
 } finally {
-  await adapter.dispose();
+  await shutdown();
+  if (chatDir) rmSync(chatDir, { recursive: true, force: true });
 }
 // Give the agent's unpacked temp folder a moment to be deleted (a later launch sweeps it otherwise).
 await new Promise((r) => setTimeout(r, 3_000));
