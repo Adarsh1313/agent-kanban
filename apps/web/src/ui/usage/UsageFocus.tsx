@@ -41,12 +41,9 @@ export function UsageFocus({ provider }: { provider: ProviderId }) {
   const note = chipNote(reading, installed);
   const dim = !reading || reading.status !== 'ok';
 
-  // Clears the focus; when the focus came from a single-provider filter, that filter is the focus, so it goes too.
+  // The focus is a single-provider filter: clearing it ends the focus.
   const showAll = () =>
-    store.setState((s) => {
-      const single = s.ui.filters.provider?.length === 1;
-      return { ...s, ui: { ...s.ui, focusProvider: null, filters: single ? { ...s.ui.filters, provider: null } : s.ui.filters } };
-    });
+    store.setState((s) => (s.ui.filters.provider?.length === 1 ? { ...s, ui: { ...s.ui, filters: { ...s.ui.filters, provider: null } } } : s));
 
   return (
     <>

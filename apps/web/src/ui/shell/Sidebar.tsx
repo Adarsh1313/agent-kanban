@@ -76,7 +76,7 @@ function Providers() {
     store.setState((s) => {
       // Focusing a provider here is the Filter's "Provider is <p>": it shows as a chip and the Filter menu edits it.
       const clearing = focusedProvider(s) === id;
-      return { ...s, ui: { ...s.ui, focusProvider: null, filters: { ...s.ui.filters, provider: clearing ? null : [id] } } };
+      return { ...s, ui: { ...s.ui, filters: { ...s.ui.filters, provider: clearing ? null : [id] } } };
     });
   return (
     <SideSection title="Providers">
@@ -95,12 +95,13 @@ function Recent() {
   // Memoized on the parts it reads, so streaming deltas do not re-sort every history chat.
   const select = useMemo(
     () => memoState(
-      (s) => [s.chats, s.history, s.projects, s.ui.focusProvider, s.ui.filters, s.ui.archiving, s.now],
+      (s) => [s.chats, s.history, s.projects, s.ui.filters, s.ui.archiving, s.now],
       (s) => recentChatsByProject(s, s.now, { projects: PROJECTS_SHOWN + 1, chats: CHATS_SHOWN }, expanded),
     ),
     [expanded],
   );
   const groups = useStore(select);
+  const filtering = useStore((s) => Object.values(s.ui.filters).some((v) => v !== null));
   const openChatId = useStore((s) => s.ui.openChatId);
   const openHistory = useStore((s) => s.ui.openHistory);
   const toggle = (id: string) =>
@@ -111,6 +112,7 @@ function Recent() {
     });
   return (
     <SideSection title="Recent chats">
+      {filtering && groups.length === 0 && <p className="empty-note side-empty">No matching chats</p>}
       {groups.slice(0, PROJECTS_SHOWN).map((g) => {
         const open = expanded.has(g.projectId);
         const goProject = () => navigate('projects', g.projectId);

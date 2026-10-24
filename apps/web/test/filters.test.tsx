@@ -201,7 +201,21 @@ describe('Shell: F key and the sidebar', () => {
     expect(titles(w({ source: ['here'] }))).toEqual(['Add tests', 'Fix login', 'Write docs']);
     expect(titles(w({ status: ['needs_you'] }))).toEqual(['Add tests']);
     expect(titles(w({ provider: ['claude'] }))).toEqual(['Fix login', 'Old idea']);
+    // History rows count as column null: no status, no model, no reason, so those filters leave them out.
+    expect(titles(w({ status: ['running', 'needs_you', 'review'] }))).toEqual(['Add tests', 'Fix login', 'Write docs']);
+    expect(titles(w({ model: ['sonnet'] }))).toEqual(['Fix login']);
+    expect(titles(w({ reason: ['permission'] }))).toEqual(['Add tests']);
+    expect(titles(w({ provider: ['claude'], source: ['native'] }))).toEqual(['Old idea']);
     mount(createStore(w({ provider: [] })), <Sidebar />);
     expect(screen.queryByText('Fix login')).toBeNull();
+  });
+
+  it('the sidebar says so when filters leave no recent chats, and says nothing without filters', () => {
+    const s = seeded().getState();
+    mount(createStore({ ...s, ui: { ...s.ui, filters: { ...s.ui.filters, provider: [] } } }), <Sidebar />);
+    expect(screen.getByText('No matching chats')).toBeTruthy();
+    cleanup();
+    mount(seeded({}, [], []), <Sidebar />);
+    expect(screen.queryByText('No matching chats')).toBeNull();
   });
 });

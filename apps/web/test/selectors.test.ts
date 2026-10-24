@@ -10,8 +10,8 @@ function state(chats = [chat()], extra: Partial<AppState> = {}, history: AppStat
   const s = applySnapshot(initialState(), { chats, usage: [], suggested: null, connections: [], history, projects: [] });
   return { ...s, ...extra };
 }
-const withFilters = (s: AppState, f: Partial<Filters>, focusProvider: AppState['ui']['focusProvider'] = null): AppState =>
-  ({ ...s, ui: { ...s.ui, filters: { ...noFilters, ...f }, focusProvider } });
+const withFilters = (s: AppState, f: Partial<Filters>): AppState =>
+  ({ ...s, ui: { ...s.ui, filters: { ...noFilters, ...f } } });
 const ids = (s: AppState) => visibleChats(s, NOW).map((c) => c.id).sort();
 
 describe('filters', () => {
@@ -45,10 +45,10 @@ describe('filters', () => {
     expect(ids(withFilters(s, { source: ['here'] }))).toEqual(['a', 'b', 'c', 'd']);
     expect(ids(withFilters(s, { source: ['native'] }))).toEqual([]);
   });
-  it('a single provider filter or the focus provider focuses that provider', () => {
+  it('a single provider filter focuses that provider', () => {
     expect(focusedProvider(withFilters(s, { provider: ['codex'] }))).toBe('codex');
     expect(focusedProvider(withFilters(s, { provider: ['codex', 'claude'] }))).toBeNull();
-    expect(ids(withFilters(s, {}, 'claude'))).toEqual(['a', 'c']);
+    expect(ids(withFilters(s, { provider: ['claude'] }))).toEqual(['a', 'c']);
   });
   it('archived chats are hidden', () => {
     expect(ids(state([chat({ id: 'x', archived: true })]))).toEqual([]);
@@ -106,7 +106,7 @@ describe('recentChatsByProject', () => {
     const all = recentChatsByProject(s, NOW)[0]!.chats;
     expect(all.map((c) => c.title)).toEqual(['A chat', 'native one']);
     expect(all[1]).toMatchObject({ chatId: null, sessionRef: 'S2', provider: 'codex' });
-    expect(recentChatsByProject(withFilters(s, {}, 'claude'), NOW)[0]!.chats).toHaveLength(1);
+    expect(recentChatsByProject(withFilters(s, { provider: ['claude'] }), NOW)[0]!.chats).toHaveLength(1);
   });
 });
 

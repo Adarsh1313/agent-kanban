@@ -32,10 +32,10 @@ export const isSnoozed = (c: { snoozedUntil: string | null }, now: number) => c.
 export const isArchived = (s: AppState, c: { id: string; archived: boolean }) => c.archived || s.ui.archiving[c.id] === true;
 export const baseName = (p: string) => p.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || p;
 
+/** A single-provider filter (set from the sidebar's provider rows or the Filter menu) focuses that provider. */
 export function focusedProvider(s: AppState): ProviderId | null {
-  if (s.ui.focusProvider) return s.ui.focusProvider;
   const p = s.ui.filters.provider;
-  return p && p.length === 1 ? p[0]! : null;
+  return p?.length === 1 ? p[0]! : null;
 }
 
 interface Filterable {
@@ -64,11 +64,10 @@ function passes(c: Filterable, f: Filters, now: number): boolean {
 
 const byRecent = (a: { updatedAt: string }, b: { updatedAt: string }) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0);
 
-/** Board chats that pass the filters and provider focus; archived and snoozed ones are hidden. */
+/** Board chats that pass the filters; archived and snoozed ones are hidden. */
 export function visibleChats(s: AppState, now: number = Date.now()): Chat[] {
-  const focus = focusedProvider(s);
   return Object.values(s.chats)
-    .filter((c) => c.column !== null && !isArchived(s, c) && !isSnoozed(c, now) && (!focus || c.provider === focus) && passes(c, s.ui.filters, now))
+    .filter((c) => c.column !== null && !isArchived(s, c) && !isSnoozed(c, now) && passes(c, s.ui.filters, now))
     .sort(byRecent);
 }
 
@@ -87,7 +86,6 @@ export function pinned(s: AppState, now: number = Date.now()): Chat[] {
 }
 
 function sidebarChats(s: AppState, now: number): SidebarChat[] {
-  const focus = focusedProvider(s);
   const known = new Set<string>();
   for (const c of Object.values(s.chats)) if (c.sessionRef) known.add(`${c.provider}\u0000${c.sessionRef}`);
   const f = s.ui.filters;
@@ -95,7 +93,7 @@ function sidebarChats(s: AppState, now: number): SidebarChat[] {
   const fromHistory: SidebarChat[] = s.history
     .filter((h) => !known.has(`${h.provider}\u0000${h.sessionRef}`) && passes({ ...h, column: null, model: null, needsReason: null }, f, now))
     .map((h) => ({ key: `h:${h.provider}:${h.sessionRef}`, chatId: null, provider: h.provider, sessionRef: h.sessionRef, title: h.title, cwd: h.cwd, updatedAt: h.updatedAt, column: null, pinned: false }));
-  return [...fromBoard, ...fromHistory].filter((c) => !focus || c.provider === focus);
+  return [...fromBoard, ...fromHistory];
 }
 
 /** Sidebar "Recent chats": the most recently active projects, each with its latest chats (design: 4 x 3); the Filter applies here too. */

@@ -9,6 +9,7 @@ html, body { overflow: hidden; }
 .usage-area { display: flex; align-items: center; gap: calc(var(--space-1) / 2); }
 .crumb { color: var(--color-text-faint); font-weight: var(--weight-regular); }
 .empty-note { color: var(--color-text-faint); font-size: var(--text-caption); padding: var(--space-2) var(--space-1); }
+.side-empty { margin: 0; padding: var(--space-1) var(--space-2); }
 
 .sidebar .scroll { flex: 1; overflow-y: auto; margin: 0 calc(var(--space-2) * -1); padding: 0 var(--space-2); }
 /* Rows indent to line up under the small provider logo + gap used by .chat-row */

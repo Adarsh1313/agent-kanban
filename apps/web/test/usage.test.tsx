@@ -213,7 +213,7 @@ describe('usage focus', () => {
   };
 
   it("focusing a provider swaps the chips for that provider's meters and a way back", () => {
-    const store = focusedOn({ focusProvider: 'codex' });
+    const store = focusedOn({ filters: { ...initialState().ui.filters, provider: ['codex'] } });
     expect(chips()).toHaveLength(0);
     const focus = area().querySelector<HTMLElement>('.usage-focus')!;
     // AT doesn't read inside a button: the label carries the numbers and the reset times; the meters are decorative.
@@ -234,12 +234,12 @@ describe('usage focus', () => {
     expect(focus.getAttribute('aria-expanded')).toBe('false');
     expect(document.activeElement).toBe(focus);
     fireEvent.click(screen.getByRole('button', { name: 'Usage for all providers' }));
-    expect(store.getState().ui.focusProvider).toBeNull();
+    expect(store.getState().ui.filters.provider).toBeNull();
     expect(chips()).toHaveLength(2);
   });
 
   it('a focused provider that is not installed says "Not connected"', () => {
-    focusedOn({ focusProvider: 'antigravity' });
+    focusedOn({ filters: { ...initialState().ui.filters, provider: ['antigravity'] } });
     expect(area().querySelector('.usage-focus')!.getAttribute('aria-label')).toBe('Antigravity: Not connected. Show details');
   });
 

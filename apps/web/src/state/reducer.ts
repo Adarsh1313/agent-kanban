@@ -49,7 +49,6 @@ export interface UiState {
   /** Chats archived here whose Undo toast is still showing: hidden at once, archived on the server when it expires. */
   archiving: Record<string, true>;
   filters: Filters;
-  focusProvider: ProviderId | null;
 }
 
 export interface SyncState {
@@ -131,7 +130,6 @@ export function initialState(): AppState {
       openHistory: null,
       archiving: {},
       filters: { provider: null, project: null, status: null, model: null, reason: null, activity: null, source: null },
-      focusProvider: null,
     },
   };
 }

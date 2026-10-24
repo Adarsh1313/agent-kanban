@@ -111,7 +111,7 @@ export function withFilter(s: AppState, key: FilterKey, values: string[] | null)
 export const NO_FILTERS: Filters = { provider: null, project: null, status: null, model: null, reason: null, activity: null, source: null };
 
 export const setFilter = (s: AppState, key: FilterKey, values: string[] | null): AppState => ({ ...s, ui: { ...s.ui, filters: withFilter(s, key, values) } });
-export const clearAllFilters = (s: AppState): AppState => ({ ...s, ui: { ...s.ui, focusProvider: null, filters: NO_FILTERS } });
+export const clearAllFilters = (s: AppState): AppState => ({ ...s, ui: { ...s.ui, filters: NO_FILTERS } });
 export const activeKeys = (f: Filters): FilterKey[] => FILTER_KEYS.filter((k) => f[k] !== null);
 
 /** Chip parts, as design/board.html words them: "Provider" "is any of" "Claude Code, Codex" / "3 providers" / "none selected". */
