@@ -374,10 +374,21 @@ export function markNotificationRead(s: AppState, id: string): AppState {
   return { ...s, notifications: s.notifications.map((n) => (n.id === id ? { ...n, unread: false } : n)) };
 }
 
-/** Marks every notification read. */
-export function markAllNotificationsRead(s: AppState): AppState {
-  if (!s.notifications.some((n) => n.unread)) return s;
-  return { ...s, notifications: s.notifications.map((n) => (n.unread ? { ...n, unread: false } : n)) };
+/** Marks every notification read; with `until` (ms), only those that arrived at or before it. */
+export function markAllNotificationsRead(s: AppState, until = Infinity): AppState {
+  const hit = (n: AppNotification) => n.unread && Date.parse(n.at) <= until;
+  if (!s.notifications.some(hit)) return s;
+  return { ...s, notifications: s.notifications.map((n) => (hit(n) ? { ...n, unread: false } : n)) };
+}
+
+/**
+ * Marks a chat's notifications that arrived at or before `until` (ms) read. Another tab numbers its
+ * notifications differently, so a read relayed from it is matched by chat and time, not by id.
+ */
+export function markChatNotificationsRead(s: AppState, chatId: string, until: number): AppState {
+  const hit = (n: AppNotification) => n.unread && n.chatId === chatId && Date.parse(n.at) <= until;
+  if (!s.notifications.some(hit)) return s;
+  return { ...s, notifications: s.notifications.map((n) => (hit(n) ? { ...n, unread: false } : n)) };
 }
 
 /** Opens a history-only chat in the side panel (closing any board chat shown there). */

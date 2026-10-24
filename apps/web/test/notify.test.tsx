@@ -1,10 +1,10 @@
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import type { ServerEvent } from '@agent-kanban/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { applyEvent, applySnapshot, initialState, markAllNotificationsRead, markNotificationRead, type AppNotification, type AppState } from '../src/state/reducer.ts';
+import { applyEvent, applySnapshot, initialState, markAllNotificationsRead, markChatNotificationsRead, markNotificationRead, type AppNotification, type AppState } from '../src/state/reducer.ts';
 import { createStore, StoreProvider, type Store } from '../src/state/store.ts';
 import { Bell } from '../src/ui/notify/Bell.tsx';
-import { onRing, reloadPrefs, resetAudioForTests, RING_GAP_MS, startNotifier } from '../src/ui/notify/notifier.ts';
+import { markAllRead, onRing, openNotification, reloadPrefs, resetAudioForTests, RING_GAP_MS, startNotifier } from '../src/ui/notify/notifier.ts';
 import { chat } from './helpers.ts';
 
 /* ───────── Browser API fakes ───────── */
@@ -42,6 +42,23 @@ class FakeAudioContext {
   }
 }
 
+/** Delivers to every other open channel of the same name, never to the sender (as browsers do). */
+class FakeBroadcastChannel {
+  static open: FakeBroadcastChannel[] = [];
+  onmessage: ((e: { data: unknown }) => void) | null = null;
+  sent: unknown[] = [];
+  constructor(public name: string) {
+    FakeBroadcastChannel.open.push(this);
+  }
+  postMessage(data: unknown) {
+    this.sent.push(data);
+    for (const c of FakeBroadcastChannel.open) if (c !== this && c.name === this.name) c.onmessage?.({ data: structuredClone(data) });
+  }
+  close() {
+    FakeBroadcastChannel.open = FakeBroadcastChannel.open.filter((c) => c !== this);
+  }
+}
+
 let visibility: DocumentVisibilityState = 'visible';
 let reduced = false;
 
@@ -58,6 +75,8 @@ beforeEach(() => {
   reduced = false;
   vi.stubGlobal('Notification', FakeNotification);
   vi.stubGlobal('AudioContext', FakeAudioContext);
+  FakeBroadcastChannel.open = [];
+  vi.stubGlobal('BroadcastChannel', FakeBroadcastChannel);
   vi.stubGlobal('matchMedia', (q: string) => ({ matches: reduced && q.includes('reduce'), media: q, addEventListener: () => {}, removeEventListener: () => {} }));
   Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => visibility });
 });
@@ -384,4 +403,145 @@ describe('notifications popover', () => {
 it('the screen reader name keeps the existing format', () => {
   mount(seeded({ notifications: [note({})] }));
   expect(screen.getByRole('button', { name: 'Notifications, 1 unread' })).toBe(bell());
+});
+
+/* ───────── Fix round 1 ───────── */
+
+describe('relayed reads (matched by chat and time, since each tab numbers its own)', () => {
+  it('markChatNotificationsRead / markAllNotificationsRead(until) only touch what arrived by then', () => {
+    const s = { ...initialState(), notifications: [
+      note({ id: 'a', chatId: 'c1', at: new Date(NOW + 10_000).toISOString() }),
+      note({ id: 'b', chatId: 'c2', at: new Date(NOW).toISOString() }),
+      note({ id: 'c', chatId: 'c1', at: new Date(NOW).toISOString() }),
+    ] };
+    expect(markChatNotificationsRead(s, 'c1', NOW + 1).notifications.map((n) => n.unread)).toEqual([true, true, false]);
+    expect(markChatNotificationsRead(s, 'zz', NOW + 1)).toBe(s);
+    expect(markAllNotificationsRead(s, NOW + 1).notifications.map((n) => n.unread)).toEqual([true, false, false]);
+  });
+});
+
+describe('two tabs', () => {
+  const otherTab = () => new FakeBroadcastChannel('agent-kanban.notify');
+
+  it('reading a row relays chat id + time only (no id, no content); Mark all read relays too', () => {
+    const store = seeded({ notifications: [note({ id: 'n2', chatId: 'c2' }), note({ id: 'n1', chatId: 'c1' })] });
+    start(store);
+    const got: unknown[] = [];
+    otherTab().onmessage = (e) => got.push(e.data);
+    mount(store);
+    fireEvent.click(bell());
+    fireEvent.click(pop().querySelector('[data-id="n1"]')!);
+    expect(got).toEqual([{ type: 'read', chatId: 'c1', until: NOW + 2000 }]);
+    fireEvent.click(bell());
+    fireEvent.click(within(pop()).getByRole('button', { name: 'Mark all read' }));
+    expect(got[1]).toMatchObject({ type: 'all' });
+    expect(Object.keys(got[1] as object).sort()).toEqual(['type', 'until']);
+  });
+
+  it('a read from another tab applies here and is never posted on again', () => {
+    const store = seeded({ notifications: [note({ id: 'x2', chatId: 'c2' }), note({ id: 'x1', chatId: 'c1', at: new Date(NOW + 500).toISOString() })] });
+    start(store);
+    const mine = FakeBroadcastChannel.open[0]!;
+    const other = otherTab();
+    act(() => other.postMessage({ type: 'read', chatId: 'c1', until: NOW + 2000 }));
+    expect(store.getState().notifications.map((n) => n.unread)).toEqual([true, false]);
+    act(() => other.postMessage({ type: 'read', chatId: 42, until: 1 }));
+    act(() => other.postMessage('junk'));
+    expect(store.getState().notifications.map((n) => n.unread)).toEqual([true, false]);
+    act(() => other.postMessage({ type: 'all', until: NOW + 2000 }));
+    expect(store.getState().notifications.every((n) => !n.unread)).toBe(true);
+    expect(mine.sent).toEqual([]);
+  });
+
+  it('works without BroadcastChannel', () => {
+    vi.stubGlobal('BroadcastChannel', undefined);
+    const store = seeded({ notifications: [note({ id: 'n1' })] });
+    start(store);
+    act(() => markAllRead(store));
+    expect(store.getState().notifications[0]!.unread).toBe(false);
+  });
+
+  it('stopping the notifier closes its channel', () => {
+    const stop = start(seeded());
+    expect(FakeBroadcastChannel.open).toHaveLength(1);
+    stop();
+    expect(FakeBroadcastChannel.open).toHaveLength(0);
+  });
+});
+
+describe('desktop notifications close once read in the app', () => {
+  it('reading one closes its notification; Mark all read closes the rest; a read from another tab closes too', () => {
+    FakeNotification.permission = 'granted';
+    localStorage.setItem('agent-kanban.notify', JSON.stringify({ desktop: true, sound: false }));
+    reloadPrefs();
+    visibility = 'hidden';
+    const store = seeded();
+    start(store);
+    send(store, 'permission', 'c1');
+    send(store, 'question', 'c2');
+    const [first, second] = FakeNotification.instances;
+    const n1 = store.getState().notifications[1]!;
+    act(() => openNotification(store, n1));
+    expect(first!.close).toHaveBeenCalled();
+    expect(second!.close).not.toHaveBeenCalled();
+    act(() => markAllRead(store));
+    expect(second!.close).toHaveBeenCalled();
+
+    send(store, 'finished', 'c1');
+    const third = FakeNotification.instances[2]!;
+    act(() => new FakeBroadcastChannel('agent-kanban.notify').postMessage({ type: 'read', chatId: 'c1', until: Date.now() + 2000 }));
+    expect(third.close).toHaveBeenCalled();
+  });
+});
+
+describe('popover polish', () => {
+  it('the rows have list semantics; the empty state does not', () => {
+    mount(seeded({ notifications: [note({ id: 'n2' }), note({ id: 'n1' })] }));
+    fireEvent.click(bell());
+    expect(within(within(pop()).getByRole('list')).getAllByRole('listitem')).toHaveLength(2);
+    cleanup();
+    mount(seeded());
+    fireEvent.click(bell());
+    expect(within(pop()).queryByRole('list')).toBeNull();
+  });
+
+  it('aria-expanded follows the popover', () => {
+    mount(seeded());
+    expect(bell().getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(bell());
+    expect(bell().getAttribute('aria-expanded')).toBe('true');
+    fireEvent.click(bell());
+    expect(bell().getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('re-reads the permission each time it opens', () => {
+    FakeNotification.permission = 'denied';
+    mount(seeded());
+    fireEvent.click(bell());
+    expect(within(pop()).getByText('Notifications are blocked in your browser settings.')).toBeTruthy();
+    fireEvent.click(bell());
+    FakeNotification.permission = 'default';
+    fireEvent.click(bell());
+    expect(within(pop()).queryByText('Notifications are blocked in your browser settings.')).toBeNull();
+  });
+
+  it('the new row slides in once: enter is cleared on animationend and on close', () => {
+    const store = seeded();
+    start(store);
+    mount(store);
+    send(store, 'permission');
+    fireEvent.click(bell());
+    const row = () => pop().querySelector<HTMLElement>('.notif')!;
+    expect(row().classList.contains('enter')).toBe(true);
+    // jsdom has no AnimationEvent, so React listens for the prefixed name there; send both.
+    for (const type of ['animationend', 'webkitAnimationEnd']) act(() => { row().dispatchEvent(new Event(type, { bubbles: true })); });
+    expect(row().classList.contains('enter')).toBe(false);
+    fireEvent.click(bell());
+    vi.useFakeTimers({ now: Date.now() + RING_GAP_MS + 1, toFake: ['Date'] });
+    send(store, 'question');
+    fireEvent.click(bell());
+    expect(row().classList.contains('enter')).toBe(true);
+    fireEvent.click(bell());
+    expect(row().classList.contains('enter')).toBe(false);
+  });
 });

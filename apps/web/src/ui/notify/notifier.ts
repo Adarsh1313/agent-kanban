@@ -1,4 +1,4 @@
-import { markNotificationRead, openChatIn, type AppNotification, type AppState } from '../../state/reducer.ts';
+import { markAllNotificationsRead, markChatNotificationsRead, markNotificationRead, openChatIn, type AppNotification, type AppState } from '../../state/reducer.ts';
 import type { Store } from '../../state/store.ts';
 import { providerName } from '../primitives/ProviderLogo.tsx';
 import { reducedMotion } from '../primitives/motion.ts';
@@ -22,9 +22,41 @@ export function notificationText(s: AppState, n: AppNotification): string {
   return `${chat ? providerName(chat.provider) : 'An agent'} ${NOTE_TEXT[n.kind]}`;
 }
 
-/** Opens the notification's chat in the side panel and marks it read. */
+/** Opens the notification's chat in the side panel and marks it read (here and in other tabs). */
 export function openNotification(store: Store, n: AppNotification): void {
   store.setState((s) => markNotificationRead(openChatIn(s, n.chatId), n.id));
+  relay(store, { type: 'read', chatId: n.chatId, until: Date.parse(n.at) + RELAY_SLACK_MS });
+}
+
+/** Marks every notification read (here and in other tabs). */
+export function markAllRead(store: Store): void {
+  const latest = Math.max(Date.now(), ...store.getState().notifications.map((n) => Date.parse(n.at)));
+  store.setState((s) => markAllNotificationsRead(s));
+  relay(store, { type: 'all', until: latest + RELAY_SLACK_MS });
+}
+
+/* ───────── Read state across tabs (BroadcastChannel `agent-kanban.notify`) ───────── */
+
+/**
+ * Each tab numbers its notifications itself, so a read is relayed as chat id + arrival time, never by id;
+ * the slack covers the few ms between two tabs receiving the same event. Messages carry ids and times only.
+ */
+type RelayMsg = { type: 'read'; chatId: string; until: number } | { type: 'all'; until: number };
+const RELAY_SLACK_MS = 2000;
+const CHANNEL = 'agent-kanban.notify';
+
+function relay(store: Store, msg: RelayMsg): void {
+  const cur = (globalThis as Holder)[REGISTRY];
+  if (cur?.store === store) cur.post(msg);
+}
+
+function parseRelay(data: unknown): RelayMsg | null {
+  if (!data || typeof data !== 'object') return null;
+  const m = data as Record<string, unknown>;
+  if (typeof m.until !== 'number' || !Number.isFinite(m.until)) return null;
+  if (m.type === 'all') return { type: 'all', until: m.until };
+  if (m.type === 'read' && typeof m.chatId === 'string') return { type: 'read', chatId: m.chatId, until: m.until };
+  return null;
 }
 
 /* ───────── Prefs (localStorage `agent-kanban.notify`) ───────── */
@@ -169,11 +201,17 @@ export const RING_GAP_MS = 600;
 
 /* ───────── The notifier ───────── */
 
-function showDesktop(store: Store, s: AppState, n: AppNotification): void {
+function showDesktop(store: Store, s: AppState, n: AppNotification, shown: Map<string, Notification>): void {
   if (!getPrefs().desktop || typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
   if (document.visibilityState !== 'hidden') return;
   try {
     const note = new Notification(notificationTitle(s, n), { body: notificationText(s, n), tag: n.chatId });
+    // The same tag replaces the chat's previous notification: forget that one.
+    for (const [id, other] of shown) if (other.tag === n.chatId) shown.delete(id);
+    shown.set(n.id, note);
+    note.onclose = () => {
+      if (shown.get(n.id) === note) shown.delete(n.id);
+    };
     note.onclick = () => {
       try {
         window.focus();
@@ -188,7 +226,7 @@ function showDesktop(store: Store, s: AppState, n: AppNotification): void {
   }
 }
 
-interface Running { store: Store; stop: () => void }
+interface Running { store: Store; stop: () => void; post: (msg: RelayMsg) => void }
 const REGISTRY = Symbol.for('agent-kanban.notifier');
 type Holder = { [REGISTRY]?: Running };
 
@@ -206,16 +244,33 @@ export function startNotifier(store: Store): () => void {
   const seen = new Set(store.getState().notifications.map((n) => n.id));
   let list = store.getState().notifications;
   let lastRing = -Infinity;
+  /** Desktop notifications still on screen, by notification id: closed once that item is read here. */
+  const shown = new Map<string, Notification>();
+
+  const closeRead = (s: AppState) => {
+    if (shown.size === 0) return;
+    const unread = new Set(s.notifications.filter((n) => n.unread).map((n) => n.id));
+    for (const [id, note] of shown) {
+      if (unread.has(id)) continue;
+      shown.delete(id);
+      try {
+        note.close();
+      } catch {
+        // Already gone.
+      }
+    }
+  };
 
   const unsubscribe = store.subscribe(() => {
     const s = store.getState();
     if (s.notifications === list) return;
     list = s.notifications;
+    closeRead(s);
     const fresh = list.filter((n) => !seen.has(n.id));
     for (const n of list) seen.add(n.id);
     if (fresh.length === 0) return;
     // Newest first in the list; fire oldest first so the last desktop notification is the newest.
-    for (const n of [...fresh].reverse()) if (n.unread) showDesktop(store, s, n);
+    for (const n of [...fresh].reverse()) if (n.unread) showDesktop(store, s, n, shown);
     const now = Date.now();
     if (now - lastRing < RING_GAP_MS) return;
     lastRing = now;
@@ -223,6 +278,21 @@ export function startNotifier(store: Store): () => void {
     if (getPrefs().sound) chime(newest.kind === 'finished');
     if (!reducedMotion()) for (const l of [...ringListeners]) l(newest.id);
   });
+
+  // Reads made in another tab. A received message is applied here only, never posted on again.
+  let channel: BroadcastChannel | null = null;
+  try {
+    if (typeof BroadcastChannel !== 'undefined') {
+      channel = new BroadcastChannel(CHANNEL);
+      channel.onmessage = (e: MessageEvent) => {
+        const msg = parseRelay(e.data);
+        if (!msg) return;
+        store.setState((s) => (msg.type === 'all' ? markAllNotificationsRead(s, msg.until) : markChatNotificationsRead(s, msg.chatId, msg.until)));
+      };
+    }
+  } catch {
+    channel = null;
+  }
 
   // Browsers only let audio start inside a gesture: the first click or key press primes the context.
   const prime = () => {
@@ -235,8 +305,17 @@ export function startNotifier(store: Store): () => void {
 
   const running: Running = {
     store,
+    post: (msg) => {
+      try {
+        channel?.postMessage(msg);
+      } catch {
+        // The other tabs catch up on their own; nothing to do.
+      }
+    },
     stop: () => {
       unsubscribe();
+      channel?.close();
+      channel = null;
       document.removeEventListener('pointerdown', prime, true);
       document.removeEventListener('keydown', prime, true);
       if (holder[REGISTRY] === running) delete holder[REGISTRY];

@@ -36,16 +36,27 @@ export function Bell() {
           className="btn icon-only ghost bell"
           type="button"
           aria-haspopup="dialog"
-          aria-expanded="false"
           aria-label={unread > 0 ? `Notifications, ${unread} unread` : 'Notifications'}
-          onClick={() => setOpen((o) => !o)}
+          onClick={() => {
+            if (open) setEnterId(null);
+            setOpen(!open);
+          }}
           onAnimationEnd={(e) => e.currentTarget.classList.remove('ring')}
         >
           <Icon name={prefs.desktop || prefs.sound ? 'bell' : 'bell-off'} />
           <span className="dot" data-n={unread} aria-hidden="true">{unread}</span>
         </button>
       </Tooltip>
-      <NotificationsPopover anchor={anchor} open={open} onClose={() => setOpen(false)} enterId={enterId} />
+      <NotificationsPopover
+        anchor={anchor}
+        open={open}
+        onClose={() => {
+          setOpen(false);
+          setEnterId(null);
+        }}
+        enterId={enterId}
+        onEntered={() => setEnterId(null)}
+      />
     </>
   );
 }
