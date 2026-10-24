@@ -368,6 +368,18 @@ export function openChatIn(s: AppState, id: string): AppState {
   return { ...s, ui: { ...s.ui, openChatId: id, openHistory: null } };
 }
 
+/** Marks one notification read (the bell's count drops); unchanged state when it is already read or gone. */
+export function markNotificationRead(s: AppState, id: string): AppState {
+  if (!s.notifications.some((n) => n.id === id && n.unread)) return s;
+  return { ...s, notifications: s.notifications.map((n) => (n.id === id ? { ...n, unread: false } : n)) };
+}
+
+/** Marks every notification read. */
+export function markAllNotificationsRead(s: AppState): AppState {
+  if (!s.notifications.some((n) => n.unread)) return s;
+  return { ...s, notifications: s.notifications.map((n) => (n.unread ? { ...n, unread: false } : n)) };
+}
+
 /** Opens a history-only chat in the side panel (closing any board chat shown there). */
 export function openHistoryIn(s: AppState, ref: HistoryRef): AppState {
   const cur = s.ui.openHistory;

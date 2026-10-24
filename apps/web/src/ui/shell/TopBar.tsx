@@ -1,7 +1,8 @@
-import { focusedProvider, projectLabel, unreadCount } from '../../state/selectors.ts';
+import { focusedProvider, projectLabel } from '../../state/selectors.ts';
 import { useStore } from '../../state/store.ts';
 import { openNewChat } from '../actions.ts';
-import { Icon, Tooltip, providerName, type IconName } from '../primitives/index.ts';
+import { Icon, providerName, type IconName } from '../primitives/index.ts';
+import { Bell } from '../notify/Bell.tsx';
 import { FilterButton } from '../filters/FilterMenu.tsx';
 import { UsageChips } from '../usage/UsageChips.tsx';
 
@@ -20,7 +21,6 @@ export function TopBar() {
     }
     return s.ui.view === 'projects' && s.ui.projectId ? projectLabel(s, s.ui.projectId) : '';
   });
-  const unread = useStore(unreadCount);
   const meta = VIEW_META[view];
 
   return (
@@ -35,11 +35,7 @@ export function TopBar() {
       )}
       <span className="spacer" />
       <div className="usage-area"><UsageChips /></div>
-      <Tooltip label="Notifications">
-        <button className="btn icon-only ghost bell" type="button" aria-label={unread > 0 ? `Notifications, ${unread} unread` : 'Notifications'}>
-          <Icon name="bell" /><span className="dot" data-n={unread} aria-hidden="true">{unread}</span>
-        </button>
-      </Tooltip>
+      <Bell />
       <button className="btn primary" type="button" aria-label="New chat" onClick={() => openNewChat()}>
         <Icon name="plus" /><span className="new-label">New chat</span> <span className="kbd">N</span>
       </button>

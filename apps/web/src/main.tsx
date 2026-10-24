@@ -7,10 +7,12 @@ import './styles/app.css';
 import { App } from './App.tsx';
 import { initialState } from './state/reducer.ts';
 import { createStore, StoreProvider } from './state/store.ts';
+import { startNotifier } from './ui/notify/notifier.ts';
 import { applySavedTheme } from './ui/shell/theme.ts';
 
 applySavedTheme();
 const store = createStore(initialState());
+startNotifier(store);
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

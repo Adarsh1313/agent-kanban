@@ -104,3 +104,7 @@ button.usage-focus { color: inherit; transition: background-color var(--duration
 
 @media (max-width: 900px) { .sidebar { display: none; } }
 @media (max-width: 640px) { .usage-area .pct, .topbar .new-label, .usage-focus .m span { display: none; } }
+
+/* Notifications popover: why a switch cannot be turned on */
+.toggle-note { margin: calc(var(--space-1) * -1) 0 0; padding-left: calc(var(--space-2) + var(--space-3)); color: var(--color-text-faint); font-size: var(--text-micro); }
+.switch:disabled { opacity: .5; cursor: not-allowed; }
