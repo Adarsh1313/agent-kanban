@@ -1,0 +1,156 @@
+/* App-level layout and the few rules the design keeps inline in board.html. Tokens only. */
+html, body, #root { height: 100%; }
+html, body { overflow: hidden; }
+
+.app { display: flex; height: 100vh; overflow: hidden; }
+.main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.main-view { flex: 1; display: flex; flex-direction: column; min-height: 0; outline: none; }
+
+.usage-area { display: flex; align-items: center; gap: calc(var(--space-1) / 2); }
+.crumb { color: var(--color-text-faint); font-weight: var(--weight-regular); }
+.empty-note { color: var(--color-text-faint); font-size: var(--text-caption); padding: var(--space-2) var(--space-1); }
+.side-empty { margin: 0; padding: var(--space-1) var(--space-2); }
+
+.sidebar .scroll { flex: 1; overflow-y: auto; margin: 0 calc(var(--space-2) * -1); padding: 0 var(--space-2); }
+/* Rows indent to line up under the small provider logo + gap used by .chat-row */
+.show-more-row {
+  --row-indent: calc(var(--space-2) * 2 + var(--space-4) - var(--space-1) / 2);
+  font-size: var(--text-caption); color: var(--color-text-faint); padding: 0 var(--space-2) 0 var(--row-indent);
+  height: var(--space-6); border-radius: var(--radius-control); width: 100%; text-align: left;
+}
+.show-more-row.all-projects { display: flex; align-items: center; gap: var(--space-1); padding-left: var(--space-2); margin-top: var(--space-2); }
+@media (hover: hover) and (pointer: fine) { .show-more-row:hover { color: var(--color-text); background: var(--color-nav-hover); } }
+.chat-row .state-dot { width: calc(var(--space-1) * 1.5); height: calc(var(--space-1) * 1.5); border-radius: var(--radius-full); background: var(--color-needs); flex: none; }
+
+/* Connection status (Reconnecting… / server restarted) sits under the top bar */
+.conn-banner { flex: none; padding: var(--space-2) var(--space-4); font-size: var(--text-body); color: var(--color-text-muted); background: var(--color-control); border-bottom: 1px solid var(--color-border); }
+.conn-banner[data-state="unauthorized"] { color: var(--color-needs-text); background: var(--color-needs-soft); }
+
+/* Board: each card sits in a stable slot the board moves between columns (FLIP keeps the same node) */
+.col-cards, .card-slot { display: contents; }
+.card[aria-current="true"] { border-color: var(--color-ink); }
+.card-meta .card-proj { display: inline-flex; align-items: center; gap: var(--space-1); min-width: 0; }
+.no-results { flex: 1; display: grid; place-items: center; text-align: center; color: var(--color-text-muted); align-self: stretch; }
+.no-results h3 { margin: var(--space-2) 0 var(--space-1); color: var(--color-text); font-size: var(--text-title); font-weight: var(--weight-semibold); }
+.no-results p { margin: 0 0 var(--space-3); font-size: var(--text-body); }
+
+/* Chat panel (design/board.html keeps these inline) */
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.panel:focus { outline: none; }
+.panel-head .t small .icon { flex: none; }
+.panel-head .panel-proj { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.title-edit { display: block; width: 100%; font: inherit; font-size: var(--text-title); font-weight: var(--weight-semibold); letter-spacing: var(--tracking-tight);
+  color: var(--color-text); background: var(--color-surface); border: 1px solid var(--color-border-strong); border-radius: var(--radius-control); padding: 0 var(--space-1); outline: 0; }
+.title-edit:focus-visible { box-shadow: 0 0 0 calc(var(--space-1) * .75) color-mix(in srgb, var(--color-focus) 15%, transparent); }
+.panel-source { padding: var(--space-2) var(--space-4) 0; display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; }
+.thread .turn { display: flex; flex-direction: column; gap: var(--space-4); }
+.thread .msg.agent { width: 100%; }
+.msg-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.msg.agent .work + .msg-text, .msg.agent .msg-text + .msg-text, .msg.agent .work + .thread-note { margin-top: var(--space-3); }
+.msg-time { font-size: var(--text-caption); color: var(--color-text-faint); font-variant-numeric: tabular-nums; }
+.msg.user .msg-time { display: block; text-align: right; margin-top: var(--space-1); }
+.msg .who .msg-time { margin-left: var(--space-1); }
+.thread-note { display: flex; align-items: center; gap: calc(var(--space-1) * 1.5); color: var(--color-text-muted); font-size: var(--text-caption); }
+.thread-note.center { justify-content: center; color: var(--color-text-faint); text-align: center; }
+.thread .show-earlier { align-self: center; flex: none; }
+.steps li.failed .icon { color: var(--color-danger); }
+.request-head { display: flex; align-items: center; gap: calc(var(--space-1) * 1.5); font-weight: var(--weight-medium); }
+.request-note { color: var(--color-text-muted); font-size: var(--text-caption); }
+.request .composer-box textarea { width: 100%; border: 0; outline: 0; resize: none; background: transparent; font: inherit; font-size: var(--text-body); padding: calc(var(--space-1) / 2) var(--space-1); }
+.menu-label .menu-back { width: var(--space-5); height: var(--space-5); margin-right: var(--space-1); }
+.menu-label:has(.menu-back) { display: flex; align-items: center; }
+@media (prefers-reduced-motion: reduce) { .request { animation: none; } }
+
+/* New chat dialog (design/board.html keeps .dlg-note inline) */
+.dlg-chips { display: flex; gap: var(--space-2); flex-wrap: wrap; }
+.dlg-chips .chip-btn:disabled { opacity: .5; cursor: default; }
+.dlg-note { font-size: var(--text-caption); color: var(--color-text-muted); display: flex; gap: calc(var(--space-1) * 1.5); align-items: center; }
+.dlg-note .icon { flex: none; }
+.dlg-hint { color: var(--color-text-faint); font-size: var(--text-caption); font-variant-numeric: tabular-nums; }
+.dlg-hint.warn { color: var(--color-needs-text); }
+.dlg-path { display: flex; flex-direction: column; gap: var(--space-1); }
+.dlg-path-input { width: 100%; height: calc(var(--space-6) + var(--space-2)); padding: 0 var(--space-2); font: inherit; font-family: var(--font-mono); font-size: var(--text-caption);
+  color: var(--color-text); background: var(--color-surface); border: 1px solid var(--color-border-strong); border-radius: var(--radius-control); outline: 0; }
+.dlg-path-input:focus-visible { box-shadow: 0 0 0 calc(var(--space-1) * .75) color-mix(in srgb, var(--color-focus) 15%, transparent); }
+.dlg-path-input[aria-invalid="true"] { border-color: var(--color-danger); }
+.dlg-path-error { margin: 0; font-size: var(--text-caption); color: var(--color-danger); }
+.dlg-pop { width: min(calc(var(--space-8) * 10), calc(100vw - var(--space-4))); z-index: 65; } /* above the dialog, as board.html does */
+.dlg-pop .dlg-scroll { max-height: 40vh; overflow-y: auto; overflow-x: hidden; }
+.dlg-pop .grow-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* An empty prompt shakes (NewChatDialog); with reduced motion there is no shake, so it is outlined instead. */
+@media (prefers-reduced-motion: reduce) {
+  .dialog-body textarea.invalid { outline: 1px solid var(--color-needs-text); outline-offset: var(--space-1); border-radius: var(--radius-control); }
+}
+
+/* Usage (design/board.html keeps .refresh .spinning inline) */
+/* A continuous turn while checking: the sweep token (linear and continuous). */
+.refresh .icon.spinning { animation: spin var(--duration-sweep) linear infinite; }
+.btn.refresh:disabled, .btn.refresh[aria-disabled="true"] { opacity: 1; cursor: progress; }
+/* Connection card names are headings, styled as the design's bold name. */
+.conn-head h4.conn-name { margin: 0; display: block; font-size: var(--text-title); font-weight: var(--weight-semibold); letter-spacing: var(--tracking-tight); }
+.usage-chip[data-dim], .usage-focus[data-dim] .m, .prov-block[data-status="error"] .meter, .prov-block[data-status="error"] .model-toggle { opacity: .55; }
+.prov-block[data-status="error"] .unavailable { color: var(--color-needs-text); }
+.usage-chip .pct, .usage-focus .m, .usage-area .link-btn { white-space: nowrap; }
+button.usage-focus { color: inherit; transition: background-color var(--duration-hover) var(--ease-colour); }
+@media (hover: hover) and (pointer: fine) { button.usage-focus:hover { background: var(--color-control-hover); } }
+.usage-focus .m i { flex: none; }
+/* Meter fills change by transform (scaleX); with reduced motion the new value just appears. */
+@media (prefers-reduced-motion: reduce) {
+  .refresh .icon.spinning { animation: none; }
+  .meter .fill, .minimeter i::after, .usage-focus .m i::after { transition: none; }
+}
+
+/* Connections (read-only cards; design/connections.js) */
+.conn-update { color: var(--color-running); }
+.conn-checked { color: var(--color-text-faint); font-size: var(--text-caption); }
+.conn-head .logo { flex: none; }
+
+@media (max-width: 900px) { .sidebar { display: none; } }
+@media (max-width: 640px) { .usage-area .pct, .topbar .new-label, .usage-focus .m span { display: none; } }
+
+/* Notifications popover: why a switch cannot be turned on */
+.toggle-note { margin: calc(var(--space-1) * -1) 0 0; padding-left: calc(var(--space-2) + var(--space-3)); color: var(--color-text-faint); font-size: var(--text-micro); }
+.switch:disabled { opacity: .5; cursor: not-allowed; }
+
+/* Projects page (design/projects.js keeps these inline). The top bar holds the page's h1, so the page title is an h2 styled like views.css's h1. */
+.page-head .page-title { margin: 0; font-size: var(--text-heading); font-weight: var(--weight-semibold); letter-spacing: var(--tracking-tight); display: flex; align-items: center; gap: var(--space-2); min-width: 0; overflow-wrap: anywhere; }
+.page-head .count { font-size: var(--text-body); color: var(--color-text-faint); font-weight: var(--weight-regular); font-variant-numeric: tabular-nums; }
+.page-head .path-line { font-size: var(--text-caption); overflow-wrap: anywhere; }
+/* No palette for folder glyphs exists in tokens.css yet, so the glyph is neutral. */
+.folder-glyph.proj-glyph { background: var(--color-control); color: var(--color-text-muted); }
+a.prow { color: inherit; text-decoration: none; }
+/* Rows sit in a <ul> (one <li> each), so views.css's .prow:first-of-type no longer finds the first row. */
+.plist-rows { list-style: none; margin: 0; padding: 0; }
+.plist-rows .prow:first-of-type { border-top: 1px solid var(--color-border); }
+.plist-rows li:first-child .prow { border-top: 0; }
+.prow .go { display: grid; place-items: center; }
+.plist-head button[aria-pressed="true"] { color: var(--color-text); }
+.know .btn:disabled { opacity: .5; cursor: not-allowed; }
+.about .copy-path { align-self: flex-start; margin-left: calc(var(--space-2) * -1); }
+.about .v.muted { color: var(--color-text-muted); }
+.about .faint { color: var(--color-text-faint); }
+.about .skel { display: block; height: var(--space-3); width: 70%; border-radius: var(--radius-badge); background: var(--color-control); }
+.about .skel + .skel { width: 50%; }
+.about-error { font-size: var(--text-caption); color: var(--color-danger); overflow-wrap: anywhere; }
+.about-retry { align-self: flex-start; }
+.chats-empty { padding: var(--space-6); }
+.chats-more { display: block; width: 100%; height: calc(var(--space-8) + var(--space-1)); border-top: 1px solid var(--color-border); font-size: var(--text-caption); color: var(--color-text-muted);
+  transition: background-color var(--duration-hover) var(--ease-colour); }
+@media (hover: hover) and (pointer: fine) { .chats-more:hover { background: var(--color-surface-hover); color: var(--color-text); } }
+/* Filtering the chats: rows rise in, one --stagger apart (design/projects.js). */
+.chat-list.swapped .crow { animation: rise var(--duration-pop) var(--ease-out) backwards; }
+@media (prefers-reduced-motion: reduce) { .chat-list.swapped .crow { animation: none; } }
+/* A narrow card wraps "New Claude Code chat" instead of spilling out. */
+.know .btn { max-width: 100%; height: auto; min-height: var(--space-6); padding-block: var(--space-1); text-align: left; }
+
+/* Project detail: the chat rows are a list (one item per chat); rows after the first keep the design's divider. */
+.chat-rows { list-style: none; margin: 0; padding: 0; }
+.chat-rows li + li .crow { border-top: 1px solid var(--color-border); }
+
+/* Popovers are portalled to <body> and placed with inline fixed coordinates (Popover's place()). Fixed, a closed one
+   adds no scroll range wherever it was last placed; hidden after its exit fade, it cannot be reached either. */
+.popover { position: fixed; top: 0; left: 0; }
+.popover[data-state="closed"] {
+  visibility: hidden;
+  transition: opacity var(--duration-exit) var(--ease-out), transform var(--duration-exit) var(--ease-out), visibility 0s linear var(--duration-exit);
+}

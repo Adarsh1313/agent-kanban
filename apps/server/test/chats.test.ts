@@ -552,3 +552,80 @@ test('when the registry swaps a provider adapter, chats on it resume on the new 
   await svc.send(chat.id, 'more');
   assert.deepEqual(created[1]!.calls, ['resume:s1:/w', 'send:s1:more']);
 });
+
+test('request.closed is broadcast when a request is answered and when the rest close with the turn', async () => {
+  const { adapter, events, svc } = setup();
+  const chat = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+  adapter.emit({ type: 'request.opened', sessionRef: 's1', requestId: 'r1', kind: 'permission', summary: 'a' });
+  adapter.emit({ type: 'request.opened', sessionRef: 's1', requestId: 'r2', kind: 'question', summary: 'b' });
+  await svc.answer(chat.id, 'r1', 'allow');
+  const closed = () => events.filter((e) => e.type === 'request.closed').map((e) => (e as { requestId: string }).requestId);
+  assert.deepEqual(closed(), ['r1']);
+  adapter.emit({ type: 'stopped', sessionRef: 's1' });
+  assert.deepEqual(closed(), ['r1', 'r2']);
+});
+
+test('request.closed is broadcast for open requests when the app restarts', async () => {
+  const { adapter, events, svc } = setup();
+  await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+  adapter.emit({ type: 'request.opened', sessionRef: 's1', requestId: 'r1', kind: 'permission', summary: 'a' });
+  svc.recoverAfterRestart();
+  assert.ok(events.some((e) => e.type === 'request.closed' && e.requestId === 'r1'));
+});
+
+test('message.delta carries the stored length before the delta as offset', async () => {
+  const { adapter, events, svc } = setup();
+  await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+  for (const text of ['Hel', 'lo', ' wo']) adapter.emit({ type: 'message.delta', sessionRef: 's1', messageId: 'm1', text });
+  const deltas = events.filter((e) => e.type === 'message.delta') as Extract<ServerEvent, { type: 'message.delta' }>[];
+  assert.deepEqual(deltas.map((d) => [d.text, d.offset]), [['Hel', 0], ['lo', 3], [' wo', 5]]);
+});
+
+test('a stop, an error or a limit settles a partial assistant message with message.completed', async () => {
+  for (const end of [
+    { type: 'stopped', sessionRef: 's1' },
+    { type: 'error', sessionRef: 's1', message: 'boom' },
+    { type: 'limit.reached', sessionRef: 's1' },
+  ] as const) {
+    const { adapter, events, store, svc } = setup();
+    const chat = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+    adapter.emit({ type: 'message.delta', sessionRef: 's1', messageId: 'm1', text: 'partial' });
+    adapter.emit({ ...end });
+    const done = events.filter((e) => e.type === 'message.completed' && e.message.text === 'partial');
+    assert.equal(done.length, 1, end.type);
+    assert.ok(store.listMessages(chat.id).some((m) => m.text === 'partial'));
+  }
+});
+
+test('a completed message is not announced again when the turn settles', async () => {
+  const { adapter, events, svc } = setup();
+  await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+  adapter.emit({ type: 'message.delta', sessionRef: 's1', messageId: 'm1', text: 'Hi' });
+  adapter.emit({ type: 'message.completed', sessionRef: 's1', messageId: 'm1', role: 'assistant', text: 'Hi' });
+  adapter.emit({ type: 'turn.completed', sessionRef: 's1' });
+  assert.equal(events.filter((e) => e.type === 'message.completed' && e.message.text === 'Hi').length, 1);
+});
+
+test('pin, rename and snooze do not bump updatedAt; an empty patch returns the chat unchanged without a broadcast', async () => {
+  const { store, events, svc } = setup();
+  const chat = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+  const before = store.getChat(chat.id)!.updatedAt;
+  await new Promise((r) => setTimeout(r, 5));
+  const after = svc.patch(chat.id, { pinned: true, title: 'Renamed', snoozedUntil: '2026-02-01T00:00:00.000Z' });
+  assert.equal(after.pinned, true);
+  assert.equal(after.title, 'Renamed');
+  assert.equal(after.updatedAt, before);
+  const n = events.length;
+  const same = svc.patch(chat.id, {});
+  assert.deepEqual(same, store.getChat(chat.id));
+  assert.equal(events.length, n, 'nothing broadcast for an empty patch');
+});
+
+test('archive forgets the chat\'s streaming partials', async () => {
+  const { adapter, svc } = setup();
+  const chat = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+  adapter.emit({ type: 'message.delta', sessionRef: 's1', messageId: 'm1', text: 'Hel' });
+  assert.equal((svc as any).partials.has(chat.id), true);
+  svc.archive(chat.id);
+  assert.equal((svc as any).partials.has(chat.id), false);
+});

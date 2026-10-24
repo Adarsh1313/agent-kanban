@@ -74,10 +74,35 @@ export interface ConnectionHealth {
 
 export type ServerEvent =
   | { type: 'chat.updated'; chat: Chat }
-  | { type: 'message.delta'; chatId: string; messageId: string; text: string }
+  /** `offset` is the stored message length before this delta was appended. */
+  | { type: 'message.delta'; chatId: string; messageId: string; text: string; offset: number }
   | { type: 'message.completed'; chatId: string; message: Message }
   | { type: 'tool.call'; chatId: string; toolCall: ToolCall }
   | { type: 'request.opened'; chatId: string; requestId: string; kind: 'permission' | 'question'; summary: string }
+  | { type: 'request.closed'; chatId: string; requestId: string }
   | { type: 'usage.updated'; reading: UsageReading }
   | { type: 'connection.updated'; health: ConnectionHealth }
   | { type: 'notification'; chatId: string; kind: 'permission' | 'question' | 'finished' | 'limit' | 'error' };
+
+export interface Project {
+  /** The absolute folder, exactly as the chats store it. */
+  id: string;
+  name: string;
+  path: string;
+  providers: { provider: ProviderId; chats: number; lastUsedAt: string; lastModel: string | null }[];
+  columns: Record<Column, number>;
+  historyOnly: number;
+  lastActivityAt: string;
+}
+
+export interface ProjectInfo {
+  stack: string[];
+  git: { branch: string; lastCommit: string; lastCommitAt: string } | null;
+  instructionFiles: Record<ProviderId, boolean>;
+  topFolders: string[];
+}
+
+export interface ModelOption { id: string; label: string; isDefault: boolean }
+
+export { suggest } from './usage.ts';
+export { folderKey } from './paths.ts';

@@ -152,3 +152,12 @@ test('the store creates its lookup indexes', () => {
   const names = ((s as any).db.prepare("SELECT name FROM sqlite_master WHERE type = 'index'").all() as { name: string }[]).map((r) => r.name);
   for (const n of ['messages_chat', 'tool_calls_chat', 'requests_chat', 'chats_session']) assert.ok(names.includes(n), n);
 });
+
+test('updateChat with touch: false keeps updatedAt', async () => {
+  const s = new Store(':memory:');
+  const c = s.createChat({ provider: 'codex', cwd: '/x', title: 't' });
+  await tick();
+  const u = s.updateChat(c.id, { pinned: true }, { touch: false });
+  assert.equal(u.pinned, true);
+  assert.equal(u.updatedAt, c.updatedAt);
+});

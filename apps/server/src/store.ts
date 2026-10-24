@@ -87,7 +87,8 @@ export class Store {
     return (this.db.prepare('SELECT * FROM chats WHERE archived = 0 ORDER BY updated_at DESC, rowid DESC').all() as Row[]).map(toChat);
   }
 
-  updateChat(id: string, patch: Partial<Chat>): Chat {
+  /** `touch: false` keeps updatedAt (pin, rename and snooze are not activity). */
+  updateChat(id: string, patch: Partial<Chat>, opts: { touch?: boolean } = {}): Chat {
     const sets: string[] = [];
     const vals: any[] = [];
     for (const [k, v] of Object.entries(patch) as [keyof Chat, unknown][]) {
@@ -95,8 +96,15 @@ export class Store {
       sets.push(`${COLS[k]} = ?`);
       vals.push(typeof v === 'boolean' ? (v ? 1 : 0) : v);
     }
-    sets.push('updated_at = ?');
-    vals.push(this.now());
+    if (opts.touch !== false) {
+      sets.push('updated_at = ?');
+      vals.push(this.now());
+    }
+    if (sets.length === 0) {
+      const chat = this.getChat(id);
+      if (!chat) throw new Error(`Chat not found: ${id}`);
+      return chat;
+    }
     const res = this.db.prepare(`UPDATE chats SET ${sets.join(', ')} WHERE id = ?`).run(...vals, id);
     if (res.changes === 0) throw new Error(`Chat not found: ${id}`);
     return this.getChat(id)!;

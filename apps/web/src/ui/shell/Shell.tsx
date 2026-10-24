@@ -1,0 +1,107 @@
+import { useEffect, useLayoutEffect, useRef } from 'react';
+import type { AppState } from '../../state/reducer.ts';
+import { useStore, useStoreInstance, type Store } from '../../state/store.ts';
+import { openFilter, openNewChat } from '../actions.ts';
+import { Board } from '../board/Board.tsx';
+import { ConnectionsPage } from '../connections/ConnectionsPage.tsx';
+import { ChatPanel } from '../chat/ChatPanel.tsx';
+import { FilterBar } from '../filters/FilterBar.tsx';
+import { NewChatDialog } from '../newchat/NewChatDialog.tsx';
+import { ProjectsPage } from '../projects/ProjectsPage.tsx';
+import { hasOpenLayer } from '../primitives/layers.ts';
+import { Toasts } from '../primitives/index.ts';
+import { Sidebar } from './Sidebar.tsx';
+import { TopBar } from './TopBar.tsx';
+import { parseHash } from './route.ts';
+import { applySavedTheme } from './theme.ts';
+
+const UNAUTHORIZED_TEXT = 'The server restarted. Open Agent Kanban again from the link it printed.';
+const CLOCK_MS = 30_000;
+
+const NO_TOKEN_TEXT = 'Open Agent Kanban from the link the server printed.';
+
+const bannerText = (socket: AppState['socket']): string | null => {
+  switch (socket) {
+    case 'live':
+    case 'connecting': return null;
+    case 'reconnecting': return 'Reconnecting…';
+    case 'no_token': return NO_TOKEN_TEXT;
+    case 'unauthorized': return UNAUTHORIZED_TEXT;
+  }
+};
+
+/** `ui.view` / `ui.projectId` follow the address-bar hash. */
+function useHashRoute(store: Store) {
+  useLayoutEffect(() => {
+    const sync = () => {
+      const r = parseHash(location.hash);
+      store.setState((s) => (s.ui.view === r.view && s.ui.projectId === r.projectId ? s : { ...s, ui: { ...s.ui, view: r.view, projectId: r.projectId } }));
+    };
+    sync();
+    window.addEventListener('hashchange', sync);
+    return () => window.removeEventListener('hashchange', sync);
+  }, [store]);
+}
+
+/** Bumps `now` so snoozed chats come back (and "Resets 2:40 pm" style text stays fresh) without any event arriving. */
+function useClock(store: Store) {
+  useEffect(() => {
+    const id = setInterval(() => store.setState((s) => ({ ...s, now: Date.now() })), CLOCK_MS);
+    return () => clearInterval(id);
+  }, [store]);
+}
+
+function useShortcuts() {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey || e.altKey || hasOpenLayer()) return;
+      const t = e.target;
+      if (t instanceof Element && t.closest('input, textarea, select, [contenteditable]')) return;
+      if (e.key === 'n' || e.key === 'N') {
+        e.preventDefault();
+        openNewChat();
+      } else if (e.key === 'f' || e.key === 'F') {
+        e.preventDefault();
+        openFilter();
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, []);
+}
+
+export function Shell() {
+  const store = useStoreInstance();
+  const view = useStore((s) => s.ui.view);
+  const socket = useStore((s) => s.socket);
+  const prevView = useRef(view);
+  const entering = prevView.current !== view;
+  useEffect(() => { prevView.current = view; });
+
+  useHashRoute(store);
+  useClock(store);
+  useShortcuts();
+  useEffect(() => applySavedTheme(), []);
+
+  const banner = bannerText(socket);
+  return (
+    <>
+      <a className="skip" href="#/board" onClick={(e) => { e.preventDefault(); document.getElementById('main')?.focus(); }}>Skip to the content</a>
+      <div className="app">
+        <Sidebar />
+        <div className="main">
+          <TopBar />
+          {banner && <p className="conn-banner" role="status" data-state={socket}>{banner}</p>}
+          <main className={`view main-view${entering ? ' entering' : ''}`} key={view} id="main" tabIndex={-1} data-view={view}>
+            {view === 'board' && <><FilterBar /><Board /></>}
+            {view === 'projects' && <ProjectsPage />}
+            {view === 'connections' && <ConnectionsPage />}
+          </main>
+        </div>
+      </div>
+      <ChatPanel />
+      <NewChatDialog />
+      <Toasts />
+    </>
+  );
+}

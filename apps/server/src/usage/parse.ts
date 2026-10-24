@@ -1,5 +1,5 @@
 // Ported from pingdotgg/t3code (MIT), apps/server/src/provider/claudeUsageLimits.ts and codexUsageLimits.ts
-import type { ProviderId, UsageReading, UsageWindow } from '@agent-kanban/shared';
+import type { UsageReading, UsageWindow } from '@agent-kanban/shared';
 
 export interface CodexWindow { usedPercent: number; windowDurationMins: number | null; resetsAt: number | null }
 export interface CodexSnapshot { limitId: string | null; limitName: string | null; primary: CodexWindow | null; secondary: CodexWindow | null }
@@ -59,18 +59,4 @@ export function codexLimitsToReading(r: CodexLimits, now: Date): UsageReading {
     }
   }
   return { provider: 'codex', status: 'ok', windows, readAt: now.toISOString() };
-}
-
-export function suggest(readings: UsageReading[], allowed: ProviderId[]): ProviderId | null {
-  let best: { provider: ProviderId; score: number; reset: number } | null = null;
-  for (const rd of readings) {
-    if (!allowed.includes(rd.provider) || rd.status !== 'ok') continue;
-    const main = rd.windows.filter((w) => w.kind === 'five_hour' || w.kind === 'weekly');
-    if (main.length === 0) continue;
-    const score = Math.min(...main.map((w) => w.leftPct));
-    const fh = rd.windows.find((w) => w.kind === 'five_hour')?.resetsAt;
-    const reset = fh ? Date.parse(fh) : Infinity;
-    if (!best || score > best.score || (score === best.score && reset < best.reset)) best = { provider: rd.provider, score, reset };
-  }
-  return best ? best.provider : null;
 }

@@ -46,6 +46,8 @@ export class ChatService {
   private now: () => Date;
   private buffers = new Map<ProviderId, { at: number; event: AdapterEvent }[]>();
   private messageIds = new Map<string, Map<string, string>>();
+  /** Stored ids of assistant messages that received deltas but no message.completed yet, per chat. */
+  private partials = new Map<string, Set<string>>();
   /** Open requests the adapter can still answer (this process). The store keeps a copy for read-back. */
   private requests = new Map<string, Map<string, LiveRequest>>();
   /** Chats whose provider session is attached in this process (started or resumed). */
@@ -124,6 +126,7 @@ export class ChatService {
     }
     open.delete(requestId);
     this.store.setRequestStatus(chatId, requestId, 'answered');
+    this.broadcast({ type: 'request.closed', chatId, requestId });
     if (open.size === 0) this.transition(chatId, { type: 'user.answered' });
   }
 
@@ -156,6 +159,17 @@ export class ChatService {
   archive(chatId: string): Chat {
     this.mustGet(chatId);
     const chat = this.store.updateChat(chatId, { archived: true });
+    this.partials.delete(chatId);
+    this.broadcast({ type: 'chat.updated', chat });
+    return chat;
+  }
+
+  /** Rename, pin or snooze a chat. */
+  patch(chatId: string, patch: { title?: string; pinned?: boolean; snoozedUntil?: string | null }): Chat {
+    const current = this.mustGet(chatId);
+    if (Object.values(patch).every((v) => v === undefined)) return current;
+    // Not activity: the card keeps its place and its "5m ago".
+    const chat = this.store.updateChat(chatId, patch, { touch: false });
     this.broadcast({ type: 'chat.updated', chat });
     return chat;
   }
@@ -215,6 +229,7 @@ export class ChatService {
   recoverAfterRestart(): void {
     this.live.clear();
     this.requests.clear();
+    for (const chat of this.store.listChats()) this.announceClosed(chat.id);
     this.store.closeOpenRequests();
     for (const chat of this.store.listChats()) this.transition(chat.id, { type: 'app.restarted' });
   }
@@ -392,19 +407,25 @@ export class ChatService {
       case 'message.delta': {
         const ids = this.idsFor(chatId);
         let id = ids.get(e.messageId);
+        let offset = 0;
         if (!id) {
           id = this.store.addMessage(chatId, 'assistant', e.text).id;
           ids.set(e.messageId, id);
         } else {
+          offset = this.store.getMessage(id)?.text.length ?? 0;
           this.store.appendToMessage(id, e.text);
         }
-        this.broadcast({ type: 'message.delta', chatId, messageId: id, text: e.text });
+        let open = this.partials.get(chatId);
+        if (!open) { open = new Set(); this.partials.set(chatId, open); }
+        open.add(id);
+        this.broadcast({ type: 'message.delta', chatId, messageId: id, text: e.text, offset });
         return;
       }
       case 'message.completed': {
         const ids = this.idsFor(chatId);
         const id = ids.get(e.messageId);
         if (id) {
+          this.partials.get(chatId)?.delete(id);
           this.store.setMessageText(id, e.text);
           const message = this.store.getMessage(id);
           if (message) this.broadcast({ type: 'message.completed', chatId, message });
@@ -469,8 +490,26 @@ export class ChatService {
 
   /** Open requests can no longer be answered (turn over, stopped, failed): drop them here and in the store. */
   private closeRequests(chatId: string): void {
+    this.finalizePartials(chatId);
     this.requests.delete(chatId);
+    this.announceClosed(chatId);
     this.store.closeOpenRequests(chatId);
+  }
+
+  /** A turn ended (stop, error, limit) with assistant text still streaming: settle it with the stored text. */
+  private finalizePartials(chatId: string): void {
+    const open = this.partials.get(chatId);
+    if (!open) return;
+    this.partials.delete(chatId);
+    for (const id of open) {
+      const message = this.store.getMessage(id);
+      if (message) this.broadcast({ type: 'message.completed', chatId, message });
+    }
+  }
+
+  /** Tells every open page that the chat's still-open requests are gone. */
+  private announceClosed(chatId: string): void {
+    for (const r of this.store.listOpenRequests(chatId)) this.broadcast({ type: 'request.closed', chatId, requestId: r.requestId });
   }
 
   private idsFor(chatId: string): Map<string, string> {

@@ -22,6 +22,7 @@
   --color-ink: #1f1f1e;             /* primary button, selected segment, meter fill */
   --color-ink-hover: #000000;
   --color-ink-contrast: #ffffff;    /* text on ink */
+  --color-on-status: #ffffff;       /* glyph on state-coloured circles */
   --color-focus: #3b6fd8;           /* keyboard focus ring */
   --color-overlay: rgba(20, 20, 18, .28); /* behind the New chat dialog */
 
@@ -125,6 +126,7 @@
   --color-ink: #ececea;
   --color-ink-hover: #ffffff;
   --color-ink-contrast: #121213;
+  --color-on-status: #ffffff;       /* glyph on state-coloured circles */
   --color-focus: #7aa2ff;
   --color-overlay: rgba(0, 0, 0, .5);
   --color-running: #6f95f0;
@@ -161,6 +163,7 @@
     --color-ink: #ececea;
     --color-ink-hover: #ffffff;
     --color-ink-contrast: #121213;
+    --color-on-status: #ffffff;     /* glyph on state-coloured circles */
     --color-focus: #7aa2ff;
     --color-overlay: rgba(0, 0, 0, .5);
     --color-running: #6f95f0;

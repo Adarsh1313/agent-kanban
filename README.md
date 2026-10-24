@@ -11,7 +11,7 @@ connection is healthy and up to date.
 |---|---|
 | Server (`apps/server`) | Built: Claude Code + Codex chats, board state, usage limits, chat history, connection health, HTTP + WebSocket API |
 | Design (`design/`) | Clickable prototype and design system |
-| Web app | Next (Plan 2) |
+| Web app (`apps/web`) | Built: board, chat panel, New chat, usage, filters, notifications, Projects and Connections pages |
 | Antigravity chats, install/sign-in flows | Plan 3 |
 | Desktop app | Plan 4 |
 
@@ -22,19 +22,20 @@ Requires Node 22.18+ and Claude Code and/or Codex installed and signed in.
 ```bash
 npm install
 npm test
-AGENT_KANBAN_PORT=3006 node apps/server/src/main.ts
+npm run build
+AGENT_KANBAN_PORT=3006 npm start
 ```
 
-The server prints a URL with a one-time token. Open it in a browser to see a live console of
-connections, usage, the board and your chat history.
+The server prints a link with a one-time token. Open it to use Agent Kanban. The token changes on
+every restart. For development, `npm run dev -w apps/web` runs Vite on 3005 against the server on 3006.
 
 Design prototype:
 
 ```bash
-python -m http.server 3005 --directory design
+python -m http.server 3007 --directory design
 ```
 
-Then open http://localhost:3005/board.html.
+Then open http://localhost:3007/board.html.
 
 ## Docs
 

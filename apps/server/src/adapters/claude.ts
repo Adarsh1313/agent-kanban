@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { query as sdkQuery } from '@anthropic-ai/claude-agent-sdk';
 import type { CanUseTool, PermissionResult, Query, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
-import type { AdapterEvent, UsageReading } from '@agent-kanban/shared';
+import type { AdapterEvent, ModelOption, UsageReading } from '@agent-kanban/shared';
 import type { PingResult, ProviderAdapter } from './adapter.ts';
 import { resolveSpawnTarget } from './spawn-target.ts';
 import { claudeUsageToReading } from '../usage/parse.ts';
@@ -337,6 +337,20 @@ export class ClaudeAdapter implements ProviderAdapter {
     }
   }
 
+  async listModels(): Promise<ModelOption[]> {
+    this.assertOpen();
+    // Inside the ping backoff window a broken shared query isn't recreated.
+    if (!this.usageQuery && Date.now() < this.pingRetryAt) return [];
+    let models: Awaited<ReturnType<Query['supportedModels']>>;
+    try {
+      models = await this.withUsageQuery((q) => q.supportedModels(), true);
+    } catch (e) {
+      this.noteSharedFailure();
+      throw e;
+    }
+    return models.map((m) => ({ id: m.value, label: m.displayName || m.value, isDefault: m.value === 'default' }));
+  }
+
   async readUsage(): Promise<UsageReading> {
     this.assertOpen();
     const failed: UsageReading = { provider: 'claude', status: 'error', windows: [], readAt: new Date().toISOString(), message: "Couldn't read Claude Code usage." };
@@ -367,10 +381,15 @@ export class ClaudeAdapter implements ProviderAdapter {
       this.lastSignedIn = signedIn;
       return { ok: true, signedIn };
     } catch {
-      this.pingFailures++;
-      this.pingRetryAt = Date.now() + Math.min(1000 * 2 ** (this.pingFailures - 1), 60_000);
+      this.noteSharedFailure();
       return { ok: false, signedIn: null };
     }
+  }
+
+  /** The shared query failed: pace how soon it is recreated (1 s, 2 s, 4 s ... max 60 s). */
+  private noteSharedFailure(): void {
+    this.pingFailures++;
+    this.pingRetryAt = Date.now() + Math.min(1000 * 2 ** (this.pingFailures - 1), 60_000);
   }
 
   /** After Claude Code is updated: drop the shared query so the next one runs the new binary. Chats keep their own processes. */

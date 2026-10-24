@@ -36,14 +36,24 @@ test('close kills a running process', async () => {
   await assert.rejects(p.request('x', {}), /exited/);
 });
 
+/** A child that writes `reply` (one JSON line) each time it reads a `poke` notification on stdin, so the test decides when it speaks. */
+function pokeChild(reply: unknown): string {
+  return [
+    'const rl = require("node:readline").createInterface({ input: process.stdin });',
+    `const reply = ${JSON.stringify(JSON.stringify(reply))};`,
+    'rl.on("line", (l) => { try { if (JSON.parse(l).method === "poke") console.log(reply); } catch {} });',
+  ].join('\n');
+}
+
 test('a request timeout makes the process suspect and any notification clears it', async () => {
-  const script = 'setTimeout(() => console.log(JSON.stringify({ method: "hello", params: {} })), 300); setTimeout(() => {}, 5000)';
-  const p = new JsonRpcProcess(process.execPath, ['-e', script], { requestTimeoutMs: 50 });
+  const p = new JsonRpcProcess(process.execPath, ['-e', pokeChild({ method: 'hello', params: {} })], { requestTimeoutMs: 50 });
   try {
     assert.equal(p.suspect, false);
     await assert.rejects(p.request('anything', {}), /timed out/);
     assert.equal(p.suspect, true);
-    await new Promise((r) => setTimeout(r, 400));
+    const heard = new Promise<void>((r) => p.onNotification((m) => { if (m === 'hello') r(); }));
+    p.notify('poke');
+    await heard;
     assert.equal(p.suspect, false, 'a notification arrived');
   } finally { await p.close(); }
 });
@@ -60,13 +70,15 @@ test('close falls back to child.kill() when taskkill exits non-zero', async () =
 });
 
 test('a request from the server also counts as a sign of life', async () => {
-  const script = 'setTimeout(() => console.log(JSON.stringify({ id: 7, method: "approve", params: {} })), 300); setTimeout(() => {}, 5000)';
-  const p = new JsonRpcProcess(process.execPath, ['-e', script], { requestTimeoutMs: 50 });
-  p.onRequest(async () => ({}));
+  const p = new JsonRpcProcess(process.execPath, ['-e', pokeChild({ id: 7, method: 'approve', params: {} })], { requestTimeoutMs: 50 });
+  let asked!: () => void;
+  const heard = new Promise<void>((r) => { asked = r; });
+  p.onRequest(async () => { asked(); return {}; });
   try {
     await assert.rejects(p.request('anything', {}), /timed out/);
     assert.equal(p.suspect, true);
-    await new Promise((r) => setTimeout(r, 400));
+    p.notify('poke');
+    await heard;
     assert.equal(p.suspect, false);
   } finally { await p.close(); }
 });

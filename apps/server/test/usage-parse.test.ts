@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { claudeUsageToReading, codexLimitsToReading, suggest } from '../src/usage/parse.ts';
+import { suggest } from '@agent-kanban/shared';
+import { claudeUsageToReading, codexLimitsToReading } from '../src/usage/parse.ts';
 
 const now = new Date('2026-10-22T12:00:00Z');
 const W = (kind, label, leftPct, resetsAt = null) => ({ kind, label, leftPct, resetsAt });
