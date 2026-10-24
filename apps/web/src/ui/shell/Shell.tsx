@@ -6,6 +6,7 @@ import { Board } from '../board/Board.tsx';
 import { ChatPanel } from '../chat/ChatPanel.tsx';
 import { FilterBar } from '../filters/FilterBar.tsx';
 import { NewChatDialog } from '../newchat/NewChatDialog.tsx';
+import { ProjectsPage } from '../projects/ProjectsPage.tsx';
 import { hasOpenLayer } from '../primitives/layers.ts';
 import { Toasts } from '../primitives/index.ts';
 import { Sidebar } from './Sidebar.tsx';
@@ -87,7 +88,7 @@ export function Shell() {
           {banner && <p className="conn-banner" role="status" data-state={socket}>{banner}</p>}
           <main className={`view main-view${entering ? ' entering' : ''}`} key={view} id="main" tabIndex={-1} data-view={view}>
             {view === 'board' && <><FilterBar /><Board /></>}
-            {view === 'projects' && <Placeholder title="Projects" />}
+            {view === 'projects' && <ProjectsPage />}
             {view === 'connections' && <Placeholder title="Connections" />}
           </main>
         </div>

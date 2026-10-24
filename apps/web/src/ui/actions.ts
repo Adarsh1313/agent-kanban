@@ -1,3 +1,4 @@
+import type { ProviderId } from '@agent-kanban/shared';
 import type { HistoryRef } from '../state/reducer.ts';
 
 export type { HistoryRef };
@@ -6,7 +7,11 @@ export type { HistoryRef };
  * Actions that later tasks implement (New chat dialog, row menus, history import). The shell calls
  * these; until a handler is registered they do nothing.
  */
-export interface NewChatOptions { cwd?: string }
+/**
+ * `cwd`: the folder to start in; an empty string opens on "Choose another folder" with an empty path.
+ * `provider`: preselected when it is allowed for that folder.
+ */
+export interface NewChatOptions { cwd?: string; provider?: ProviderId }
 export interface RowMenuTarget { chatId: string | null; history: HistoryRef | null }
 
 let newChat: ((opts?: NewChatOptions) => void) | null = null;

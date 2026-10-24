@@ -180,9 +180,10 @@ export function NewChatDialog() {
   useEffect(() => {
     setNewChatHandler((opts?: NewChatOptions) => {
       const { projects, focus, connections } = stRef.current;
-      const target = opts?.cwd ? findProject(projects, opts.cwd) : latestProject(projects, focus);
-      // Opened before the projects loaded: pick the latest one when they arrive, unless a folder was typed.
-      autoPick.current = !opts?.cwd && !target;
+      const given = opts?.cwd !== undefined;
+      const target = given ? (opts.cwd ? findProject(projects, opts.cwd) : undefined) : latestProject(projects, focus);
+      // Opened before the projects loaded: pick the latest one when they arrive, unless a folder was given.
+      autoPick.current = !given && !target;
       if (target) {
         setWhere({ kind: 'project', id: target.id });
         setPath('');
@@ -190,7 +191,10 @@ export function NewChatDialog() {
         setWhere({ kind: 'path' });
         setPath(opts?.cwd ?? '');
       }
-      setChosen(focus && allowedProviders({ connections }, target).includes(focus) ? focus : null);
+      // A provider asked for (a project's "New Codex chat") wins over the focused one, when it may start there.
+      const ok = allowedProviders({ connections }, target);
+      const preset = [opts?.provider, focus].find((p): p is ProviderId => !!p && ok.includes(p)) ?? null;
+      setChosen(preset);
       setModel(null);
       setPathError(null);
       setEmptyHint(false);

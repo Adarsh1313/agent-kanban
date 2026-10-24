@@ -39,7 +39,7 @@ async function act(store: Store, run: () => Promise<Chat | void>): Promise<boole
 /** Only the user moves cards to Done; Done cards can only go back to Review. */
 export const dropAllowed = (from: Column, to: Column) => (from === 'done' ? to === 'review' : to === 'done');
 
-function ReasonBadge({ chat }: { chat: Chat }) {
+export function ReasonBadge({ chat }: { chat: Chat }) {
   const now = useStore((s) => s.now);
   const resets = useStore((s) => (chat.needsReason === 'limit' ? limitResetsAt(s.usage[chat.provider], s.now) : null));
   switch (chat.needsReason) {

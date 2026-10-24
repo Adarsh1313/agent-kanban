@@ -164,7 +164,7 @@ const counts = (s: AppState) => {
     (c) => c.column !== null && c.column !== 'done' && !isArchived(s, c) && !isSnoozed(c, now),
   ).length;
   const connected = Object.values(s.connections).filter((c) => c?.status === 'connected' || c?.status === 'update_available').length;
-  return { board, projects: s.projects.length, connections: connected };
+  return { board, projects: s.projects.filter((p) => p.id.trim() !== '').length, connections: connected };
 };
 
 export function Sidebar() {

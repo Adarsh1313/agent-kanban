@@ -1,0 +1,156 @@
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import type { Column, Project, ProviderId } from '@agent-kanban/shared';
+import type { AppState } from '../../state/reducer.ts';
+import { useStore } from '../../state/store.ts';
+import { openNewChat } from '../actions.ts';
+import { Icon, PROVIDER_IDS, ProviderLogo, providerName, StatusIcon, Tooltip } from '../primitives/index.ts';
+import { hashFor } from '../shell/route.ts';
+import { ProjectDetail } from './ProjectDetail.tsx';
+import { agoLabel, chatsByFolder, folderKey, plural, statsOf, workedWith, type ProjectStats } from './model.ts';
+
+type Sort = 'name' | 'activity';
+
+/** Rows rise in on the first visit only; never again on sort or search (design-system §Motion). */
+let visited = false;
+/** Tests start as a first visit. */
+export const resetProjectsVisit = () => { visited = false; };
+/** Rows past this one arrive together, so a long list never takes seconds to appear. */
+const STAGGER_ROWS = 12;
+
+const BAR: [Column, string][] = [
+  ['running', 'var(--color-running)'], ['needs_you', 'var(--color-needs)'], ['review', 'var(--color-review)'], ['done', 'var(--color-done)'],
+];
+const LEGEND: [Column, string][] = [['running', 'working'], ['needs_you', 'need you'], ['review', 'to review']];
+
+/** Folders a chat can live in (history can carry chats with no folder; those have no page). */
+const usable = (s: AppState) => s.projects.filter((p) => p.id.trim() !== '');
+
+function StatusBar({ stats }: { stats: ProjectStats }) {
+  const total = stats.total || 1;
+  const legend = LEGEND.filter(([k]) => stats.columns[k] > 0);
+  return (
+    <div className="statusbar">
+      <span className="bar" aria-hidden="true">
+        {BAR.map(([k, colour]) => stats.columns[k] > 0 && <i key={k} style={{ width: `${(stats.columns[k] / total) * 100}%`, background: colour }} />)}
+        {stats.quiet > 0 && <i style={{ width: `${(stats.quiet / total) * 100}%`, background: 'var(--color-border-strong)' }} />}
+      </span>
+      <span className="legend">
+        {legend.length > 0
+          ? legend.map(([k, label]) => <span key={k}><StatusIcon state={k} />{stats.columns[k]} {label}</span>)
+          : <span>{plural(stats.total, 'chat')}, all quiet</span>}
+      </span>
+    </div>
+  );
+}
+
+interface Row { project: Project; stats: ProjectStats; lastAt: string; providers: ProviderId[] }
+
+function ProjectRow({ row, now, stagger }: { row: Row; now: number; stagger: number | null }) {
+  const { project, stats } = row;
+  const style: CSSProperties | undefined = stagger === null ? undefined : { animationDelay: `calc(var(--stagger) * ${Math.min(stagger, STAGGER_ROWS)})` };
+  return (
+    <a className={`prow${stagger === null ? '' : ' stagger'}`} style={style} href={hashFor('projects', project.id)}>
+      <div className="name">
+        <span className="folder-glyph big-glyph proj-glyph" aria-hidden="true">{(project.name || '?')[0]!.toUpperCase()}</span>
+        <span><b>{project.name}</b><small>{project.path}</small></span>
+      </div>
+      <div className="who-knows">
+        {row.providers.map((id) => {
+          const n = stats.providers[id]?.chats ?? 0;
+          return (
+            <Tooltip key={id} label={`${providerName(id)} has ${plural(n, 'chat')} here`}>
+              <span className="p"><ProviderLogo id={id} size="sm" alt={providerName(id)} />{n}</span>
+            </Tooltip>
+          );
+        })}
+      </div>
+      <StatusBar stats={stats} />
+      <div className="when">{agoLabel(row.lastAt, now)}</div>
+      <div className="go" aria-hidden="true"><Icon name="chevron-right" /></div>
+    </a>
+  );
+}
+
+const listState = (s: AppState) => ({ projects: usable(s), index: chatsByFolder(s), now: s.now, loaded: s.loaded });
+
+function ProjectList() {
+  const { projects, index, now, loaded } = useStore(listState);
+  const [q, setQ] = useState('');
+  const [sort, setSort] = useState<Sort>('activity');
+  const [stagger] = useState(() => !visited);
+  const firstPaint = useRef(true);
+  useEffect(() => { visited = true; firstPaint.current = false; }, []);
+
+  const needle = q.trim().toLowerCase();
+  const rows: Row[] = projects
+    .filter((p) => !needle || p.name.toLowerCase().includes(needle) || p.path.toLowerCase().includes(needle))
+    .map((project) => {
+      const stats = statsOf(index[folderKey(project.id)] ?? []);
+      return { project, stats, lastAt: stats.lastAt > project.lastActivityAt ? stats.lastAt : project.lastActivityAt, providers: workedWith(project, stats, PROVIDER_IDS) };
+    })
+    .sort(sort === 'name'
+      ? (a, b) => a.project.name.localeCompare(b.project.name, undefined, { sensitivity: 'base' })
+      : (a, b) => (a.lastAt < b.lastAt ? 1 : a.lastAt > b.lastAt ? -1 : a.project.name.localeCompare(b.project.name)));
+  const animate = stagger && firstPaint.current && !needle;
+
+  const sortButton = (key: Sort, label: string) => (
+    <button type="button" aria-pressed={sort === key} aria-label={`Sort by ${label.toLowerCase()}`} onClick={() => setSort(key)}>
+      {label}{sort === key && <Icon name="chevron-down" size="sm" />}
+    </button>
+  );
+
+  return (
+    <div className="page-inner">
+      <div className="page-head">
+        <div className="t">
+          <h2 className="page-title">Projects <span className="count">{projects.length}</span></h2>
+          <p>Every folder an agent has worked in, found in your Claude Code, Codex and Antigravity history. Open one to see which providers know it and what they can read.</p>
+        </div>
+        <label className="search">
+          <Icon name="search" size="sm" />
+          <input name="project-search" type="search" autoComplete="off" spellCheck={false} placeholder="Search projects…" aria-label="Search projects"
+            value={q} onChange={(e) => setQ(e.target.value)} />
+        </label>
+        <button className="btn" type="button" onClick={() => openNewChat({ cwd: '' })}><Icon name="folder" size="sm" />Add a folder</button>
+      </div>
+      {!loaded ? null : projects.length === 0 ? (
+        <div className="page-empty">
+          <Icon name="projects" />
+          <h3>No projects yet</h3>
+          <p>Folders show up here once Claude Code, Codex or Antigravity has worked in them.</p>
+          <button className="btn" type="button" onClick={() => openNewChat({ cwd: '' })}>Add a folder</button>
+        </div>
+      ) : rows.length === 0 ? (
+        <div className="page-empty">
+          <Icon name="search" />
+          <h3>No projects match “{q.trim()}”</h3>
+          <p>Check the spelling, or add the folder yourself.</p>
+          <button className="btn" type="button" onClick={() => setQ('')}>Clear search</button>
+        </div>
+      ) : (
+        <div className="plist" aria-label="Projects">
+          <div className="plist-head">
+            {sortButton('name', 'Project')}<span>Worked on with</span><span>Chats</span>{sortButton('activity', 'Last activity')}<span />
+          </div>
+          {rows.map((row, i) => <ProjectRow key={row.project.id} row={row} now={now} stagger={animate ? i : null} />)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** `#/projects` lists every project; `#/projects/<path>` shows one. Moving between them slides like a page change (back goes the other way). */
+export function ProjectsPage() {
+  const projectId = useStore((s) => s.ui.projectId);
+  const prev = useRef(projectId);
+  const changed = prev.current !== projectId;
+  const back = changed && projectId === null;
+  useEffect(() => { prev.current = projectId; });
+  const pageRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { pageRef.current?.scrollTo?.(0, 0); }, [projectId]);
+  return (
+    <div ref={pageRef} key={projectId ?? ''} className={`view page projects-page${changed ? ` entering${back ? ' from-left' : ''}` : ''}`}>
+      {projectId === null ? <ProjectList /> : <ProjectDetail projectId={projectId} />}
+    </div>
+  );
+}

@@ -117,6 +117,26 @@ describe('New chat dialog', () => {
     expect(chip(/^Provider: Claude Code$/)).toBeTruthy();
   });
 
+  it('a provider preset (a project page’s "New Codex chat") is preselected when allowed, else ignored', () => {
+    mount(seeded({ suggested: 'claude' }));
+    act(() => openNewChat({ cwd: '/work/beta', provider: 'codex' }));
+    expect(chip(/^Project: beta$/)).toBeTruthy();
+    expect(chip(/^Provider: Codex$/)).toBeTruthy();
+    fireEvent.click(within(dialog()).getByRole('button', { name: 'Cancel' }));
+    // Codex hasn't worked in alpha, and Antigravity isn't connected: the usual pick stands.
+    act(() => openNewChat({ cwd: '/work/alpha', provider: 'codex' }));
+    expect(chip(/^Provider: Claude Code/)).toBeTruthy();
+    act(() => openNewChat({ cwd: '/work/beta', provider: 'antigravity' }));
+    expect(chip(/^Provider: Claude Code/)).toBeTruthy();
+  });
+
+  it('an empty folder (Add a folder) opens on the folder path field', () => {
+    mount(seeded());
+    act(() => openNewChat({ cwd: '' }));
+    expect(chip(/^Project: Another folder$/)).toBeTruthy();
+    expect((screen.getByRole('textbox', { name: 'Folder path' }) as HTMLInputElement).value).toBe('');
+  });
+
   it('switching project keeps an allowed provider and drops one that is not', () => {
     mount(seeded());
     act(() => openNewChat({ cwd: '/work/beta' }));
