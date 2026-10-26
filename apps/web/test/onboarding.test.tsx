@@ -6,6 +6,7 @@ import { applyEvent, applySnapshot, initialState } from '../src/state/reducer.ts
 import { createStore, StoreProvider, type Store } from '../src/state/store.ts';
 import { setNewChatHandler } from '../src/ui/actions.ts';
 import { notificationsLine, Onboarding, replayOnboarding } from '../src/ui/onboarding/Onboarding.tsx';
+import { applyConnectEvent } from '../src/ui/connections/ConnectionsPage.tsx';
 import { setPrefs } from '../src/ui/notify/notifier.ts';
 import { dismissToast, toast, Toasts } from '../src/ui/primitives/toast.tsx';
 import { hasOpenLayer } from '../src/ui/primitives/layers.ts';
@@ -136,17 +137,22 @@ describe('connect step', () => {
     expect(screen.getByText('3 connected. You can add more later in Connections.')).toBeTruthy();
   });
 
-  it('Sign in runs the shared connect action; Antigravity signing in says it can take a couple of minutes', async () => {
-    mocked.connect.mockResolvedValue(cs('antigravity', { phase: 'signing_in', lastOp: 'signin' }));
+  it('Sign in runs the shared connect action; Antigravity says Starting (can take a couple of minutes) until its link arrives', async () => {
+    mocked.connect.mockResolvedValue(cs('antigravity', { phase: 'signing_in', step: 'Starting Antigravity…', lastOp: 'signin' }));
     const store = seeded([conn('claude'), signedOut('codex'), signedOut('antigravity')]);
     mount(store);
     fireEvent.click(primary('Get started'));
     fireEvent.click(within(row('antigravity')).getByRole('button', { name: /Sign in/ }));
-    await waitFor(() => expect(within(row('antigravity')).getByText('Finish signing in in your browser')).toBeTruthy());
+    await waitFor(() => expect(within(row('antigravity')).getByText('Starting Antigravity…')).toBeTruthy());
     expect(mocked.connect).toHaveBeenCalledWith('antigravity', 'signin');
     expect(within(row('antigravity')).getByText('This can take a couple of minutes the first time.')).toBeTruthy();
     expect(within(row('antigravity')).getByRole('button', { name: /Cancel/ })).toBeTruthy();
-    expect(screen.getByText('Opened Google sign-in in your browser')).toBeTruthy();
+    expect(screen.queryByText('Opened Google sign-in in your browser')).toBeNull();
+    // The agent started and printed its link (it opens the browser itself): now the sign-in step and the toast.
+    act(() => applyConnectEvent(store, cs('antigravity', { phase: 'signing_in', step: 'Finish signing in in your browser', signInUrl: 'https://accounts.google.com/o/oauth2/v2/auth?x=1', lastOp: 'signin', updatedAt: new Date(Date.parse(store.getState().connect.antigravity!.updatedAt) + 1000).toISOString() })));
+    expect(within(row('antigravity')).getByText('Finish signing in in your browser')).toBeTruthy();
+    expect(within(row('antigravity')).queryByText('This can take a couple of minutes the first time.')).toBeNull();
+    expect(await screen.findByText('Opened Google sign-in in your browser')).toBeTruthy();
     // Codex signing in does not get the Antigravity note.
     act(() => store.setState((s) => applyEvent(s, { type: 'connect.updated', state: cs('codex', { phase: 'signing_in' }) })));
     expect(within(row('codex')).queryByText('This can take a couple of minutes the first time.')).toBeNull();

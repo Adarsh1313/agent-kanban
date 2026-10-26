@@ -477,3 +477,44 @@ describe('connections fix round 1', () => {
     await waitFor(() => expect(show.getAttribute('aria-checked')).toBe('true'));
   });
 });
+
+describe('final review fixes', () => {
+  const later = (sec: number) => new Date(NOW + sec * 1000).toISOString();
+
+  it('right after a successful operation the card says Checking… until a newer health check arrives (I2)', () => {
+    const store = seeded([conn('codex', { status: 'signed_out', signedIn: false, checkedAt: ago(1) })], [], [], [cs('codex', { lastOp: 'signin', outcome: 'done', updatedAt: ago(0) })]);
+    mount(store);
+    expect(card('codex').querySelector('.conn-state')!.textContent).toBe('Checking…');
+    act(() => store.setState((s) => applyEvent(s, { type: 'connection.updated', health: conn('codex', { checkedAt: later(1) }) })));
+    expect(card('codex').querySelector('.conn-state')!.textContent).toBe('Connected');
+  });
+
+  it('an older failure or a cancel is not hidden behind Checking…', () => {
+    mount(seeded([conn('codex', { status: 'signed_out', signedIn: false, checkedAt: ago(1) })], [], [], [cs('codex', { lastOp: 'signin', outcome: 'cancelled', updatedAt: ago(0) })]));
+    expect(card('codex').querySelector('.conn-state')!.textContent).toBe('Signed out');
+  });
+
+  it('Antigravity sign-in during a cold start shows the server step and the slow note until its link arrives (I3)', () => {
+    const store = seeded([conn('antigravity', { status: 'signed_out', signedIn: false })], [], [], [cs('antigravity', { phase: 'signing_in', step: 'Starting Antigravity…' })]);
+    mount(store);
+    expect(card('antigravity').textContent).toContain('Starting Antigravity…');
+    expect(card('antigravity').textContent).toContain('This can take a couple of minutes the first time.');
+    expect(card('antigravity').textContent).not.toContain('We opened');
+    live(store, cs('antigravity', { phase: 'signing_in', step: 'Finish signing in in your browser', signInUrl: 'https://accounts.google.com/o/oauth2/v2/auth?x=1', updatedAt: later(1) }));
+    expect(card('antigravity').textContent).toContain('Finish signing in in your browser');
+    expect(card('antigravity').textContent).toContain('We opened Google sign-in.');
+    expect(card('antigravity').textContent).not.toContain('couple of minutes');
+  });
+
+  it('Antigravity: "Opened Google sign-in in your browser" only once its link arrives (I3)', async () => {
+    mocked.connect.mockResolvedValue(cs('antigravity', { phase: 'signing_in', step: 'Starting Antigravity…' }));
+    const store = seeded([conn('antigravity', { status: 'signed_out', signedIn: false })]);
+    mount(store);
+    fireEvent.click(btn('antigravity', 'Sign in to Antigravity'));
+    await waitFor(() => expect(mocked.connect).toHaveBeenCalledWith('antigravity', 'signin'));
+    await waitFor(() => expect(card('antigravity').dataset.state).toBe('signin'));
+    expect(screen.queryByText('Opened Google sign-in in your browser')).toBeNull();
+    act(() => applyConnectEvent(store, cs('antigravity', { phase: 'signing_in', step: 'Finish signing in in your browser', signInUrl: 'https://accounts.google.com/o/oauth2/v2/auth?x=1', updatedAt: later(1) })));
+    expect(await screen.findByText('Opened Google sign-in in your browser')).toBeTruthy();
+  });
+});

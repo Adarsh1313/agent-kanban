@@ -18,6 +18,14 @@ const NOTE: Partial<Record<ProviderId, string>> = {
   antigravity: 'Usage limits show only when Antigravity reports them itself.',
 };
 const ANTIGRAVITY_SERVER = 'Uses Google’s official Antigravity server.';
+/** Antigravity's agent takes minutes to start the first time (shown while it installs or starts for a sign-in). */
+export const ANTIGRAVITY_SLOW = 'This can take a couple of minutes the first time.';
+
+/**
+ * Antigravity's sign-in before the agent printed its link (it is still starting): the server's step is shown,
+ * not "Finish signing in", and nothing says the browser was opened yet (the agent opens it with the link).
+ */
+export const antigravityStarting = (id: ProviderId, c: ConnectState | undefined) => id === 'antigravity' && c?.phase === 'signing_in' && !c.signInUrl;
 
 /**
  * What a card shows. The server's operation (ConnectState) wins while one runs; otherwise the health check decides.
@@ -58,7 +66,10 @@ export function cardView(h: ConnectionHealth | undefined, c: ConnectState | unde
     case 'signing_out': return 'signingout';
     // A failed update or sign-out leaves a working connection: the card stays connected and shows the message.
     case 'error': return isConnected(h) ? 'connected' : 'error';
-    default: return healthView(h, loaded);
+    default:
+      // Just finished (done): the health on hand predates it, so wait for the check the server runs next.
+      if (c?.phase === 'idle' && c.outcome === 'done' && h && Date.parse(c.updatedAt) > Date.parse(h.checkedAt)) return 'checking';
+      return healthView(h, loaded);
   }
 }
 
@@ -88,10 +99,18 @@ export function connectDoneToast(prev: ConnectState | undefined, next: ConnectSt
   }
 }
 
-/** Applies a live connect.updated event, toasting an operation that just finished. */
+/** Antigravity opens the browser itself when its link arrives: that is when "Opened Google sign-in" is true. */
+export function signInLinkToast(prev: ConnectState | undefined, next: ConnectState): string | null {
+  if (next.provider !== 'antigravity' || next.phase !== 'signing_in' || !next.signInUrl || prev?.signInUrl) return null;
+  if (prev && Date.parse(next.updatedAt) < Date.parse(prev.updatedAt)) return null;
+  return `Opened ${OPENED[next.provider]} in your browser`;
+}
+
+/** Applies a live connect.updated event, toasting an operation that just finished (or Antigravity's opened sign-in). */
 export function applyConnectEvent(store: Store, state: ConnectState): void {
   const s = store.getState();
-  const text = connectDoneToast(s.connect[state.provider], state, s.connections[state.provider]);
+  const prev = s.connect[state.provider];
+  const text = connectDoneToast(prev, state, s.connections[state.provider]) ?? signInLinkToast(prev, state);
   store.setState((cur) => applyEvent(cur, { type: 'connect.updated', state }));
   if (text) toast(text);
 }
@@ -156,7 +175,8 @@ export function useConnectRun(id: ProviderId) {
     try {
       const ok = await runConnect(store, id, action);
       if (ok && action === 'open') toast('Opened the sign-in page again');
-      if (ok && action === 'signin') toast(`Opened ${OPENED[id]} in your browser`);
+      // Antigravity's agent opens the browser once it has started: toasted when its link arrives (applyConnectEvent).
+      if (ok && action === 'signin' && id !== 'antigravity') toast(`Opened ${OPENED[id]} in your browser`);
     } finally {
       setPending(null);
     }
@@ -369,7 +389,12 @@ function ConnectionCard({ id }: { id: ProviderId }) {
       break;
     }
     case 'signin':
-      body = (
+      body = antigravityStarting(id, connect) ? (
+        <>
+          <span className="step-text"><StatusIcon state="running" />{connect?.step ?? 'Starting Antigravity…'}</span>
+          <span>{ANTIGRAVITY_SLOW}</span>
+        </>
+      ) : (
         <>
           <span className="step-text"><StatusIcon state="running" />Finish signing in in your browser</span>
           <span>We opened {OPENED[id]}. This page updates on its own when you’re done.</span>

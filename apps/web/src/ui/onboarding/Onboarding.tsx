@@ -6,7 +6,7 @@ import { applySettings, type AppState } from '../../state/reducer.ts';
 import { providerCounts } from '../../state/selectors.ts';
 import { useStore, useStoreInstance, type Store } from '../../state/store.ts';
 import { openNewChat } from '../actions.ts';
-import { cardView, checkConnection, isConnected, retryAction, useConnectRun, useProviderToggle } from '../connections/ConnectionsPage.tsx';
+import { ANTIGRAVITY_SLOW, antigravityStarting, cardView, checkConnection, isConnected, retryAction, useConnectRun, useProviderToggle } from '../connections/ConnectionsPage.tsx';
 import { BLOCKED, UNSUPPORTED } from '../notify/NotificationsPopover.tsx';
 import { chime, desktopSupport, enableDesktop, getPrefs, primeAudio, setPrefs, subscribePrefs, type DesktopSupport } from '../notify/notifier.ts';
 import { freeze, unfreeze } from '../primitives/Dialog.tsx';
@@ -21,7 +21,6 @@ const STEP_COUNT = 4;
 const TABBABLE = 'input, textarea, select, button:not([disabled]), [href], [tabindex]:not([tabindex="-1"])'; // Welcome isn't counted
 /** The most recent projects shown as chips; the rest are counted (a real computer can have dozens). */
 const MAX_CHIPS = 12;
-const ANTIGRAVITY_SLOW = 'This can take a couple of minutes the first time.';
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -183,7 +182,7 @@ function AgentRow({ id }: { id: ProviderId }) {
       break;
     }
     case 'signin':
-      sub = <><StatusIcon state="running" />Finish signing in in your browser</>;
+      sub = <><StatusIcon state="running" />{antigravityStarting(id, connect) ? connect?.step ?? 'Starting Antigravity…' : 'Finish signing in in your browser'}</>;
       act = (
         <>
           {connect?.signInUrl && <button className="link-btn" type="button" {...busyProps('open')}><Icon name="external" size="sm" />Open the browser again{forName}</button>}
@@ -203,7 +202,7 @@ function AgentRow({ id }: { id: ProviderId }) {
       act = <button className="btn" type="button" {...busyProps(retryAction(connect, health))}>Try again{forName}</button>;
       break;
   }
-  const slow = id === 'antigravity' && (view === 'installing' || view === 'signin');
+  const slow = id === 'antigravity' && (view === 'installing' || (view === 'signin' && antigravityStarting(id, connect)));
 
   return (
     <div className="agent" data-agent={id} data-view={view} ref={rowRef} tabIndex={-1} onFocus={() => { focusInside.current = true; }}>
