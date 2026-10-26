@@ -117,3 +117,22 @@ test('a throwing notification listener does not break framing or other listeners
     assert.deepEqual(got, ['hello', 'hello']);
   } finally { await p.close(); }
 });
+
+test('group: true (POSIX) — close kills the children of the child too', { skip: process.platform === 'win32' }, async () => {
+  // The child starts a grandchild (no pipes shared), reports its pid, then waits.
+  const script = [
+    'const { spawn } = require("node:child_process");',
+    'const g = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });',
+    'console.log(JSON.stringify({ method: "grandchild", params: g.pid }));',
+    'setInterval(() => {}, 1000);',
+  ].join('\n');
+  const p = new JsonRpcProcess(process.execPath, ['-e', script], { group: true });
+  const gpid = await new Promise<number>((r) => p.onNotification((m, params) => { if (m === 'grandchild') r(params); }));
+  const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  assert.equal(alive(gpid), true);
+  await p.close();
+  for (let i = 0; i < 100 && alive(gpid); i++) await new Promise((r) => setTimeout(r, 20));
+  const left = alive(gpid);
+  if (left) { try { process.kill(gpid, 'SIGKILL'); } catch { /* gone */ } }
+  assert.equal(left, false, 'the grandchild was killed with the group');
+});

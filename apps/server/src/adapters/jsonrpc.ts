@@ -54,13 +54,21 @@ export class JsonRpcProcess {
   private textLineFns: Array<(line: string) => void> = [];
   private stderrLineFns: Array<(line: string) => void> = [];
   private warnedLongLine = false;
+  /** POSIX: the child leads its own process group, and close() kills the whole group (its children too). */
+  private group: boolean;
 
-  constructor(command: string, args: string[], opts: { cwd?: string; env?: NodeJS.ProcessEnv; requestTimeoutMs?: number; taskkill?: (pid: number) => ChildProcess; jsonrpc?: '2.0' } = {}) {
+  /**
+   * `group: true` (POSIX only; Windows already kills the tree with taskkill /T): the child is started detached as the
+   * leader of its own process group, and close() signals the group, so programs it started (e.g. a PyInstaller
+   * bootloader's real process) don't outlive it.
+   */
+  constructor(command: string, args: string[], opts: { cwd?: string; env?: NodeJS.ProcessEnv; requestTimeoutMs?: number; taskkill?: (pid: number) => ChildProcess; jsonrpc?: '2.0'; group?: boolean } = {}) {
     this.taskkill = opts.taskkill;
+    this.group = opts.group === true && process.platform !== 'win32' && !opts.taskkill;
     this.jsonrpc = opts.jsonrpc;
     this.defaultTimeoutMs = opts.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
     const target = resolveSpawnTarget(command);
-    this.child = spawn(target.command, [...target.args, ...args], { cwd: opts.cwd, env: opts.env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+    this.child = spawn(target.command, [...target.args, ...args], { cwd: opts.cwd, env: opts.env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, detached: this.group });
     createInterface({ input: this.child.stdout! }).on('line', (line) => this.onLine(line));
     createInterface({ input: this.child.stderr! }).on('line', (line) => {
       if (!line.trim()) return;
@@ -125,14 +133,26 @@ export class JsonRpcProcess {
     });
     this.killTree();
     if (process.platform !== 'win32') {
-      escalate = setTimeout(() => { try { this.child.kill('SIGKILL'); } catch { /* already gone */ } }, KILL_ESCALATE_MS);
+      escalate = setTimeout(() => this.signal('SIGKILL'), KILL_ESCALATE_MS);
     }
     await done;
     clearTimeout(cap);
     clearTimeout(escalate);
   }
 
-  private killTree(): void { killTree(this.child, this.taskkill); }
+  private killTree(): void {
+    if (this.group) this.signal('SIGTERM');
+    else killTree(this.child, this.taskkill);
+  }
+
+  /** Sends `sig` to the child's process group when it leads one, else to the child. Never throws. */
+  private signal(sig: NodeJS.Signals): void {
+    const pid = this.child.pid;
+    if (this.group && pid !== undefined) {
+      try { process.kill(-pid, sig); return; } catch { /* the group is gone; try the child itself */ }
+    }
+    try { this.child.kill(sig); } catch { /* already gone */ }
+  }
 
   private write(msg: object): void {
     const framed = this.jsonrpc ? { jsonrpc: this.jsonrpc, ...msg } : msg;

@@ -705,7 +705,9 @@ export function spawnAntigravity(exePath: string, tempDir: string): JsonRpcProce
   activeTemp.add(name);
   const env: NodeJS.ProcessEnv = { ...process.env, PYTHONUNBUFFERED: '1' };
   if (process.platform === 'win32') { env.TEMP = mine; env.TMP = mine; } else env.TMPDIR = mine;
-  const proc = new JsonRpcProcess(exePath, [], { jsonrpc: '2.0', env, requestTimeoutMs: REQUEST_TIMEOUT_MS });
+  // Its own process group on Linux/macOS: the PyInstaller bootloader starts the real agent as a child, which a
+  // plain SIGTERM to the bootloader would leave running.
+  const proc = new JsonRpcProcess(exePath, [], { jsonrpc: '2.0', env, requestTimeoutMs: REQUEST_TIMEOUT_MS, group: true });
   proc.onExit(() => {
     // Windows releases the unpacked files a moment after the exit.
     void rm(mine, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }).catch(() => {}).finally(() => activeTemp.delete(name));
