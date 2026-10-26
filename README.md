@@ -12,12 +12,12 @@ connection is healthy and up to date.
 | Server (`apps/server`) | Built: Claude Code + Codex chats, board state, usage limits, chat history, connection health, HTTP + WebSocket API |
 | Design (`design/`) | Clickable prototype and design system |
 | Web app (`apps/web`) | Built: board, chat panel, New chat, usage, filters, notifications, Projects and Connections pages |
-| Antigravity chats, install/sign-in flows | Plan 3 |
+| Connect and Antigravity | Built: Antigravity chats (Google's official ACP server), install / sign in / sign out / update for all three providers from the app, first-run onboarding |
 | Desktop app | Plan 4 |
 
 ## Run it
 
-Requires Node 22.18+ and Claude Code and/or Codex installed and signed in.
+Requires Node 22.18+. Claude Code, Codex and Antigravity can be installed and signed in from the app (Connections page or onboarding).
 
 ```bash
 npm install
