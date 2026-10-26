@@ -103,8 +103,16 @@ export class ChatService {
     });
     this.addMessage(chat.id, 'user', input.prompt);
     this.broadcast({ type: 'chat.updated', chat });
-    await this.begin(chat, input.prompt);
-    return this.store.getChat(chat.id)!;
+    // Answer as soon as the card exists (running, "Getting started…"): a cold Antigravity takes a minute or two to
+    // open a session. The session arrives by chat.updated; a failure moves the card to Needs you with the error.
+    // begin() marks the chat pending synchronously, so a message or answer sent meanwhile waits for it.
+    void this.begin(chat, input.prompt);
+    return chat;
+  }
+
+  /** Resolves once the chat's provider session has started or failed to (at once when nothing is starting). */
+  async started(chatId: string): Promise<void> {
+    while (this.pending.has(chatId)) await this.pending.get(chatId);
   }
 
   async send(chatId: string, text: string): Promise<void> {
@@ -324,13 +332,12 @@ export class ChatService {
     try {
       const adapter = await this.adapters.ensure(chat.provider);
       if (!adapter) { this.fail(chat.id, chat.provider, null); return; }
-      try {
-        const { sessionRef } = await adapter.startChat({ cwd: chat.cwd, prompt, ...(chat.model ? { model: chat.model } : {}) });
-        this.live.add(chat.id);
-        this.claim(chat.id, chat.provider, sessionRef);
-      } catch (err) {
-        this.fail(chat.id, chat.provider, err);
-      }
+      const { sessionRef } = await adapter.startChat({ cwd: chat.cwd, prompt, ...(chat.model ? { model: chat.model } : {}) });
+      this.live.add(chat.id);
+      this.claim(chat.id, chat.provider, sessionRef);
+    } catch (err) {
+      // Nobody awaits a start: any failure (also from ensure) belongs on the card, never an unhandled rejection.
+      try { this.fail(chat.id, chat.provider, err); } catch { /* the chat is gone */ }
     } finally {
       this.pending.delete(chat.id);
       release();
