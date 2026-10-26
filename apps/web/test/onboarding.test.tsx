@@ -45,7 +45,7 @@ function seeded(connections: ConnectionHealth[], opts: { settings?: Settings | n
   });
   return createStore({ ...s, now: NOW });
 }
-const mount = (store: Store) => render(<StoreProvider store={store}><Onboarding /><Toasts /></StoreProvider>);
+const mount = (store: Store) => render(<StoreProvider store={store}><main id="main" tabIndex={-1} /><Onboarding /><Toasts /></StoreProvider>);
 const dialog = () => screen.queryByRole('dialog', { name: 'Set up Agent Kanban' });
 const primary = (name: string | RegExp) => screen.getByRole('button', { name });
 const row = (id: ProviderId) => document.querySelector<HTMLElement>(`[data-agent="${id}"]`)!;
@@ -162,6 +162,14 @@ describe('connect step', () => {
     expect(within(row('antigravity')).getByRole('button', { name: /Cancel/ })).toBeTruthy();
   });
 
+  it('with nothing connected, the step focuses its heading (Continue is disabled)', () => {
+    mount(seeded([signedOut('claude'), missing('codex'), missing('antigravity')]));
+    fireEvent.click(primary('Get started'));
+    expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Connect the agents you use' }));
+    expect(screen.getByRole('group', { name: 'Connect the agents you use' }).getAttribute('aria-describedby')).toBeTruthy();
+    expect(screen.getByText('Step 1 of 4')).toBeTruthy();
+  });
+
   it('Enter on the step advances with the primary button; Back returns', () => {
     mount(seeded([conn('claude')]));
     fireEvent.keyDown(dialog()!, { key: 'Enter' });
@@ -195,6 +203,36 @@ describe('chats and notifications steps', () => {
     expect(mocked.patchSettings).not.toHaveBeenCalledWith(expect.objectContaining({ onboarded: true }));
   });
 
+  it('off then on while the first save is in flight: the last click wins (final PATCH true, switch on)', async () => {
+    const pending: ((v: Settings) => void)[] = [];
+    mocked.patchSettings.mockImplementation(() => new Promise<Settings>((r) => pending.push(r)));
+    mocked.history.mockImplementation(() => new Promise(() => {})); // the refetch never answers
+    mocked.projects.mockImplementation(() => new Promise(() => {}));
+    mount(seeded([conn('claude'), conn('codex')], { history: hist('codex', 2) }));
+    fireEvent.click(primary('Get started'));
+    fireEvent.click(primary('Continue'));
+    const sw = () => screen.getByRole('switch', { name: 'Show Codex chats in the sidebar' });
+    fireEvent.click(sw()); // off
+    expect(sw().getAttribute('aria-checked')).toBe('false');
+    fireEvent.click(sw()); // on, while "off" is saving
+    expect(sw().getAttribute('aria-checked')).toBe('true');
+    expect(mocked.patchSettings).toHaveBeenCalledTimes(1);
+    await act(async () => { pending[0]!(settings({ showChats: { ...ON, codex: false } })); });
+    await waitFor(() => expect(mocked.patchSettings).toHaveBeenCalledTimes(2));
+    expect(mocked.patchSettings).toHaveBeenLastCalledWith({ showChats: { codex: true } });
+    await act(async () => { pending[1]!(settings()); });
+    await waitFor(() => expect(sw().getAttribute('aria-checked')).toBe('true'));
+    expect(mocked.patchSettings).toHaveBeenCalledTimes(2);
+  });
+
+  it('a provider whose chats are hidden shows "—", not a partial count', () => {
+    mount(seeded([conn('claude'), conn('codex')], { settings: settings({ showChats: { ...ON, codex: false } }), history: hist('claude', 3) }));
+    fireEvent.click(primary('Get started'));
+    fireEvent.click(primary('Continue'));
+    expect(document.querySelector('[data-found="codex"] .n')?.textContent).toBe('—');
+    expect(screen.getByRole('switch', { name: 'Show Codex chats in the sidebar' }).getAttribute('aria-checked')).toBe('false');
+  });
+
   it('the notifications step uses the notifier prefs', () => {
     mount(seeded([conn('claude')]));
     fireEvent.click(primary('Get started'));
@@ -220,7 +258,8 @@ describe('finish', () => {
 
   it('summarises, writes onboarded: true, closes, and opens New chat', async () => {
     mocked.patchSettings.mockResolvedValue(settings({ onboarded: true }));
-    const newChat = vi.fn();
+    let focusAtOpen: Element | null = null;
+    const newChat = vi.fn(() => { focusAtOpen = document.activeElement; });
     setNewChatHandler(newChat);
     const store = seeded([conn('claude'), signedOut('codex'), missing('antigravity')], { history: hist('claude', 4), projects: [project('/w/alpha', ['claude'])] });
     const { container } = mount(store);
@@ -233,8 +272,21 @@ describe('finish', () => {
     await waitFor(() => expect(newChat).toHaveBeenCalled());
     expect(store.getState().settings?.onboarded).toBe(true);
     expect(container.inert).toBe(false);
+    // Focus was put on the board before New chat opened, so closing New chat returns it there.
+    expect(focusAtOpen).toBe(document.getElementById('main'));
     await waitFor(() => expect(dialog()).toBeNull());
     expect(hasOpenLayer()).toBe(false);
+  });
+
+  it('Go to the board finishes and leaves focus on the board', async () => {
+    mocked.patchSettings.mockResolvedValue(settings({ onboarded: true }));
+    location.hash = '#/connections';
+    mount(seeded([conn('claude')]));
+    toReady();
+    fireEvent.click(screen.getByRole('button', { name: 'Go to the board' }));
+    await waitFor(() => expect(document.activeElement).toBe(document.getElementById('main')));
+    expect(location.hash).toBe('#/board');
+    await waitFor(() => expect(dialog()).toBeNull());
   });
 
   it('a failed write toasts the server text and stays on the last step', async () => {

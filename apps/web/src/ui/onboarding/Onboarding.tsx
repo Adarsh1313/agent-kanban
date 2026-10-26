@@ -17,7 +17,8 @@ import { navigate } from '../shell/route.ts';
 
 /* First-run onboarding (design/onboarding.js): Welcome → Connect → Bring in your chats → Notifications → Ready. */
 
-const STEP_COUNT = 4; // Welcome isn't counted
+const STEP_COUNT = 4;
+const TABBABLE = 'input, textarea, select, button:not([disabled]), [href], [tabindex]:not([tabindex="-1"])'; // Welcome isn't counted
 /** The most recent projects shown as chips; the rest are counted (a real computer can have dozens). */
 const MAX_CHIPS = 12;
 const ANTIGRAVITY_SLOW = 'This can take a couple of minutes the first time.';
@@ -219,25 +220,33 @@ function AgentRow({ id }: { id: ProviderId }) {
 
 /* ───────── Step 2: chats found ───────── */
 
-/** Counts up quickly to `to` with an ease-out; at once with reduced motion. */
-function CountUp({ to }: { to: number }) {
-  const [n, setN] = useState(() => (reducedMotion() || typeof requestAnimationFrame !== 'function' ? to : 0));
+/**
+ * Counts up quickly to `to` with an ease-out, from 0 at first and from the number shown when `to` changes later
+ * (a refetch); at once with reduced motion. `to` null shows "—" (not known).
+ */
+function CountUp({ to }: { to: number | null }) {
+  const [n, setN] = useState(() => (to === null || reducedMotion() || typeof requestAnimationFrame !== 'function' ? to ?? 0 : 0));
+  const shown = useRef(n);
+  shown.current = n;
   useEffect(() => {
+    if (to === null) return;
     if (reducedMotion() || typeof requestAnimationFrame !== 'function') { setN(to); return; }
+    const from = shown.current;
+    if (from === to) return;
     const dur = 700;
     let t0: number | null = null;
     let raf = 0;
     const tick = (t: number) => {
       t0 ??= t; // the frame clock, not performance.now(): some environments time frames differently
       const k = Math.max(0, Math.min(1, (t - t0) / dur));
-      setN(Math.round(to * (1 - Math.pow(1 - k, 3))));
+      setN(Math.round(from + (to - from) * (1 - Math.pow(1 - k, 3))));
       if (k < 1) raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
     const done = setTimeout(() => setN(to), dur + 100); // in case the window is hidden
     return () => { cancelAnimationFrame(raf); clearTimeout(done); };
   }, [to]);
-  return <span className="n">{n}</span>;
+  return <span className="n">{to === null ? '—' : n}</span>;
 }
 
 /* ───────── Notifications ───────── */
@@ -273,10 +282,12 @@ export function Onboarding() {
   const thenRef = useRef<(() => void) | null>(null);
   const headingId = useId();
   const deskNote = useId();
-  const toggle = { claude: useProviderToggle('claude'), codex: useProviderToggle('codex'), antigravity: useProviderToggle('antigravity') };
+  const toggles = { claude: useProviderToggle('claude'), codex: useProviderToggle('codex'), antigravity: useProviderToggle('antigravity') };
+  const stepId = useId();
 
   // Once open, it stays open until finished (a resync that still says onboarded: true does not cut a replay short).
-  useEffect(() => {
+  // A layout effect: the re-render with the layer happens before the first paint, so the board never flashes.
+  useLayoutEffect(() => {
     if (want && phase === 'hidden') {
       setStep(0);
       setBack(false);
@@ -318,8 +329,12 @@ export function Onboarding() {
   // Chat counts per provider. A switched-off provider keeps showing the number it had (the server then hides its history).
   const seen = useRef<Partial<Record<ProviderId, number>>>({});
   const count = (id: ProviderId) => {
-    if (showChats?.[id] !== false) seen.current[id] = live[id];
-    return showChats?.[id] === false ? seen.current[id] ?? live[id] : live[id];
+    if (showChats?.[id] !== false) {
+      seen.current[id] = live[id];
+      return live[id];
+    }
+    // Hidden: the server leaves its history out, so only a count seen while it was shown is right; else "—".
+    return seen.current[id] ?? null;
   };
 
   if (phase === 'hidden') return null;
@@ -341,6 +356,17 @@ export function Onboarding() {
     }
   };
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === 'Tab') {
+      // Focus cycles within the layer (as Dialog does).
+      const items = [...(ref.current?.querySelectorAll<HTMLElement>(TABBABLE) ?? [])];
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (!first || !last) return;
+      const active = document.activeElement;
+      if (e.shiftKey && (active === first || !ref.current?.contains(active))) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && (active === last || !ref.current?.contains(active))) { e.preventDefault(); first.focus(); }
+      return;
+    }
     if (e.key !== 'Enter' || e.target instanceof HTMLButtonElement) return;
     ref.current?.querySelector<HTMLButtonElement>('.onb-stage [data-primary]:not(:disabled)')?.click();
   };
@@ -394,7 +420,7 @@ export function Onboarding() {
                 <span className="h">chats</span>
                 <div className="toggle-row onb-show">
                   <span>Show in sidebar</span>
-                  <Switch checked={showChats?.[id] !== false} label={`Show ${providerName(id)} chats in the sidebar`} onChange={(on) => void toggle[id]('showChats', on)} />
+                  <Switch checked={toggles[id].intent.showChats ?? showChats?.[id] !== false} label={`Show ${providerName(id)} chats in the sidebar`} onChange={(on) => void toggles[id].toggle('showChats', on)} />
                 </div>
               </div>
             ))}
@@ -467,7 +493,11 @@ export function Onboarding() {
             })}>Go to the board</button>
             <span className="grow" />
             <button className="btn primary" type="button" data-primary aria-disabled={finishing || undefined} aria-busy={finishing || undefined}
-              onClick={() => void finish(() => openNewChat())}>
+              onClick={() => void finish(() => {
+                // Focus waits on the board, so closing New chat returns it there rather than to the page body.
+                document.getElementById('main')?.focus({ preventScroll: true });
+                openNewChat();
+              })}>
               <Icon name="plus" size="sm" />Start your first chat
             </button>
           </div>
@@ -484,12 +514,12 @@ export function Onboarding() {
           Agent Kanban
         </div>
         <div className="onb-steps" aria-hidden={step === 0}>
-          <small>{step ? `Step ${step} of ${STEP_COUNT}` : ''}</small>
+          <small id={stepId}>{step ? `Step ${step} of ${STEP_COUNT}` : ''}</small>
           <div className="onb-bar">{Array.from({ length: STEP_COUNT }, (_, n) => <i key={n} style={{ '--f': n < step ? 1 : 0 } as CSSProperties} />)}</div>
         </div>
       </div>
       <div className="onb-stage">
-        <div className={back ? 'onb-pane back' : 'onb-pane'} key={step} aria-labelledby={headingId} role="group">{pane}</div>
+        <div className={back ? 'onb-pane back' : 'onb-pane'} key={step} aria-labelledby={headingId} aria-describedby={step ? stepId : undefined} role="group">{pane}</div>
       </div>
     </div>,
     document.body,

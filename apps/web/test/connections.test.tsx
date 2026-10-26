@@ -456,19 +456,24 @@ describe('connections fix round 1', () => {
     expect(screen.getByRole('dialog', { name: 'Sign out of Claude Code?' })).toBeTruthy();
   });
 
-  it('each switch has its own pending request: the other switch still works meanwhile', async () => {
+  it('each switch has its own pending request: the other switch still works meanwhile, and the last click wins', async () => {
     let answer!: (v: Settings) => void;
     mocked.patchSettings.mockReturnValueOnce(new Promise((r) => { answer = r; }));
+    mocked.patchSettings.mockResolvedValueOnce({ ...SETTINGS, suggest: { ...ON, codex: false } });
     mocked.patchSettings.mockResolvedValueOnce({ ...SETTINGS, suggest: { ...ON, codex: false } });
     mount(seeded(ALL()));
     const show = within(card('codex')).getByRole('switch', { name: 'Show Codex chats in Recent chats' });
     const sug = within(card('codex')).getByRole('switch', { name: 'Suggest Codex for new chats' });
     fireEvent.click(show);
-    fireEvent.click(show); // ignored while its request runs
+    fireEvent.click(show); // remembered while its request runs, not sent yet
+    expect(show.getAttribute('aria-checked')).toBe('true');
     fireEvent.click(sug);
     expect(mocked.patchSettings).toHaveBeenCalledTimes(2);
     expect(mocked.patchSettings).toHaveBeenLastCalledWith({ suggest: { codex: false } });
     await act(async () => answer({ ...SETTINGS, showChats: { ...ON, codex: false }, suggest: { ...ON, codex: false } }));
-    await waitFor(() => expect(show.getAttribute('aria-checked')).toBe('false'));
+    // The first save said off; the last click asked for on, so it is saved again.
+    await waitFor(() => expect(mocked.patchSettings).toHaveBeenCalledTimes(3));
+    expect(mocked.patchSettings).toHaveBeenLastCalledWith({ showChats: { codex: true } });
+    await waitFor(() => expect(show.getAttribute('aria-checked')).toBe('true'));
   });
 });

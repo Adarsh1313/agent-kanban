@@ -130,8 +130,10 @@ export async function setProviderSetting(store: Store, provider: ProviderId, key
     const settings = await api.patchSettings({ [key]: { [provider]: on } });
     store.setState((s) => applySettings(s, settings));
     if (key === 'showChats') {
-      // The server filters history (and so the projects built from it) by this switch.
-      await Promise.all([refreshHistory(store, api), refreshProjects(store, api)]).catch(() => { /* the next resync fetches them */ });
+      // The server filters history (and so the projects built from it) by this switch. Not awaited: the switch is free
+      // again as soon as the setting is saved; the refreshes drop answers that a later refresh overtook.
+      void refreshHistory(store, api).catch(() => { /* the next resync fetches it */ });
+      void refreshProjects(store, api).catch(() => { /* the next resync fetches them */ });
     }
     return true;
   } catch (e) {
@@ -167,19 +169,40 @@ export function useConnectRun(id: ProviderId) {
   return { pending, run, busyProps };
 }
 
-/** Saves "Show its chats" / "Suggest it" for one provider: one request at a time per switch. */
+type ToggleKey = 'showChats' | 'suggest';
+
+/**
+ * Saves "Show its chats" / "Suggest it" for one provider. One request at a time per switch, and the latest click wins:
+ * a click while a save is in flight is remembered and saved when that one finishes (if it differs). `intent` is what
+ * the user last asked for while saving, so the switch follows the click at once.
+ */
 export function useProviderToggle(id: ProviderId) {
   const store = useStoreInstance();
-  const saving = useRef<Record<'showChats' | 'suggest', boolean>>({ showChats: false, suggest: false });
-  return async (key: 'showChats' | 'suggest', on: boolean) => {
-    if (saving.current[key]) return;
-    saving.current[key] = true;
+  const st = useRef<Record<ToggleKey, { busy: boolean; want: boolean | null }>>({ showChats: { busy: false, want: null }, suggest: { busy: false, want: null } });
+  const [intent, setIntent] = useState<Partial<Record<ToggleKey, boolean>>>({});
+  const toggle = async (key: ToggleKey, on: boolean) => {
+    const k = st.current[key];
+    k.want = on;
+    setIntent((i) => ({ ...i, [key]: on }));
+    if (k.busy) return;
+    k.busy = true;
     try {
-      await setProviderSetting(store, id, key, on);
+      let sent: boolean | null = null;
+      while (k.want !== null && k.want !== sent) {
+        sent = k.want;
+        if (!(await setProviderSetting(store, id, key, sent))) break;
+      }
     } finally {
-      saving.current[key] = false;
+      k.busy = false;
+      k.want = null;
+      setIntent((i) => {
+        const next = { ...i };
+        delete next[key];
+        return next;
+      });
     }
   };
+  return { toggle, intent };
 }
 
 const signedInText = (v: boolean | null) => (v === true ? 'Yes' : v === false ? 'No' : 'Unknown');
@@ -211,7 +234,7 @@ function ConnectionCard({ id }: { id: ProviderId }) {
   const [checking, setChecking] = useState(false);
   const [upToDate, setUpToDate] = useState(false);
   const { run, busyProps } = useConnectRun(id);
-  const toggle = useProviderToggle(id);
+  const { toggle, intent } = useProviderToggle(id);
   const [confirm, setConfirm] = useState(false);
   const signOutRef = useRef<HTMLButtonElement>(null);
   const name = providerName(id);
@@ -283,11 +306,11 @@ function ConnectionCard({ id }: { id: ProviderId }) {
           <div className="conn-toggles">
             <div className="toggle-row">
               <span>Show its chats in Recent chats</span>
-              <Switch checked={showChats ?? true} disabled={showChats === null} label={`Show ${name} chats in Recent chats`} onChange={(on) => void toggle('showChats', on)} />
+              <Switch checked={intent.showChats ?? showChats ?? true} disabled={showChats === null} label={`Show ${name} chats in Recent chats`} onChange={(on) => void toggle('showChats', on)} />
             </div>
             <div className="toggle-row">
               <span>Suggest it for new chats</span>
-              <Switch checked={suggest ?? true} disabled={suggest === null} label={`Suggest ${name} for new chats`} onChange={(on) => void toggle('suggest', on)} />
+              <Switch checked={intent.suggest ?? suggest ?? true} disabled={suggest === null} label={`Suggest ${name} for new chats`} onChange={(on) => void toggle('suggest', on)} />
             </div>
           </div>
           {NOTE[id] && <div className="conn-note"><Icon name="help" />{NOTE[id]}</div>}
