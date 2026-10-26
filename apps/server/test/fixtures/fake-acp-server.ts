@@ -13,10 +13,12 @@
 // FAKE_NEW_DELAY_MS: session/new answers after this delay.
 // FAKE_VERSION: agentInfo.version (default 1.3.0).
 // FAKE_STOP: the stop reason the default turn ends with (default end_turn).
-// editperm: an edit asks permission; after Allow it runs like the real 1.3.0: the work in a NEW call with the same
-//   title, and the approved call ends failed "Tool call was approved but never executed".
-//   FAKE_EDIT_ORDER=after (default): the new call completes, then the approved one fails;
-//   before: the approved one fails, then the new call runs; nonew: it fails and no other call does the work.
+// editperm: shaped like the real 1.3.0 run (Task 7): call_a "create_file" (kind other) asks permission as
+//   "Run create_file?"; after Allow the work runs in a separate call_b "edit_file" (kind edit) and call_a ends failed
+//   "Tool call was approved but never executed".
+//   FAKE_EDIT_ORDER=after (default): call_b completes, then call_a fails; before: call_a fails, then call_b runs;
+//   nonew: call_a fails and nothing else runs; unrelated: instead of call_b, call_c with call_a's own title and kind
+//   (not a file edit) completes, then call_a fails.
 // FAKE_NO_LOGOUT=1: initialize doesn't advertise auth.logout (and logout is method-not-found).
 // Strict about framing: any incoming message without "jsonrpc":"2.0" is rejected (requests) or ignored.
 import { createInterface } from 'node:readline';
@@ -47,10 +49,10 @@ function onPrompt(id: unknown, sessionId: string) {
   }
   if (scenario === 'editperm') {
     pendingPrompt = { id, sessionId };
-    update(sessionId, { sessionUpdate: 'tool_call', toolCallId: 'call_a', title: 'Edit hello.txt', kind: 'edit', status: 'pending' });
+    update(sessionId, { sessionUpdate: 'tool_call', toolCallId: 'call_a', title: 'create_file', kind: 'other', status: 'pending' });
     send({ id: PERM_ID, method: 'session/request_permission', params: {
       sessionId,
-      toolCall: { toolCallId: 'call_a', title: 'Edit hello.txt', kind: 'edit', status: 'pending' },
+      toolCall: { toolCallId: 'call_a', title: 'Run create_file?' },
       options: [{ optionId: 'allow_once', name: 'Allow', kind: 'allow_once' }, { optionId: 'reject_once', name: 'Reject', kind: 'reject_once' }],
     } });
     return;
@@ -91,7 +93,12 @@ createInterface({ input: process.stdin }).on('line', (line) => {
       const never = () => update(sid, { sessionUpdate: 'tool_call_update', toolCallId: 'call_a', status: 'failed',
         rawOutput: 'Tool call was approved but never executed', content: [{ type: 'content', content: { type: 'text', text: 'Tool call was approved but never executed' } }] });
       const work = () => {
-        update(sid, { sessionUpdate: 'tool_call', toolCallId: 'call_b', title: 'Edit hello.txt', kind: 'edit', status: 'in_progress' });
+        if (order === 'unrelated') {
+          update(sid, { sessionUpdate: 'tool_call', toolCallId: 'call_c', title: 'create_file', kind: 'other', status: 'in_progress' });
+          update(sid, { sessionUpdate: 'tool_call_update', toolCallId: 'call_c', status: 'completed' });
+          return;
+        }
+        update(sid, { sessionUpdate: 'tool_call', toolCallId: 'call_b', title: 'edit_file', kind: 'edit', status: 'in_progress' });
         update(sid, { sessionUpdate: 'tool_call_update', toolCallId: 'call_b', status: 'completed' });
       };
       if (order === 'before') { never(); work(); } else if (order === 'nonew') never(); else { work(); never(); }

@@ -54,12 +54,15 @@ export function Popover({ anchor, open, onClose, align = 'left', label, classNam
     // neither way (a short window), on the roomier side, capped to that space and scrolling inside.
     const above = h > room.below && (h <= room.above || room.above > room.below);
     const space = Math.max(0, above ? room.above : room.below);
+    // data-capped: the popover itself scrolls, so a list inside it must not scroll too (app.css).
     if (h > space) {
       pop.style.maxHeight = `${space}px`;
       pop.style.overflowY = 'auto';
+      pop.dataset.capped = '';
     } else {
       pop.style.maxHeight = '';
       pop.style.overflowY = '';
+      delete pop.dataset.capped;
     }
     pop.style.position = 'fixed';
     pop.style.top = `${above ? r.top - GAP - Math.min(h, space) : r.bottom + GAP}px`;

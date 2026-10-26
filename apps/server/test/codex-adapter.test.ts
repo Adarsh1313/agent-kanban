@@ -148,7 +148,7 @@ test('initialize timeout rejects, kills the process, and a later call spawns aga
     const killed = procs[0]!;
     await new Promise<void>((r) => killed.onExit(() => r()));
     // The second process does answer: give its (cold, possibly slow) start the normal budget so load can't fail it.
-    (adapter as unknown as { initializeTimeoutMs: number }).initializeTimeoutMs = 15_000;
+    adapter.initializeTimeoutMs = 15_000;
     const r = await adapter.startChat({ cwd, prompt: 'hi' });
     assert.equal(r.sessionRef, 'thr_1');
     assert.equal(procs.length, 2);

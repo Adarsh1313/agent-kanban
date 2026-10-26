@@ -129,11 +129,18 @@ describe('Popover placement', () => {
     return { pop, grow: (to: number) => { h = to; } };
   }
 
+  it('one scroller: a capped popover turns off the scrolling of a New chat list inside it', async () => {
+    const { readFileSync } = await import('node:fs');
+    const css = readFileSync('src/styles/app.css', 'utf8'); // vitest runs from apps/web
+    expect(css).toMatch(/\.dlg-pop\[data-capped\] \.dlg-scroll \{ max-height: none; overflow-y: visible; \}/);
+  });
+
   it('fits below the anchor: placed below with no max-height', () => {
     viewport(1000, 768);
     const { pop } = placed({ anchor: { left: 100, top: 100 }, w: 260, h: 200 });
     expect(pop.style.top).toBe('136px');
     expect(pop.style.maxHeight).toBe('');
+    expect(pop.hasAttribute('data-capped')).toBe(false);
     expect(pop.style.overflowY).toBe('');
   });
 
@@ -151,6 +158,7 @@ describe('Popover placement', () => {
     // Below: 500 - 330 - 6 - 8 = 156; above: 300 - 6 - 8 = 286 → above, 286 px tall, its top 8 px from the window's.
     expect(pop.style.maxHeight).toBe('286px');
     expect(pop.style.overflowY).toBe('auto');
+    expect(pop.hasAttribute('data-capped')).toBe(true);
     expect(pop.style.top).toBe('8px');
     expect(pop.contains(document.activeElement)).toBe(true);
   });

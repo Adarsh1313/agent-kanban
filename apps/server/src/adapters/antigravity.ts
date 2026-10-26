@@ -47,15 +47,13 @@ interface Live {
 
 interface Turn {
   live: Live; messageId: string; text: string[]; started: boolean;
-  /** This turn's tool calls: title, and whether they have finished. */
-  calls: Map<string, { title: string; finished: boolean }>;
-  /** Calls the user allowed in this turn. */
-  approved: Set<string>;
-  /** A later call that does an approved call's work, mapped to the approved call's id (its step shows the work). */
-  alias: Map<string, string>;
-  /** Approved calls whose work another call did: their own later updates are dropped. */
-  takenOver: Set<string>;
-  /** Calls that ended "approved but never executed", not shown yet: shown failed at the turn's end unless another call did the work. */
+  /** New tool calls seen so far this turn: each call's `start` is its place in that order. */
+  seq: number;
+  /** This turn's tool calls: when each started, its kind and whether it ended done. */
+  calls: Map<string, { start: number; kind: string; done: boolean }>;
+  /** Calls the user allowed in this turn, with the `seq` at the moment of the answer. */
+  approvedAt: Map<string, number>;
+  /** Calls that ended "approved but never executed": decided when the turn ends (see flushHeld). */
   held: Set<string>;
 }
 interface Perm { sessionId: string; toolCallId: string | null; options: AcpPermissionOption[]; resolve: (d: AcpPermissionDecision) => void }
@@ -266,55 +264,33 @@ export class AntigravityAdapter implements ProviderAdapter {
         const title = typeof u.title === 'string' && u.title ? u.title : known?.title ?? 'Using a tool';
         const kind = typeof u.kind === 'string' && u.kind ? u.kind : known?.kind ?? 'tool';
         this.toolInfo.set(u.toolCallId, { title, kind });
-        const id = this.stepOf(turn, u.toolCallId, title, u);
-        if (id === null) return;
         const status = toolStatus(u.status);
-        const step = turn.calls.get(id);
-        if (step) step.finished = status !== 'running';
-        const shown = this.toolInfo.get(id) ?? { title, kind };
-        this.emit({ type: 'tool.call', sessionRef: sessionId, toolCallId: id, name: id === u.toolCallId ? kind : shown.kind, summary: id === u.toolCallId ? title : shown.title, status });
+        let call = turn.calls.get(u.toolCallId);
+        if (!call) { call = { start: ++turn.seq, kind, done: false }; turn.calls.set(u.toolCallId, call); }
+        call.kind = kind;
+        call.done = status === 'done';
+        if (status === 'failed' && neverExecuted(u)) { turn.held.add(u.toolCallId); return; }
+        turn.held.delete(u.toolCallId);
+        this.emit({ type: 'tool.call', sessionRef: sessionId, toolCallId: u.toolCallId, name: kind, summary: title, status });
         return;
       }
     }
   }
 
   /**
-   * The step a tool-call update shows on, or null to drop it. After the user allows an edit, Antigravity 1.3.0 does
-   * the work in a NEW call with the same title and ends the approved one failed, "approved but never executed"
-   * (seen in the Task 7 end-to-end run). One edit then showed as a failed step and a done step. Here the new call
-   * reports on the approved call's step, and the approved call's own failure is dropped; an "approved but never
-   * executed" failure no other call makes up for is shown at the turn's end.
+   * After the user allows a call, Antigravity 1.3.0 does the work in a separate call (an `edit_file` call of kind
+   * edit for an allowed "Run create_file?") and ends the allowed one failed, "Tool call was approved but never
+   * executed" (seen in the Task 7 end-to-end run), so one edit showed as a failed step plus a done one. Such a
+   * failure is held until the turn ends: it shows as done (superseded) when a call that started after the approval
+   * ended done with kind edit, delete or move; otherwise as failed. Nothing is left running.
    */
-  private stepOf(turn: Turn, id: string, title: string, u: any): string | null {
-    const target = turn.alias.get(id);
-    if (target) return target;
-    if (turn.takenOver.has(id)) return null;
-    if (!turn.calls.has(id)) {
-      for (const [other, c] of turn.calls) {
-        if (other === id || c.title !== title || turn.alias.has(other)) continue;
-        if (turn.held.has(other) || (turn.approved.has(other) && !c.finished)) {
-          turn.held.delete(other);
-          turn.alias.set(id, other);
-          turn.takenOver.add(other);
-          return other;
-        }
-      }
-      turn.calls.set(id, { title, finished: false });
-    }
-    if (u.status === 'failed' && neverExecuted(u)) {
-      const step = turn.calls.get(id);
-      if (step) step.finished = true;
-      turn.held.add(id);
-      return null;
-    }
-    return id;
-  }
-
-  /** Shows the held "approved but never executed" failures nothing made up for (the turn is ending). */
   private flushHeld(sessionId: string, turn: Turn): void {
     for (const id of turn.held) {
+      const approvedAt = turn.approvedAt.get(id);
+      const redone = approvedAt !== undefined && [...turn.calls].some(([other, c]) =>
+        other !== id && c.start > approvedAt && c.done && FILE_KINDS.has(c.kind));
       const info = this.toolInfo.get(id);
-      this.emit({ type: 'tool.call', sessionRef: sessionId, toolCallId: id, name: info?.kind ?? 'tool', summary: info?.title ?? 'Using a tool', status: 'failed' });
+      this.emit({ type: 'tool.call', sessionRef: sessionId, toolCallId: id, name: info?.kind ?? 'tool', summary: info?.title ?? 'Using a tool', status: redone ? 'done' : 'failed' });
     }
     turn.held.clear();
   }
@@ -324,7 +300,7 @@ export class AntigravityAdapter implements ProviderAdapter {
     const tc = req.toolCall;
     const known = typeof tc?.toolCallId === 'string' ? this.toolInfo.get(tc.toolCallId) : undefined;
     const summary = typeof tc?.title === 'string' && tc.title ? tc.title : known?.title ?? 'Use a tool';
-    const action = acpAction(typeof tc?.kind === 'string' && tc.kind ? tc.kind : known?.kind);
+    const action = acpAction(typeof tc?.kind === 'string' && tc.kind ? tc.kind : known?.kind, summary);
     return new Promise((resolve) => {
       this.perms.set(requestId, { sessionId, toolCallId: typeof tc?.toolCallId === 'string' ? tc.toolCallId : null, options: req.options, resolve });
       this.emit({ type: 'request.opened', sessionRef: sessionId, requestId, kind: 'permission', summary, action });
@@ -346,7 +322,7 @@ export class AntigravityAdapter implements ProviderAdapter {
     this.turnCount.set(sessionId, n);
     const turn: Turn = {
       live, messageId: `${sessionId}:${n}`, text: [], started: false,
-      calls: new Map(), approved: new Set(), alias: new Map(), takenOver: new Set(), held: new Set(),
+      seq: 0, calls: new Map(), approvedAt: new Map(), held: new Set(),
     };
     this.turns.set(sessionId, turn);
     live.acp.prompt(sessionId, text).then(
@@ -455,7 +431,8 @@ export class AntigravityAdapter implements ProviderAdapter {
     if (!option) {
       console.warn(`[antigravity] no ${want === 'allow' ? 'allow-once' : 'reject'} option was offered (${p.options.map((o) => o.kind).join(', ')}); answered cancelled.`);
     }
-    if (option && want === 'allow' && p.toolCallId) this.turns.get(p.sessionId)?.approved.add(p.toolCallId);
+    const turn = this.turns.get(p.sessionId);
+    if (option && want === 'allow' && p.toolCallId && turn) turn.approvedAt.set(p.toolCallId, turn.seq);
     p.resolve(option ? { optionId: option.optionId } : 'cancelled');
     this.touchIdle();
   }
@@ -628,9 +605,13 @@ function isAuthRequired(err: unknown): boolean {
 }
 
 /** What an ACP tool call's permission is for, from its `kind` (edit / delete / move change files; execute runs a command). */
-export function acpAction(kind: string | undefined): RequestAction {
-  if (kind === 'edit' || kind === 'delete' || kind === 'move') return 'edit';
+const FILE_KINDS = new Set(['edit', 'delete', 'move']);
+
+export function acpAction(kind: string | undefined, title = ''): RequestAction {
+  if (kind !== undefined && FILE_KINDS.has(kind)) return 'edit';
   if (kind === 'execute') return 'command';
+  // 1.3.0 asks for its file tools with no file kind ("Run create_file?", kind other): name them by the tool.
+  if (/\b(create|edit|write|delete|move|replace)_file\b/i.test(title)) return 'edit';
   return 'tool';
 }
 

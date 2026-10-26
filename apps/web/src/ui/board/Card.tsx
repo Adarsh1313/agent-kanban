@@ -42,7 +42,7 @@ export const ANTIGRAVITY_STARTING = 'Starting Antigravity… This can take a cou
 /** While a new chat waits for its provider session (no sessionRef yet), Antigravity's slow first start is named. */
 const startingText = (chat: Chat) => (chat.provider === 'antigravity' && !chat.sessionRef ? ANTIGRAVITY_STARTING : undefined);
 
-export const dropAllowed =(from: Column, to: Column) => (from === 'done' ? to === 'review' : to === 'done');
+export const dropAllowed = (from: Column, to: Column) => (from === 'done' ? to === 'review' : to === 'done');
 
 export function ReasonBadge({ chat }: { chat: Chat }) {
   const now = useStore((s) => s.now);

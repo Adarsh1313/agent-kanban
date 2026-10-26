@@ -462,7 +462,7 @@ function questionAnswers(input: Record<string, unknown>, reply: string): Record<
 /** What a Claude Code tool's permission is for: its file-editing tools, its shell tools, or any other tool. */
 export function claudeAction(name: string): RequestAction {
   if (['Edit', 'Write', 'MultiEdit', 'NotebookEdit'].includes(name)) return 'edit';
-  if (['Bash', 'BashOutput', 'KillShell', 'KillBash'].includes(name)) return 'command';
+  if (['Bash', 'BashOutput', 'KillShell', 'KillBash', 'PowerShell'].includes(name)) return 'command';
   return 'tool';
 }
 

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store } from '../src/store.ts';
@@ -164,16 +164,24 @@ test('updateChat with touch: false keeps updatedAt', async () => {
 
 test('a permission request keeps what it is for; a database from before the action column gets it', async () => {
   const { DatabaseSync } = await import('node:sqlite');
-  const file = join(mkdtempSync(join(tmpdir(), 'ak-')), 'old.db');
-  const old = new DatabaseSync(file);
-  old.exec(`CREATE TABLE requests (id TEXT PRIMARY KEY, chat_id TEXT NOT NULL, kind TEXT NOT NULL, summary TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL);
-    INSERT INTO requests VALUES ('c1:r0', 'c1', 'permission', 'npm test', 'open', '2026-01-01T00:00:00.000Z');`);
-  old.close();
-  const s = new Store(file);
-  s.addRequest('c1', { requestId: 'r1', kind: 'permission', summary: 'Edit a.txt', action: 'edit' });
-  s.addRequest('c1', { requestId: 'r2', kind: 'question', summary: 'Which?' });
-  const open = s.listOpenRequests('c1');
-  assert.deepEqual(open.map((r) => [r.requestId, r.action]), [['r0', undefined], ['r1', 'edit'], ['r2', undefined]]);
-  assert.ok(!('action' in open[0]!));
-  new Store(file); // opening it again doesn't try to add the column twice
+  const dir = mkdtempSync(join(tmpdir(), 'ak-'));
+  const file = join(dir, 'old.db');
+  const opened: Store[] = [];
+  try {
+    const old = new DatabaseSync(file);
+    old.exec(`CREATE TABLE requests (id TEXT PRIMARY KEY, chat_id TEXT NOT NULL, kind TEXT NOT NULL, summary TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL);
+      INSERT INTO requests VALUES ('c1:r0', 'c1', 'permission', 'npm test', 'open', '2026-01-01T00:00:00.000Z');`);
+    old.close();
+    const s = new Store(file);
+    opened.push(s);
+    s.addRequest('c1', { requestId: 'r1', kind: 'permission', summary: 'Edit a.txt', action: 'edit' });
+    s.addRequest('c1', { requestId: 'r2', kind: 'question', summary: 'Which?' });
+    const open = s.listOpenRequests('c1');
+    assert.deepEqual(open.map((r) => [r.requestId, r.action]), [['r0', undefined], ['r1', 'edit'], ['r2', undefined]]);
+    assert.ok(!('action' in open[0]!));
+    opened.push(new Store(file)); // opening it again doesn't try to add the column twice
+  } finally {
+    for (const s of opened) s.close();
+    rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
 });

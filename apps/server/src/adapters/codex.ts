@@ -34,7 +34,8 @@ export class CodexAdapter implements ProviderAdapter {
   private loaded = new WeakMap<JsonRpcProcess, Set<string>>(); // threads known to each process
   private disposed = false;
   private makeProcess: () => JsonRpcProcess;
-  private initializeTimeoutMs: number;
+  /** How long initialize (and model/list) may take; public so a caller can change it between process starts. */
+  initializeTimeoutMs: number;
   private codexHome: string;
   private fallbackModel = new WeakMap<JsonRpcProcess, string | null>();
   private _modelNote: string | null = null;

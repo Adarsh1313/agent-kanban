@@ -81,6 +81,8 @@ html, body { overflow: hidden; }
 .dlg-path-error { margin: 0; font-size: var(--text-caption); color: var(--color-danger); }
 .dlg-pop { width: min(calc(var(--space-8) * 10), calc(100vw - var(--space-4))); z-index: 65; } /* above the dialog, as board.html does */
 .dlg-pop .dlg-scroll { max-height: 40vh; overflow-y: auto; overflow-x: hidden; }
+/* A popover capped to a short window scrolls as a whole (Popover's place()): its list then doesn't scroll as well. */
+.dlg-pop[data-capped] .dlg-scroll { max-height: none; overflow-y: visible; }
 .dlg-pop .grow-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* An empty prompt shakes (NewChatDialog); with reduced motion there is no shake, so it is outlined instead. */
 @media (prefers-reduced-motion: reduce) {

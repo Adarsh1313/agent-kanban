@@ -65,6 +65,9 @@ export class Store {
     if (!requestCols.includes('action')) this.db.exec('ALTER TABLE requests ADD COLUMN action TEXT');
   }
 
+  /** Closes the database (tests remove its folder afterwards). */
+  close(): void { this.db.close(); }
+
   /** ISO timestamp, strictly increasing within this process so ordering is stable. */
   private now(): string {
     this.lastStamp = Math.max(Date.now(), this.lastStamp + 1);

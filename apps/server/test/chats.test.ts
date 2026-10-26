@@ -175,6 +175,41 @@ test('start answers as soon as the card exists; the session arrives by chat.upda
   assert.deepEqual(adapter.calls, ['startChat', 'send:s1:more']);
 });
 
+test('stop during a slow start answers at once (card stopped); the first turn is stopped once the session arrives', async () => {
+  const { store, adapter, svc } = setup();
+  let open!: (v: { sessionRef: string }) => void;
+  adapter.startChat = () => { adapter.calls.push('startChat'); return new Promise((r) => { open = r; }); };
+  const chat = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+  let stopped = false;
+  const stopping = svc.stop(chat.id).then(() => { stopped = true; });
+  await new Promise((r) => setTimeout(r, 5));
+  assert.equal(stopped, true, 'stop does not wait for the session');
+  await stopping;
+  assert.deepEqual([store.getChat(chat.id)!.column, store.getChat(chat.id)!.needsReason], ['needs_you', 'stopped']);
+  assert.deepEqual(adapter.calls, ['startChat']);
+  open({ sessionRef: 's1' });
+  await svc.started(chat.id);
+  assert.deepEqual(adapter.calls, ['startChat', 'stop:s1']);
+  assert.equal(store.getChat(chat.id)!.sessionRef, 's1');
+  assert.deepEqual([store.getChat(chat.id)!.column, store.getChat(chat.id)!.needsReason], ['needs_you', 'stopped']);
+  // The next start of this chat is not stopped by the old request.
+  await svc.send(chat.id, 'go on');
+  assert.equal(adapter.calls.at(-1), 'send:s1:go on');
+  assert.equal(adapter.calls.filter((c) => c.startsWith('stop')).length, 1);
+});
+
+test('mark done during a slow start: the session is stopped when it arrives and the card stays done', async () => {
+  const { store, adapter, svc } = setup();
+  let open!: (v: { sessionRef: string }) => void;
+  adapter.startChat = () => { adapter.calls.push('startChat'); return new Promise((r) => { open = r; }); };
+  const chat = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+  assert.equal(svc.markDone(chat.id).column, 'done');
+  open({ sessionRef: 's1' });
+  await svc.started(chat.id);
+  assert.deepEqual(adapter.calls, ['startChat', 'stop:s1']);
+  assert.equal(store.getChat(chat.id)!.column, 'done');
+});
+
 test('a start that fails after start answered moves the card to Needs you with the error (no unhandled rejection)', async () => {
   const { store, adapter, events, svc } = setup();
   let unhandled = 0;

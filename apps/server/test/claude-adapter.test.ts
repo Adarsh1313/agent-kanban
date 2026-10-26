@@ -674,6 +674,6 @@ test('a listModels failure backs off like a failed ping', async () => {
 
 test('a permission says what it is for: file edits, shell commands, any other tool', () => {
   for (const n of ['Edit', 'Write', 'MultiEdit', 'NotebookEdit']) assert.equal(claudeAction(n), 'edit');
-  for (const n of ['Bash', 'BashOutput', 'KillShell']) assert.equal(claudeAction(n), 'command');
+  for (const n of ['Bash', 'BashOutput', 'KillShell', 'PowerShell']) assert.equal(claudeAction(n), 'command');
   for (const n of ['WebFetch', 'mcp__x__y', 'Read']) assert.equal(claudeAction(n), 'tool');
 });

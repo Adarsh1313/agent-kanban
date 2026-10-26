@@ -167,41 +167,47 @@ for (const [decision, expected] of [
   });
 }
 
-for (const order of ['after', 'before'] as const) {
-  test(`an approved edit Antigravity redoes in a new call shows as one done step, not failed + done (new call ${order === 'after' ? 'before' : 'after'} the failure)`, async () => {
-    const { adapter, events, waitFor } = make('editperm', { FAKE_EDIT_ORDER: order });
-    try {
-      await adapter.startChat({ cwd, prompt: 'create hello.txt' });
-      const req = await waitFor((e) => e.type === 'request.opened');
-      assert.ok(req.type === 'request.opened');
-      assert.equal(req.action, 'edit'); // ACP kind edit: "wants to edit a file"
-      await adapter.respondToRequest('sess_1', req.requestId, 'allow');
-      await waitFor((e) => e.type === 'turn.completed');
-      const calls = events.filter((e) => e.type === 'tool.call');
-      assert.ok(calls.every((c) => c.type === 'tool.call' && c.toolCallId === 'call_a'), JSON.stringify(calls));
-      assert.ok(!calls.some((c) => c.type === 'tool.call' && c.status === 'failed'), JSON.stringify(calls));
-      const last = calls[calls.length - 1]!;
-      assert.ok(last.type === 'tool.call');
-      assert.deepEqual([last.status, last.summary, last.name], ['done', 'Edit hello.txt', 'edit']);
-    } finally { await adapter.dispose(); }
-  });
-}
+/** Each tool call's last reported status, in first-seen order. */
+const finalSteps = (events: AdapterEvent[]) => {
+  const out = new Map<string, string>();
+  for (const e of events) if (e.type === 'tool.call') out.set(e.toolCallId, e.status);
+  return [...out];
+};
 
-test('an "approved but never executed" failure that no other call makes up for still shows failed (at the turn end)', async () => {
-  const { adapter, events, waitFor } = make('editperm', { FAKE_EDIT_ORDER: 'nonew' });
+async function runEditPerm(order: string) {
+  const { adapter, events, waitFor } = make('editperm', { FAKE_EDIT_ORDER: order });
   try {
     await adapter.startChat({ cwd, prompt: 'create hello.txt' });
     const req = await waitFor((e) => e.type === 'request.opened');
     assert.ok(req.type === 'request.opened');
+    assert.equal(req.summary, 'Run create_file?');
     await adapter.respondToRequest('sess_1', req.requestId, 'allow');
-    await waitFor((e) => e.type === 'turn.completed');
-    const calls = events.filter((e) => e.type === 'tool.call');
-    const last = calls[calls.length - 1]!;
-    assert.ok(last.type === 'tool.call');
-    assert.deepEqual([last.toolCallId, last.status], ['call_a', 'failed']);
-    const failedAt = events.indexOf(last);
-    assert.ok(failedAt < events.findIndex((e) => e.type === 'turn.completed'));
+    const done = await waitFor((e) => e.type === 'turn.completed');
+    return { events, endAt: events.indexOf(done), req };
   } finally { await adapter.dispose(); }
+}
+
+for (const order of ['after', 'before'] as const) {
+  test(`an allowed call Antigravity redoes as a separate edit_file call ends done (superseded), not failed (redo ${order === 'after' ? 'before' : 'after'} the failure)`, async () => {
+    const { events, endAt, req } = await runEditPerm(order);
+    assert.ok(req.type === 'request.opened');
+    assert.equal(req.action, 'edit'); // "Run create_file?" with no file kind still reads as an edit (from the title)
+    assert.deepEqual(finalSteps(events), [['call_a', 'done'], ['call_b', 'done']]);
+    assert.ok(!events.some((e) => e.type === 'tool.call' && e.status === 'failed'), 'never shown failed');
+    const lastA = events.findLastIndex((e) => e.type === 'tool.call' && e.toolCallId === 'call_a');
+    assert.ok(lastA < endAt, 'decided before the turn completes');
+  });
+}
+
+test('an "approved but never executed" failure that no edit made up for still shows failed (at the turn end)', async () => {
+  const { events, endAt } = await runEditPerm('nonew');
+  assert.deepEqual(finalSteps(events), [['call_a', 'failed']]);
+  assert.ok(events.findLastIndex((e) => e.type === 'tool.call' && e.toolCallId === 'call_a') < endAt);
+});
+
+test('an unrelated call with the same title (not a file edit) is never folded in: it stays its own step and the failure shows', async () => {
+  const { events } = await runEditPerm('unrelated');
+  assert.deepEqual(finalSteps(events), [['call_a', 'failed'], ['call_c', 'done']]);
 });
 
 test('stop cancels the turn: stopped, not turn.completed', async () => {
@@ -554,4 +560,9 @@ test('acpAction maps ACP tool kinds to edit / command / tool', () => {
   for (const k of ['edit', 'delete', 'move']) assert.equal(acpAction(k), 'edit');
   assert.equal(acpAction('execute'), 'command');
   for (const k of ['read', 'search', 'fetch', 'think', 'other', undefined]) assert.equal(acpAction(k), 'tool');
+  // 1.3.0 asks for its file tools with kind other: the tool name in the title decides.
+  assert.equal(acpAction('other', 'Run create_file?'), 'edit');
+  assert.equal(acpAction(undefined, 'Run edit_file?'), 'edit');
+  assert.equal(acpAction('other', 'Run search_web?'), 'tool');
+  assert.equal(acpAction('execute', 'Run create_file?'), 'command');
 });

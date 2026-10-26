@@ -66,6 +66,8 @@ export class ChatService {
   /** Resolves when an in-progress startChat for the chat has settled. */
   private pending = new Map<string, Promise<void>>();
   private resuming = new Map<string, Promise<void>>();
+  /** Chats stopped while their session was still starting: stopped as soon as the session arrives. */
+  private stopAfterStart = new Set<string>();
   /** Last time this process drove or heard from each chat (ms). Distinguishes our own .jsonl writes from another app's. */
   private lastOwn = new Map<string, number>();
   /** Errors already reported, per chat: one failed resume is shared by concurrent callers of the SAME chat only. */
@@ -151,7 +153,14 @@ export class ChatService {
 
   async stop(chatId: string): Promise<void> {
     this.mustGet(chatId);
-    while (this.pending.has(chatId)) await this.pending.get(chatId);
+    if (this.pending.has(chatId)) {
+      // Still starting (a cold Antigravity can take minutes): park the card now; begin() stops the turn once the session arrives.
+      this.stopAfterStart.add(chatId);
+      this.closeRequests(chatId);
+      this.touch(chatId);
+      this.transition(chatId, { type: 'user.stop' });
+      return;
+    }
     const chat = this.mustGet(chatId);
     const adapter = this.adapters.get(chat.provider);
     if (adapter && chat.sessionRef) {
@@ -335,10 +344,15 @@ export class ChatService {
       const { sessionRef } = await adapter.startChat({ cwd: chat.cwd, prompt, ...(chat.model ? { model: chat.model } : {}) });
       this.live.add(chat.id);
       this.claim(chat.id, chat.provider, sessionRef);
+      // Stopped, or marked done, while the session was starting: its first turn must not keep running.
+      if (this.stopAfterStart.has(chat.id) || this.store.getChat(chat.id)?.column === 'done') {
+        try { await adapter.stop(sessionRef); } catch { /* the card is already parked */ }
+      }
     } catch (err) {
       // Nobody awaits a start: any failure (also from ensure) belongs on the card, never an unhandled rejection.
       try { this.fail(chat.id, chat.provider, err); } catch { /* the chat is gone */ }
     } finally {
+      this.stopAfterStart.delete(chat.id);
       this.pending.delete(chat.id);
       release();
     }
