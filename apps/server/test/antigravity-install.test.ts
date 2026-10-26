@@ -233,12 +233,21 @@ test('abort mid-download → rejects as cancelled and leaves no files', async ()
   const home = freshHome();
   const ac = new AbortController();
   let partialSeen = false;
+  let started = false;
   const p = install(home, '/stall.zip', {}, {
     signal: ac.signal,
     onProgress: (e) => {
-      if (e.phase === 'download' && e.fraction > 0 && !ac.signal.aborted) {
-        partialSeen = leftovers(home).some((n) => /^1\.3\.0\.[0-9a-f-]{36}\.partial$/.test(n));
-        ac.abort();
+      if (e.phase === 'download' && e.fraction > 0 && !started) {
+        started = true;
+        // The write stream opens its file asynchronously, so the first chunk can arrive before
+        // the .partial exists (seen on Linux). Wait for it (the stalled body keeps the download open).
+        void (async () => {
+          for (let i = 0; i < 200 && !partialSeen; i++) {
+            partialSeen = leftovers(home).some((n) => /^1\.3\.0\.[0-9a-f-]{36}\.partial$/.test(n));
+            if (!partialSeen) await new Promise((r) => setTimeout(r, 10));
+          }
+          ac.abort();
+        })();
       }
     },
   });
