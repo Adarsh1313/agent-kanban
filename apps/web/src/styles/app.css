@@ -100,10 +100,15 @@ button.usage-focus { color: inherit; transition: background-color var(--duration
   .meter .fill, .minimeter i::after, .usage-focus .m i::after { transition: none; }
 }
 
-/* Connections (read-only cards; design/connections.js) */
+/* Connections (design/connections.js keeps these inline) */
 .conn-update { color: var(--color-running); }
 .conn-checked { color: var(--color-text-faint); font-size: var(--text-caption); }
 .conn-head .logo { flex: none; }
+.conn .step-text.conn-error { color: var(--color-danger); align-items: flex-start; }
+.conn .step-text.conn-error .icon { flex: none; margin-top: calc(var(--space-1) / 2); }
+.section-title .later-note { color: var(--color-text-faint); font-size: var(--text-caption); }
+.later .later-input, .later .later-input input { width: 100%; }
+@media (prefers-reduced-motion: reduce) { .progress i { transition: none; } }
 
 @media (max-width: 900px) { .sidebar { display: none; } }
 @media (max-width: 640px) { .usage-area .pct, .topbar .new-label, .usage-focus .m span { display: none; } }

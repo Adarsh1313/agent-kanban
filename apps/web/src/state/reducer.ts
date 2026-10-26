@@ -2,6 +2,7 @@ import type {
   Chat,
   Column,
   ConnectionHealth,
+  ConnectState,
   HistoryChat,
   Message,
   NeedsReason,
@@ -9,6 +10,7 @@ import type {
   Project,
   ProviderId,
   ServerEvent,
+  Settings,
   ToolCall,
   UsageReading,
 } from '@agent-kanban/shared';
@@ -16,6 +18,10 @@ import { suggest } from '@agent-kanban/shared';
 
 /** The provider list (and order) the server passes to suggest(). */
 const USAGE_PROVIDERS: ProviderId[] = ['claude', 'codex', 'antigravity'];
+
+/** The providers "Most room" may pick: those whose "Suggest it for new chats" is on (all of them before settings load). */
+export const suggestable = (settings: Settings | null): ProviderId[] =>
+  USAGE_PROVIDERS.filter((id) => settings?.suggest[id] !== false);
 
 export type AppNotification = {
   id: string;
@@ -71,6 +77,10 @@ export interface AppState {
   usage: Partial<Record<ProviderId, UsageReading>>;
   suggested: ProviderId | null;
   connections: Partial<Record<ProviderId, ConnectionHealth>>;
+  /** What the server is doing for each provider (install, sign-in, sign-out, update). */
+  connect: Partial<Record<ProviderId, ConnectState>>;
+  /** null until loaded. */
+  settings: Settings | null;
   history: HistoryChat[];
   projects: Project[];
   notifications: AppNotification[];
@@ -100,6 +110,8 @@ export interface Snapshot {
   connections: ConnectionHealth[];
   history: HistoryChat[];
   projects: Project[];
+  connect?: ConnectState[];
+  settings?: Settings | null;
 }
 
 const MAX_NOTIFICATIONS = 100;
@@ -114,6 +126,8 @@ export function initialState(): AppState {
     usage: {},
     suggested: null,
     connections: {},
+    connect: {},
+    settings: null,
     history: [],
     projects: [],
     notifications: [],
@@ -222,6 +236,23 @@ export function mergeReadings(cur: AppState['usage'], readings: UsageReading[]):
   return next;
 }
 
+/** Keeps the newer of two states for a provider (a fetch answered after a later connect.updated event loses). */
+export function mergeConnect(cur: AppState['connect'], states: ConnectState[]): AppState['connect'] {
+  const next = { ...cur };
+  for (const st of states) {
+    const prev = next[st.provider];
+    if (prev && Date.parse(prev.updatedAt) > Date.parse(st.updatedAt)) continue;
+    next[st.provider] = st;
+  }
+  return next;
+}
+
+/** New settings from the server; "Most room" is worked out again for the providers that may now be suggested. */
+export function applySettings(s: AppState, settings: Settings): AppState {
+  const readings = Object.values(s.usage).filter((r): r is UsageReading => !!r);
+  return { ...s, settings, suggested: suggest(readings, suggestable(settings)) };
+}
+
 /** The answer to a usage refresh: every reading plus the provider with the most room. */
 export function applyUsage(s: AppState, res: { readings: UsageReading[]; suggested: ProviderId | null }): AppState {
   return { ...s, usage: mergeReadings(s.usage, res.readings), suggested: res.suggested };
@@ -288,12 +319,12 @@ export function applyEvent(s: AppState, e: ServerEvent, now: Date = new Date()):
     case 'usage.updated': {
       // The event carries no suggestion: recompute "Most room" the way the server does.
       const usage = mergeReadings(s.usage, [e.reading]);
-      return mk([], { usage, suggested: suggest(Object.values(usage).filter((r): r is UsageReading => !!r), USAGE_PROVIDERS) });
+      return mk([], { usage, suggested: suggest(Object.values(usage).filter((r): r is UsageReading => !!r), suggestable(s.settings)) });
     }
     case 'connection.updated':
       return mk([], { connections: { ...s.connections, [e.health.provider]: e.health } });
     case 'connect.updated':
-      return s; // the Connections page handles install / sign-in progress (Plan 3 Task 5)
+      return mk([], { connect: mergeConnect(s.connect, [e.state]) });
     case 'notification': {
       const item: AppNotification = { id: `n${s.sync.seq + 1}`, chatId: e.chatId, kind: e.kind, at: now.toISOString(), unread: true };
       return mk([chatKey(e.chatId)], { notifications: [item, ...s.notifications].slice(0, MAX_NOTIFICATIONS) });
@@ -359,6 +390,8 @@ export function applySnapshot(s: AppState, snap: Snapshot, since: number = s.syn
     loadedChats: {},
     usage,
     connections,
+    connect: snap.connect ? mergeConnect(s.connect, snap.connect) : s.connect,
+    settings: snap.settings === undefined ? s.settings : snap.settings,
     suggested: snap.suggested,
     history: snap.history,
     projects: snap.projects,

@@ -82,10 +82,10 @@ async function tracked<T>(store: Store, run: (since: number) => Promise<T>): Pro
 }
 
 export async function fetchSnapshot(api: Api): Promise<Snapshot> {
-  const [chats, usage, connections, history, projects] = await Promise.all([
-    api.listChats(), api.usage(), api.connections(), api.history(), api.projects(),
+  const [chats, usage, connections, history, projects, connect, settings] = await Promise.all([
+    api.listChats(), api.usage(), api.connections(), api.history(), api.projects(), api.connectStates(), api.settings(),
   ]);
-  return { chats, usage: usage.readings, suggested: usage.suggested, connections, history, projects };
+  return { chats, usage: usage.readings, suggested: usage.suggested, connections, history, projects, connect, settings };
 }
 
 const apply = (store: Store, chatId: string, part: FetchedThread, since: number) =>
@@ -186,6 +186,12 @@ export function noteChatFolder(store: Store, api: Api, chat: Chat): void {
   const k = folderKey(chat.cwd);
   if (s.projects.some((p) => folderKey(p.id) === k || folderKey(p.path) === k)) return;
   refreshProjectsSoon(store, api);
+}
+
+/** Refetches the project list now (e.g. after "Show its chats" changed which chats count). */
+export async function refreshProjects(store: Store, api: Api): Promise<void> {
+  const projects = await api.projects();
+  store.setState((s) => ({ ...s, projects }));
 }
 
 /** Refetches the provider-history list (e.g. after a history-only chat was continued and is now on the board). */

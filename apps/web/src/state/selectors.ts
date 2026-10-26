@@ -125,10 +125,14 @@ export function recentChatsByProject(
     .map(({ projectId, name, list }) => ({ projectId, name, chats: expanded.has(projectId) ? list : list.slice(0, limits.chats), total: list.length }));
 }
 
-/** The provider to preselect in New chat: the server's suggestion if allowed, else the first allowed one. */
-export function suggestFor(s: Pick<AppState, 'suggested'>, allowed: ProviderId[]): { provider: ProviderId; suggested: boolean } | null {
-  if (s.suggested && allowed.includes(s.suggested)) return { provider: s.suggested, suggested: true };
-  const first = allowed[0];
+/**
+ * The provider to preselect in New chat: the suggestion if allowed, else the first allowed one whose
+ * "Suggest it for new chats" is on, else the first allowed one.
+ */
+export function suggestFor(s: Pick<AppState, 'suggested'> & { settings?: AppState['settings'] }, allowed: ProviderId[]): { provider: ProviderId; suggested: boolean } | null {
+  const ok = (id: ProviderId) => s.settings?.suggest[id] !== false;
+  if (s.suggested && allowed.includes(s.suggested) && ok(s.suggested)) return { provider: s.suggested, suggested: true };
+  const first = allowed.find(ok) ?? allowed[0];
   return first ? { provider: first, suggested: false } : null;
 }
 

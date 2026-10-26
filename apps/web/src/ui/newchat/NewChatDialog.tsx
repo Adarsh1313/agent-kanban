@@ -123,7 +123,7 @@ type Picker = 'project' | 'provider' | 'model' | null;
 /** A known project (by id), or a folder typed by hand. */
 type Where = { kind: 'project'; id: string } | { kind: 'path' };
 
-const pickState = (s: AppState) => ({ projects: s.projects, connections: s.connections, usage: s.usage, suggested: s.suggested, focus: focusedProvider(s), loaded: s.loaded });
+const pickState = (s: AppState) => ({ projects: s.projects, connections: s.connections, usage: s.usage, suggested: s.suggested, settings: s.settings, focus: focusedProvider(s), loaded: s.loaded });
 
 export function NewChatDialog() {
   const st = useStore(pickState);

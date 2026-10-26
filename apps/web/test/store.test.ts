@@ -10,6 +10,7 @@ function fakeApi(over: Partial<Record<keyof Api, unknown>> = {}): Api {
   return {
     listChats: async () => [], history: async () => [], projects: async () => [], connections: async () => [],
     usage: async () => ({ readings: [], suggested: null }), listMessages: async () => [], listRequests: async () => [], listToolCalls: async () => [],
+    connectStates: async () => [], settings: async () => null,
     ...over,
   } as unknown as Api;
 }
@@ -45,6 +46,16 @@ describe('store', () => {
     expect(store.getState().toolCalls.r).toHaveLength(1);
     expect(store.getState().chats.d).toBeDefined();
     expect(store.getState().sync.inflight).toBe(0);
+  });
+
+  it('loadAll loads the connect states and settings', async () => {
+    const on = { claude: true, codex: true, antigravity: true };
+    const settings = { onboarded: true, showChats: { ...on, codex: false }, suggest: on };
+    const st = { provider: 'codex' as const, phase: 'installing' as const, step: 'Downloading Codex…', progress: 0.3, signInUrl: null, message: null, updatedAt: '2026-10-23T11:00:00.000Z' };
+    const store = createStore(initialState());
+    await loadAll(store, fakeApi({ connectStates: async () => [st], settings: async () => settings }));
+    expect(store.getState().connect.codex).toEqual(st);
+    expect(store.getState().settings).toEqual(settings);
   });
 
   it('loadAll drops a chat the server no longer lists (I3)', async () => {
