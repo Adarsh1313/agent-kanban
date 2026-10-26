@@ -45,7 +45,7 @@ test('startChat passes options and resolves with the init session id', async () 
   await a.dispose();
 });
 
-test('claudePath that is a .cmd shim resolves to the real exe', async () => {
+test('claudePath that is a .cmd shim resolves to the real exe', { skip: process.platform !== 'win32' && 'npm .cmd shims exist only on Windows' }, async () => {
   const shim = fileURLToPath(new URL('./fixtures/shims/claude.cmd', import.meta.url));
   const f = fake(async function* (_o, input) { await input.next(); yield init(); await never(); });
   const a = new ClaudeAdapter({ claudePath: shim, query: f.query });
