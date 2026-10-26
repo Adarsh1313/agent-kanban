@@ -108,9 +108,9 @@ export interface ConnectState {
   signInUrl: string | null;
   /** Error or outcome text to show on the card. */
   message: string | null;
-  /** The operation that ran last (null while none has, or after a health check made its outcome moot). */
+  /** The operation that ran last (null until one finishes and while one runs; kept when a health check clears message and outcome). */
   lastOp: ConnectOp | null;
-  /** How it ended; null while it runs (and as for lastOp). */
+  /** How it ended; null while it runs, and cleared (with message) when a later health check makes a failure moot. */
   outcome: ConnectOutcome | null;
   updatedAt: string;
 }
