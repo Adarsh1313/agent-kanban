@@ -102,3 +102,27 @@ test('GET/PATCH /api/settings; "suggest" limits Most room; "showChats" filters h
     api.close(); api.server.closeAllConnections(); api.server.close();
   }
 });
+
+test('PATCH /api/settings broadcasts settings.updated so other open pages follow', async () => {
+  const { WebSocket } = await import('ws');
+  const settings = new SettingsStore(tempStore());
+  const usage: any = { latest: () => [], refresh: async () => [] };
+  const api = createApi({ chats: { listChats: () => [] } as any, usage, history: async () => [], token: 'tok', settings });
+  await new Promise<void>((r) => api.server.listen(0, '127.0.0.1', r));
+  const port = (api.server.address() as AddressInfo).port;
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=tok`);
+  try {
+    await new Promise((r) => ws.on('open', r));
+    const got = new Promise<any>((r) => ws.on('message', (d) => { const e = JSON.parse(String(d)); if (e.type === 'settings.updated') r(e); }));
+    const res = await fetch(`http://127.0.0.1:${port}/api/settings`, {
+      method: 'PATCH', headers: { Authorization: 'Bearer tok', 'Content-Type': 'application/json' }, body: JSON.stringify({ suggest: { codex: false } }),
+    });
+    const body = (await res.json()) as Settings;
+    const e = await got;
+    assert.deepEqual(e.settings, body);
+    assert.equal(e.settings.suggest.codex, false);
+  } finally {
+    ws.terminate();
+    api.close(); api.server.closeAllConnections(); api.server.close();
+  }
+});

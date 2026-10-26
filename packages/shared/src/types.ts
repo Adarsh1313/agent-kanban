@@ -89,6 +89,7 @@ export type ServerEvent =
   | { type: 'usage.updated'; reading: UsageReading }
   | { type: 'connection.updated'; health: ConnectionHealth }
   | { type: 'connect.updated'; state: ConnectState }
+  | { type: 'settings.updated'; settings: Settings }
   | { type: 'notification'; chatId: string; kind: 'permission' | 'question' | 'finished' | 'limit' | 'error'; action?: RequestAction };
 
 export type ConnectPhase = 'idle' | 'installing' | 'signing_in' | 'signing_out' | 'updating' | 'error';

@@ -261,3 +261,20 @@ describe('message.delta by position (fix round 2)', () => {
     expect(s.refetch.c1).toBeUndefined();
   });
 });
+
+describe('settings.updated', () => {
+  it('applies settings saved in another tab, recomputing "Most room" like applySettings', () => {
+    const on = { claude: true, codex: true, antigravity: true };
+    const rd = (provider: 'claude' | 'codex', left: number): UsageReading => ({
+      provider, status: 'ok', readAt: '2026-10-23T12:00:00.000Z', windows: [{ kind: 'five_hour', label: '5-hour', leftPct: left, resetsAt: null }],
+    });
+    let s = applySnapshot(initialState(), {
+      chats: [], usage: [rd('claude', 80), rd('codex', 40)], suggested: 'claude', connections: [], history: [], projects: [],
+      settings: { onboarded: true, showChats: on, suggest: on },
+    });
+    const next = { onboarded: true, showChats: { ...on, antigravity: false }, suggest: { ...on, claude: false } };
+    s = applyEvent(s, { type: 'settings.updated', settings: next });
+    expect(s.settings).toEqual(next);
+    expect(s.suggested).toBe('codex');
+  });
+});

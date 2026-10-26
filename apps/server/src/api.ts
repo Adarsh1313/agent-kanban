@@ -267,10 +267,14 @@ export function createApi(opts: {
     if (match('PATCH', '/api/settings')) {
       if (!settings) throw new HttpError(404, 'Not found.');
       const b = await readJson(req);
-      try { return { status: 200, body: settings.patch(b) }; } catch (e) {
+      let next;
+      try { next = settings.patch(b); } catch (e) {
         if (e instanceof SettingsError) throw new HttpError(400, e.message);
         throw e;
       }
+      // Other open pages (a second tab) follow the change.
+      broadcast({ type: 'settings.updated', settings: next });
+      return { status: 200, body: next };
     }
     throw new HttpError(404, 'Not found.');
   }

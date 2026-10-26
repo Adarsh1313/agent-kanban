@@ -328,6 +328,9 @@ export function applyEvent(s: AppState, e: ServerEvent, now: Date = new Date()):
       return mk([], { connections: { ...s.connections, [e.health.provider]: e.health } });
     case 'connect.updated':
       return mk([], { connect: mergeConnect(s.connect, [e.state]) });
+    case 'settings.updated':
+      // Saved in another tab (or onboarding): every open page follows.
+      return { ...applySettings(s, e.settings), sync: bump(s, []) };
     case 'notification': {
       const item: AppNotification = { id: `n${s.sync.seq + 1}`, chatId: e.chatId, kind: e.kind, ...(e.action ? { action: e.action } : {}), at: now.toISOString(), unread: true };
       return mk([chatKey(e.chatId)], { notifications: [item, ...s.notifications].slice(0, MAX_NOTIFICATIONS) });
