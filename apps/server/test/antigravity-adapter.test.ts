@@ -296,8 +296,10 @@ test('signIn passes the link once and resolves when the agent reports the sign-i
   try {
     assert.deepEqual(await adapter.ping(), { ok: true, signedIn: false });
     const urls: string[] = [];
-    await adapter.signIn((u) => urls.push(u), new AbortController().signal);
+    const order: string[] = [];
+    await adapter.signIn((u) => { urls.push(u); order.push('url'); }, new AbortController().signal, () => order.push('started'));
     assert.equal(urls.length, 1);
+    assert.deepEqual(order, ['started', 'url'], 'onStarted once the agent runs, before its link');
     assert.match(urls[0], /^https:\/\/accounts\.google\.com\/o\/oauth2\/v2\/auth\?/);
     assert.deepEqual(await adapter.ping(), { ok: true, signedIn: true });
     assert.deepEqual(await adapter.startChat({ cwd, prompt: 'hi' }), { sessionRef: 'sess_1' });

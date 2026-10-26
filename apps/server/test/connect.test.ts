@@ -7,7 +7,7 @@ import type { AddressInfo } from 'node:net';
 import type { ConnectionHealth, ConnectState, ProviderId } from '@agent-kanban/shared';
 import {
   ConnectService, ConnectBusyError, SIGN_IN_TIMEOUT_MS, POLL_MS, SIGN_IN_DIDNT_FINISH, NETWORK_FAILED,
-  ANTIGRAVITY_SIGN_OUT_IN_APP, findHttpsUrl, SIGN_IN_HOSTS, NPM_TIMEOUT_MS, RECYCLE_RETRY_MS, npmFailureMessage,
+  ANTIGRAVITY_SIGN_OUT_IN_APP, findHttpsUrl, STEP_SIGN_IN, STEP_STARTING_ANTIGRAVITY, ANTIGRAVITY_DIDNT_START, ANTIGRAVITY_START_TIMEOUT_MS, SIGN_IN_HOSTS, NPM_TIMEOUT_MS, RECYCLE_RETRY_MS, npmFailureMessage,
 } from '../src/connect/service.ts';
 import type { AntigravityAuth, UpdatableAdapter } from '../src/connect/service.ts';
 import type { CommandExit, CommandRunner, RunningCommand } from '../src/connect/run.ts';
@@ -63,6 +63,8 @@ function make(opts: {
   installed?: boolean;
   /** What registry.ensure returns (default: no adapter). */
   registryAdapter?: UpdatableAdapter;
+  /** What the health check after an operation finds (default: nothing). */
+  checkResult?: (id: ProviderId | undefined) => ConnectionHealth[];
 }) {
   const r = fakeRunner(opts.script);
   const updates: ConnectState[] = [];
@@ -82,7 +84,7 @@ function make(opts: {
       adapter: async () => opts.adapter,
     },
     openBrowser: (u) => { opened.push(u); },
-    monitor: { check: async (id) => { checks.push(id); return []; } },
+    monitor: { check: async (id) => { checks.push(id); return opts.checkResult?.(id) ?? []; } },
     registry: { ensure: async (id, p) => { ensured.push([id, p]); return opts.registryAdapter; } },
     onUpdate: (s) => updates.push(s),
     home: '/nonexistent-ak-home',
@@ -346,15 +348,19 @@ test('sign out: `claude auth logout` / `codex logout`', async () => {
 
 // ---- Antigravity ----
 
-function fakeAdapter(o: { url?: string; signedOut?: boolean; hang?: boolean } = {}) {
+function fakeAdapter(o: { url?: string; signedOut?: boolean; hang?: boolean; slowStart?: Promise<void> } = {}) {
   const calls = { signIn: 0, signOut: 0, aborted: false };
   const adapter: AntigravityAuth = {
-    signIn: (onUrl, signal) => {
+    signIn: (onUrl, signal, onStarted) => {
       calls.signIn++;
       return new Promise<void>((resolve, reject) => {
-        if (o.url) onUrl(o.url);
         signal.addEventListener('abort', () => { calls.aborted = true; reject(signal.reason); }, { once: true });
-        if (!o.hang) resolve();
+        void (o.slowStart ?? Promise.resolve()).then(() => {
+          if (signal.aborted) return;
+          onStarted?.();
+          if (o.url) onUrl(o.url);
+          if (!o.hang) resolve();
+        });
       });
     },
     signOut: async () => { calls.signOut++; return o.signedOut ?? true; },
@@ -833,4 +839,58 @@ test('a health check that contradicts a failure clears its message and outcome (
   assert.equal(r.last('codex').phase, 'installing');
   r.svc.cancel('codex');
   await flush();
+});
+
+test('the health check after an operation is applied even when nothing changed: a contradicted failure clears (I2)', async () => {
+  // A failed install whose check finds Codex installed (put there meanwhile): the message goes at once.
+  const c = make({ script: () => ({ out: 'npm error code E500\n', code: 1 }), installed: false, checkResult: () => [health('codex', { status: 'signed_out', signedIn: false })] });
+  c.svc.install('codex');
+  await flush();
+  assert.deepEqual([c.last('codex').phase, c.last('codex').message, c.last('codex').outcome, c.last('codex').lastOp], ['idle', null, null, 'install']);
+  // A check that agrees with the failure keeps it.
+  const k = make({ script: () => ({ out: 'npm error code E500\n', code: 1 }), installed: false, checkResult: () => [health('codex', { installed: false, status: 'not_installed', signedIn: null })] });
+  k.svc.install('codex');
+  await flush();
+  assert.equal(k.last('codex').outcome, 'failed');
+});
+
+test('Antigravity sign-in during a cold start: "Starting Antigravity…" until the agent runs, then the sign-in step; the 5 minutes start then (I3)', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let started!: () => void;
+  const { adapter, calls } = fakeAdapter({ url: GOOGLE, hang: true, slowStart: new Promise<void>((r) => { started = r; }) });
+  const c = make({ script: () => ({}), adapter });
+  c.svc.signIn('antigravity');
+  await flush();
+  assert.equal(c.last('antigravity').step, STEP_STARTING_ANTIGRAVITY);
+  assert.equal(c.last('antigravity').signInUrl, null);
+  // 2 minutes to start: not counted against the sign-in.
+  t.mock.timers.tick(120_000);
+  await flush();
+  assert.equal(c.last('antigravity').phase, 'signing_in');
+  started();
+  await flush();
+  assert.equal(c.last('antigravity').step, STEP_SIGN_IN);
+  assert.equal(c.last('antigravity').signInUrl, GOOGLE);
+  t.mock.timers.tick(SIGN_IN_TIMEOUT_MS - 1);
+  await flush();
+  assert.equal(c.last('antigravity').phase, 'signing_in', 'the 5 minutes run from the sign-in, not the start');
+  t.mock.timers.tick(1);
+  await flush();
+  assert.equal(calls.aborted, true);
+  assert.equal(c.last('antigravity').message, SIGN_IN_DIDNT_FINISH);
+});
+
+test('Antigravity sign-in: an agent that has not started after 180 s ends with its own error copy (I3)', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { adapter, calls } = fakeAdapter({ url: GOOGLE, slowStart: new Promise<void>(() => {}) });
+  const c = make({ script: () => ({}), adapter });
+  c.svc.signIn('antigravity');
+  await flush();
+  t.mock.timers.tick(ANTIGRAVITY_START_TIMEOUT_MS - 1);
+  await flush();
+  assert.equal(c.last('antigravity').phase, 'signing_in');
+  t.mock.timers.tick(1);
+  await flush();
+  assert.equal(calls.aborted, true);
+  assert.deepEqual([c.last('antigravity').phase, c.last('antigravity').message, c.last('antigravity').outcome], ['error', ANTIGRAVITY_DIDNT_START, 'failed']);
 });

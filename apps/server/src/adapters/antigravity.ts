@@ -480,7 +480,7 @@ export class AntigravityAdapter implements ProviderAdapter {
    * sign-in finished; aborting stops the agent process, which ends its sign-in listener. The caller bounds
    * how long it waits, through `signal`.
    */
-  async signIn(onUrl: (url: string) => void, signal: AbortSignal): Promise<void> {
+  async signIn(onUrl: (url: string) => void, signal: AbortSignal, onStarted?: () => void): Promise<void> {
     signal.throwIfAborted();
     if (this.authUrlFn) throw new Error('Antigravity sign-in is already running.');
     const startedHere = !this.live && !this.starting;
@@ -493,6 +493,7 @@ export class AntigravityAdapter implements ProviderAdapter {
       if (signal.aborted && startedHere) starting.then((l) => this.recycle(l)).catch(() => {});
       throw e;
     }
+    try { onStarted?.(); } catch { /* the caller's problem */ }
     // Skip only when the agent itself says signed in, never on the settings.json guess.
     if (this.learned === true || (this.learned === null && this.agentFlag === true)) return;
     const method = live.init.authMethods[0]?.id;

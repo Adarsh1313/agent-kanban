@@ -27,6 +27,10 @@ export const SIGN_IN_DIDNT_FINISH = "Sign-in didn't finish. Try again, and keep 
 export const NETWORK_FAILED = "Couldn't reach the download server. Check your connection and try again.";
 export const ANTIGRAVITY_SIGN_OUT_IN_APP = 'Sign out of Antigravity in the Antigravity app.';
 export const STEP_SIGN_IN = 'Finish signing in in your browser';
+export const STEP_STARTING_ANTIGRAVITY = 'Starting Antigravity…';
+export const ANTIGRAVITY_DIDNT_START = "Antigravity didn't start. Try again.";
+// A cold Antigravity start was measured at up to 111 s before it answers; give it 180 s before giving up.
+export const ANTIGRAVITY_START_TIMEOUT_MS = 180_000;
 export const busyMessage = (id: ProviderId) => `${APP[id]} is busy. Wait for it to finish or cancel it.`;
 export const npmMissing = (id: ProviderId) => `Agent Kanban needs npm to install ${APP[id]}. Install Node.js from nodejs.org, then try again.`;
 export const notAllowed = (id: ProviderId) =>
@@ -44,7 +48,8 @@ export class ConnectStateError extends Error {}
 
 /** The parts of the Antigravity adapter ConnectService drives. */
 export interface AntigravityAuth {
-  signIn(onUrl: (url: string) => void, signal: AbortSignal): Promise<void>;
+  /** `onStarted`: the agent is running (it can take minutes to start); the sign-in itself begins now. */
+  signIn(onUrl: (url: string) => void, signal: AbortSignal, onStarted?: () => void): Promise<void>;
   /** false: the agent has no logout method. */
   signOut(signal: AbortSignal): Promise<boolean>;
   /** False while a chat, sign-in or anything else runs on the agent. */
@@ -68,7 +73,7 @@ export interface ConnectServiceOptions {
     adapter: () => Promise<AntigravityAuth | undefined>;
   };
   openBrowser: (url: string) => void;
-  monitor: { check: (provider?: ProviderId) => Promise<unknown> };
+  monitor: { check: (provider?: ProviderId) => Promise<ConnectionHealth[]> };
   registry: { ensure: (id: ProviderId, knownPath?: string) => Promise<UpdatableAdapter | undefined> };
   onUpdate: (s: ConnectState) => void;
   /** Agent Kanban's home (AGENT_KANBAN_HOME): the Antigravity install goes under <home>/.agent-kanban. */
@@ -82,6 +87,7 @@ const isCli = (id: ProviderId): id is Cli => id === 'claude' || id === 'codex';
 /** Why an operation was aborted. */
 class Cancelled extends Error {}
 class TimedOut extends Error {}
+class StartTimedOut extends Error {}
 
 /** The only hosts a provider's sign-in page may be on (exact hostnames). Any other link is never stored. */
 export const SIGN_IN_HOSTS: Record<ProviderId, readonly string[]> = {
@@ -241,7 +247,9 @@ export class ConnectService {
     this.ops.delete(id);
     const outcome = s.outcome ?? (s.phase === 'error' ? 'failed' : 'done');
     this.set(id, { phase: s.phase, step: null, progress: null, signInUrl: null, message: s.message ?? null, lastOp: op.kind, outcome });
-    void this.opts.monitor.check(id).catch(() => {});
+    // Health is re-read at once; a result that contradicts this outcome (or an older failure) clears it, even when
+    // the check finds nothing changed (so the monitor itself doesn't announce it).
+    void this.opts.monitor.check(id).then((hs) => { for (const h of hs ?? []) this.noteHealth(h); }).catch(() => {});
   }
 
   /** The outcome of an aborted operation: Cancel → back where it was; the 5-minute limit → the message. */
@@ -452,22 +460,36 @@ export class ConnectService {
     const adapter = await this.opts.antigravity.adapter().catch(() => undefined);
     if (signal.aborted) return this.finishAborted(id, op);
     if (!adapter) return this.finish(id, op, { phase: 'error', message: notInstalled(id) });
-    this.set(id, { step: STEP_SIGN_IN });
-    // The agent's own authenticate waits up to a day; Agent Kanban gives up after 5 minutes (abort stops the agent).
-    const deadline = setTimeout(() => op.ac.abort(new TimedOut('Sign-in timed out.')), SIGN_IN_TIMEOUT_MS);
+    // A cold agent takes minutes to start: say so until it runs (or prints its link), bounded at 180 s.
+    this.set(id, { step: STEP_STARTING_ANTIGRAVITY });
+    const startLimit = setTimeout(() => op.ac.abort(new StartTimedOut('Antigravity did not start.')), ANTIGRAVITY_START_TIMEOUT_MS);
+    let deadline: NodeJS.Timeout | undefined;
+    const signingIn = () => {
+      if (deadline || signal.aborted || this.ops.get(id) !== op) return;
+      clearTimeout(startLimit);
+      this.set(id, { step: STEP_SIGN_IN });
+      // The agent's own authenticate waits up to a day; Agent Kanban gives up 5 minutes after the sign-in began (abort stops the agent).
+      deadline = setTimeout(() => op.ac.abort(new TimedOut('Sign-in timed out.')), SIGN_IN_TIMEOUT_MS);
+    };
+    const aborted = () => {
+      if (signal.reason instanceof StartTimedOut) return this.finish(id, op, { phase: 'error', message: ANTIGRAVITY_DIDNT_START });
+      this.finishAborted(id, op);
+    };
     try {
       // The agent opens the browser itself; the link is kept only for "Open the browser again".
       await adapter.signIn((url) => {
+        signingIn();
         const href = findHttpsUrl(url, SIGN_IN_HOSTS.antigravity);
         if (href && !signal.aborted && this.ops.get(id) === op) this.set(id, { signInUrl: href });
-      }, signal);
-      if (signal.aborted) return this.finishAborted(id, op);
+      }, signal, signingIn);
+      if (signal.aborted) return aborted();
       this.finish(id, op, { phase: 'idle' });
     } catch (e) {
-      if (signal.aborted) return this.finishAborted(id, op);
+      if (signal.aborted) return aborted();
       console.error('[agent-kanban] Antigravity sign-in failed', e);
       this.finish(id, op, { phase: 'error', message: SIGN_IN_DIDNT_FINISH });
     } finally {
+      clearTimeout(startLimit);
       clearTimeout(deadline);
     }
   }
