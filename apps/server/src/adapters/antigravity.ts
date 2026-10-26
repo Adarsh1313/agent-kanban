@@ -627,7 +627,8 @@ export function acpAction(kind: string | undefined, title = ''): RequestAction {
   if (kind !== undefined && FILE_KINDS.has(kind)) return 'edit';
   if (kind === 'execute') return 'command';
   // 1.3.0 asks for its file tools with no file kind ("Run create_file?", kind other): name them by the tool.
-  if (/\b(create|edit|write|delete|move|replace)_file\b/i.test(title)) return 'edit';
+  // The whole title must be the tool ("Run create_file?"), so a command that merely mentions edit_file is not an edit.
+  if (/^(?:Run\s+)?(?:create|edit|write|delete|move|replace)_file\??$/i.test(title.trim())) return 'edit';
   return 'tool';
 }
 

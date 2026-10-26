@@ -578,4 +578,8 @@ test('acpAction maps ACP tool kinds to edit / command / tool', () => {
   assert.equal(acpAction(undefined, 'Run edit_file?'), 'edit');
   assert.equal(acpAction('other', 'Run search_web?'), 'tool');
   assert.equal(acpAction('execute', 'Run create_file?'), 'command');
+  // Only the whole title names the tool: a command or other call that mentions edit_file is not an edit.
+  assert.equal(acpAction('other', 'Run python fix.py --edit_file a.txt?'), 'tool');
+  assert.equal(acpAction('other', 'grep -r edit_file src'), 'tool');
+  assert.equal(acpAction('other', 'create_file'), 'edit');
 });
