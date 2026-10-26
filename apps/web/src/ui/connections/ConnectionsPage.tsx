@@ -11,7 +11,7 @@ import { usageSummary } from '../usage/model.ts';
 const VENDOR: Record<ProviderId, string> = { claude: 'Anthropic', codex: 'OpenAI', antigravity: 'Google' };
 /** Where the user signs in (design/connections.js). */
 const SIGN_IN_ON: Record<ProviderId, string> = { claude: 'claude.ai', codex: 'chatgpt.com', antigravity: 'your Google account' };
-const OPENED: Record<ProviderId, string> = { claude: 'claude.ai', codex: 'chatgpt.com', antigravity: 'Google sign-in' };
+export const OPENED: Record<ProviderId, string> = { claude: 'claude.ai', codex: 'chatgpt.com', antigravity: 'Google sign-in' };
 /** Notes shown on a connected card (design/connections.js). */
 const NOTE: Partial<Record<ProviderId, string>> = {
   claude: 'Runs Claude Code on this computer with your own sign-in. Anthropic’s rules for using a subscription in other apps changed several times in 2026, so check their current terms.',
@@ -23,7 +23,7 @@ const ANTIGRAVITY_SERVER = 'Uses Google’s official Antigravity server.';
  * What a card shows. The server's operation (ConnectState) wins while one runs; otherwise the health check decides.
  * `dot` is the design's data-state (it colours the status dot in design/views.css).
  */
-type View = 'checking' | 'unknown' | 'connected' | 'degraded' | 'missing' | 'signedout' | 'installing' | 'updating' | 'signin' | 'signingout' | 'error';
+export type View = 'checking' | 'unknown' | 'connected' | 'degraded' | 'missing' | 'signedout' | 'installing' | 'updating' | 'signin' | 'signingout' | 'error';
 const VIEW: Record<View, { dot: string | undefined; word: string }> = {
   checking: { dot: undefined, word: 'Checking…' },
   unknown: { dot: undefined, word: 'Not connected' },
@@ -38,7 +38,7 @@ const VIEW: Record<View, { dot: string | undefined; word: string }> = {
   error: { dot: 'error', word: 'Needs attention' },
 };
 
-const isConnected = (h: ConnectionHealth | undefined) => h?.status === 'connected' || h?.status === 'update_available';
+export const isConnected = (h: ConnectionHealth | undefined) => h?.status === 'connected' || h?.status === 'update_available';
 
 function healthView(h: ConnectionHealth | undefined, loaded: boolean): View {
   if (!h) return loaded ? 'unknown' : 'checking';
@@ -50,7 +50,7 @@ function healthView(h: ConnectionHealth | undefined, loaded: boolean): View {
   }
 }
 
-function cardView(h: ConnectionHealth | undefined, c: ConnectState | undefined, loaded: boolean): View {
+export function cardView(h: ConnectionHealth | undefined, c: ConnectState | undefined, loaded: boolean): View {
   switch (c?.phase) {
     case 'installing': return 'installing';
     case 'updating': return 'updating';
@@ -60,6 +60,12 @@ function cardView(h: ConnectionHealth | undefined, c: ConnectState | undefined, 
     case 'error': return isConnected(h) ? 'connected' : 'error';
     default: return healthView(h, loaded);
   }
+}
+
+/** Try again re-runs what failed; without a record of it, the next step the health check points to. */
+export function retryAction(connect: ConnectState | undefined, health: ConnectionHealth | undefined): ConnectAction {
+  const lastOp = connect?.lastOp ?? null;
+  return lastOp === 'install' || lastOp === 'update' || lastOp === 'signin' ? lastOp : health?.installed === true ? 'signin' : 'install';
 }
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -134,6 +140,48 @@ export async function setProviderSetting(store: Store, provider: ProviderId, key
   }
 }
 
+/**
+ * Runs Install / Sign in / Cancel / … for one provider (shared by the Connections cards and onboarding's Connect rows):
+ * one request at a time, its button aria-disabled while it is in flight, and the design's "Opened … in your browser" toasts.
+ */
+export function useConnectRun(id: ProviderId) {
+  const store = useStoreInstance();
+  /** The action whose request is in flight (its button is aria-disabled; repeat presses are ignored). */
+  const [pending, setPending] = useState<ConnectAction | null>(null);
+  const run = async (action: ConnectAction) => {
+    if (pending) return;
+    setPending(action);
+    try {
+      const ok = await runConnect(store, id, action);
+      if (ok && action === 'open') toast('Opened the sign-in page again');
+      if (ok && action === 'signin') toast(`Opened ${OPENED[id]} in your browser`);
+    } finally {
+      setPending(null);
+    }
+  };
+  const busyProps = (action: ConnectAction) => ({
+    'aria-disabled': pending === action || undefined,
+    'aria-busy': pending === action || undefined,
+    onClick: () => void run(action),
+  });
+  return { pending, run, busyProps };
+}
+
+/** Saves "Show its chats" / "Suggest it" for one provider: one request at a time per switch. */
+export function useProviderToggle(id: ProviderId) {
+  const store = useStoreInstance();
+  const saving = useRef<Record<'showChats' | 'suggest', boolean>>({ showChats: false, suggest: false });
+  return async (key: 'showChats' | 'suggest', on: boolean) => {
+    if (saving.current[key]) return;
+    saving.current[key] = true;
+    try {
+      await setProviderSetting(store, id, key, on);
+    } finally {
+      saving.current[key] = false;
+    }
+  };
+}
+
 const signedInText = (v: boolean | null) => (v === true ? 'Yes' : v === false ? 'No' : 'Unknown');
 
 const cardState = (id: ProviderId) => (s: AppState) => ({
@@ -162,10 +210,8 @@ function ConnectionCard({ id }: { id: ProviderId }) {
   const { health, connect, showChats, suggest, chats, usage, now, loaded } = useStore(cardState(id));
   const [checking, setChecking] = useState(false);
   const [upToDate, setUpToDate] = useState(false);
-  /** The action whose request is in flight (its button is aria-disabled; repeat presses are ignored). */
-  const [pending, setPending] = useState<ConnectAction | null>(null);
-  /** One request at a time per switch. */
-  const saving = useRef<Record<'showChats' | 'suggest', boolean>>({ showChats: false, suggest: false });
+  const { run, busyProps } = useConnectRun(id);
+  const toggle = useProviderToggle(id);
   const [confirm, setConfirm] = useState(false);
   const signOutRef = useRef<HTMLButtonElement>(null);
   const name = providerName(id);
@@ -174,9 +220,7 @@ function ConnectionCard({ id }: { id: ProviderId }) {
   const installed = health?.installed === true;
   const phase = connect?.phase ?? 'idle';
   const message = phase === 'idle' || phase === 'error' ? connect?.message ?? null : null;
-  // Try again re-runs what failed; without a record of it, the next step the health check points to.
-  const lastOp = connect?.lastOp ?? null;
-  const retry: ConnectAction = lastOp === 'install' || lastOp === 'update' || lastOp === 'signin' ? lastOp : installed ? 'signin' : 'install';
+  const retry = retryAction(connect, health);
 
   // The view changed under the focus (its button is gone): focus moves to the card's first action, else the card.
   const sectionRef = useRef<HTMLElement>(null);
@@ -209,33 +253,6 @@ function ConnectionCard({ id }: { id: ProviderId }) {
     }
   };
 
-  const run = async (action: ConnectAction) => {
-    if (pending) return;
-    setPending(action);
-    try {
-      const ok = await runConnect(store, id, action);
-      if (ok && action === 'open') toast('Opened the sign-in page again');
-      if (ok && action === 'signin') toast(`Opened ${OPENED[id]} in your browser`);
-    } finally {
-      setPending(null);
-    }
-  };
-
-  const toggle = async (key: 'showChats' | 'suggest', on: boolean) => {
-    if (saving.current[key]) return;
-    saving.current[key] = true;
-    try {
-      await setProviderSetting(store, id, key, on);
-    } finally {
-      saving.current[key] = false;
-    }
-  };
-
-  const busyProps = (action: ConnectAction) => ({
-    'aria-disabled': pending === action || undefined,
-    'aria-busy': pending === action || undefined,
-    onClick: () => void run(action),
-  });
   const forName = <>{' '}<span className="sr-only">for {name}</span></>;
 
   const checkedText = <small className="conn-checked">{health ? `Checked ${agoLabel(health.checkedAt, now)}` : ''}</small>;

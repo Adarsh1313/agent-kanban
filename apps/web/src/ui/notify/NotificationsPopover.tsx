@@ -6,8 +6,8 @@ import { chime, desktopSupport, enableDesktop, getPrefs, markAllRead, notificati
 
 export const useNotifyPrefs = () => useSyncExternalStore(subscribePrefs, getPrefs, getPrefs);
 
-const BLOCKED = 'Notifications are blocked in your browser settings.';
-const UNSUPPORTED = 'Not supported in this browser.';
+export const BLOCKED = 'Notifications are blocked in your browser settings.';
+export const UNSUPPORTED = 'Not supported in this browser.';
 
 function Rows({ enterId, onOpen, onEntered }: { enterId: string | null; onOpen: () => void; onEntered: () => void }) {
   const store = useStoreInstance();

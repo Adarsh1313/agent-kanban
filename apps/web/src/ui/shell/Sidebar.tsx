@@ -6,6 +6,7 @@ import { uniqueProjects } from '../projects/model.ts';
 import { useStore, useStoreInstance } from '../../state/store.ts';
 import { openHistoryChat, openNewChat, openRowMenu } from '../actions.ts';
 import { Icon, Menu, MenuItem, PROVIDER_IDS, ProviderLogo, StatusIcon, Tooltip, providerName } from '../primitives/index.ts';
+import { replayOnboarding } from '../onboarding/Onboarding.tsx';
 import { navigate, hashFor } from './route.ts';
 import { toggleTheme } from './theme.ts';
 
@@ -169,6 +170,7 @@ const counts = (s: AppState) => {
 };
 
 export function Sidebar() {
+  const store = useStoreInstance();
   const view = useStore((s) => s.ui.view);
   const n = useStore(counts);
   const navRef = useRef<HTMLElement>(null);
@@ -249,7 +251,7 @@ export function Sidebar() {
           <Icon name="settings" />Settings
         </button>
         <Menu anchor={settings} open={menuOpen} onClose={() => setMenuOpen(false)} label="Settings" panes={{
-          root: () => <MenuItem icon="resume" disabled>Replay onboarding</MenuItem>,
+          root: () => <MenuItem icon="play" onSelect={() => { setMenuOpen(false); replayOnboarding(store); }}>Replay onboarding</MenuItem>,
         }} />
       </div>
     </aside>

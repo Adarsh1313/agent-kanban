@@ -11,7 +11,7 @@ const openDialogs: HTMLElement[] = [];
 /** element -> how many open dialogs froze it, and whether it was inert before the first one. */
 const frozenBy = new Map<HTMLElement, { count: number; was: boolean }>();
 
-function freeze(wanted: (n: HTMLElement) => boolean): HTMLElement[] {
+export function freeze(wanted: (n: HTMLElement) => boolean): HTMLElement[] {
   const list = [...document.body.children].filter((n): n is HTMLElement => n instanceof HTMLElement && wanted(n));
   for (const n of list) {
     const f = frozenBy.get(n);
@@ -23,7 +23,7 @@ function freeze(wanted: (n: HTMLElement) => boolean): HTMLElement[] {
 }
 
 /** An element stays inert until the last dialog that froze it closes. */
-function unfreeze(list: HTMLElement[]) {
+export function unfreeze(list: HTMLElement[]) {
   for (const n of list) {
     const f = frozenBy.get(n);
     if (!f) continue;

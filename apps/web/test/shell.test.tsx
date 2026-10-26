@@ -315,10 +315,10 @@ describe('Shell: theme and settings', () => {
     expect(document.documentElement.dataset.theme).toBe('dark');
   });
 
-  it('Settings opens a menu with a disabled Replay onboarding', () => {
+  it('Settings opens a menu with Replay onboarding', () => {
     mount(seeded(), <Shell />);
     fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
     const item = screen.getByRole('menuitem', { name: 'Replay onboarding' });
-    expect(item.getAttribute('aria-disabled')).toBe('true');
+    expect(item.getAttribute('aria-disabled')).toBeNull();
   });
 });

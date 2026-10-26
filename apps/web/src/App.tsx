@@ -4,6 +4,7 @@ import { connectSocket } from './api/socket.ts';
 import { applyEvent } from './state/reducer.ts';
 import { loadAll, noteChatFolder, refetchGaps, syncMissing, useStoreInstance } from './state/store.ts';
 import { applyConnectEvent } from './ui/connections/ConnectionsPage.tsx';
+import { Onboarding } from './ui/onboarding/Onboarding.tsx';
 import { Shell } from './ui/shell/Shell.tsx';
 
 export function App() {
@@ -42,5 +43,10 @@ export function App() {
     return () => conn.close();
   }, [token, store]);
 
-  return <Shell />;
+  return (
+    <>
+      <Shell />
+      <Onboarding />
+    </>
+  );
 }
