@@ -607,7 +607,8 @@ let tempCounter = 0;
  * end-to-end run). Naming the folder in a new chat's first prompt makes it read, write and run commands there.
  */
 export function withFolder(cwd: string, prompt: string): string {
-  return `The working folder for this chat is ${cwd}. Unless asked otherwise, read and write files there and run commands there.\n\n${prompt}`;
+  // JSON quoting escapes control characters, so a folder name can't add lines of its own to the prompt.
+  return `The working folder for this chat is ${JSON.stringify(cwd)}. Unless asked otherwise, read and write files there and run commands there.\n\n${prompt}`;
 }
 
 export function spawnAntigravity(exePath: string, tempDir: string): JsonRpcProcess {

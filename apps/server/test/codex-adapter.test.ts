@@ -138,10 +138,15 @@ test('stop before the turn id is known interrupts once it arrives', async () => 
 });
 
 test('initialize timeout rejects, kills the process, and a later call spawns again', async () => {
-  const { adapter, procs } = make((n) => (n === 0 ? 'hanginit' : ''), { initializeTimeoutMs: 300 });
+  // The first process never answers initialize, so a short timeout always fires however loaded the machine is.
+  const { adapter, procs } = make((n) => (n === 0 ? 'hanginit' : ''), { initializeTimeoutMs: 100 });
   try {
-    await assert.rejects(adapter.startChat({ cwd, prompt: 'hi' }));
+    await assert.rejects(adapter.startChat({ cwd, prompt: 'hi' }), /timed out/);
     assert.equal(procs.length, 1);
+    const killed = procs[0]!;
+    await new Promise<void>((r) => killed.onExit(() => r()));
+    // The second process does answer: give its (cold, possibly slow) start the normal budget so load can't fail it.
+    (adapter as unknown as { initializeTimeoutMs: number }).initializeTimeoutMs = 15_000;
     const r = await adapter.startChat({ cwd, prompt: 'hi' });
     assert.equal(r.sessionRef, 'thr_1');
     assert.equal(procs.length, 2);
