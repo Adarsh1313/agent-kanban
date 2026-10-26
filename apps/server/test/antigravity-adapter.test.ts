@@ -166,6 +166,42 @@ for (const [decision, expected] of [
   });
 }
 
+for (const order of ['after', 'before'] as const) {
+  test(`an approved edit Antigravity redoes in a new call shows as one done step, not failed + done (new call ${order === 'after' ? 'before' : 'after'} the failure)`, async () => {
+    const { adapter, events, waitFor } = make('editperm', { FAKE_EDIT_ORDER: order });
+    try {
+      await adapter.startChat({ cwd, prompt: 'create hello.txt' });
+      const req = await waitFor((e) => e.type === 'request.opened');
+      assert.ok(req.type === 'request.opened');
+      await adapter.respondToRequest('sess_1', req.requestId, 'allow');
+      await waitFor((e) => e.type === 'turn.completed');
+      const calls = events.filter((e) => e.type === 'tool.call');
+      assert.ok(calls.every((c) => c.type === 'tool.call' && c.toolCallId === 'call_a'), JSON.stringify(calls));
+      assert.ok(!calls.some((c) => c.type === 'tool.call' && c.status === 'failed'), JSON.stringify(calls));
+      const last = calls[calls.length - 1]!;
+      assert.ok(last.type === 'tool.call');
+      assert.deepEqual([last.status, last.summary, last.name], ['done', 'Edit hello.txt', 'edit']);
+    } finally { await adapter.dispose(); }
+  });
+}
+
+test('an "approved but never executed" failure that no other call makes up for still shows failed (at the turn end)', async () => {
+  const { adapter, events, waitFor } = make('editperm', { FAKE_EDIT_ORDER: 'nonew' });
+  try {
+    await adapter.startChat({ cwd, prompt: 'create hello.txt' });
+    const req = await waitFor((e) => e.type === 'request.opened');
+    assert.ok(req.type === 'request.opened');
+    await adapter.respondToRequest('sess_1', req.requestId, 'allow');
+    await waitFor((e) => e.type === 'turn.completed');
+    const calls = events.filter((e) => e.type === 'tool.call');
+    const last = calls[calls.length - 1]!;
+    assert.ok(last.type === 'tool.call');
+    assert.deepEqual([last.toolCallId, last.status], ['call_a', 'failed']);
+    const failedAt = events.indexOf(last);
+    assert.ok(failedAt < events.findIndex((e) => e.type === 'turn.completed'));
+  } finally { await adapter.dispose(); }
+});
+
 test('stop cancels the turn: stopped, not turn.completed', async () => {
   const { adapter, events, waitFor } = make('cancel');
   try {

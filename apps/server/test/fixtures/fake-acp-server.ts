@@ -13,6 +13,10 @@
 // FAKE_NEW_DELAY_MS: session/new answers after this delay.
 // FAKE_VERSION: agentInfo.version (default 1.3.0).
 // FAKE_STOP: the stop reason the default turn ends with (default end_turn).
+// editperm: an edit asks permission; after Allow it runs like the real 1.3.0: the work in a NEW call with the same
+//   title, and the approved call ends failed "Tool call was approved but never executed".
+//   FAKE_EDIT_ORDER=after (default): the new call completes, then the approved one fails;
+//   before: the approved one fails, then the new call runs; nonew: it fails and no other call does the work.
 // FAKE_NO_LOGOUT=1: initialize doesn't advertise auth.logout (and logout is method-not-found).
 // Strict about framing: any incoming message without "jsonrpc":"2.0" is rejected (requests) or ignored.
 import { createInterface } from 'node:readline';
@@ -39,6 +43,16 @@ function onPrompt(id: unknown, sessionId: string) {
   if (scenario === 'unknownreq') {
     pendingPrompt = { id, sessionId };
     send({ id: 'u1', method: 'fs/read_text_file', params: { sessionId, path: '/etc/passwd' } });
+    return;
+  }
+  if (scenario === 'editperm') {
+    pendingPrompt = { id, sessionId };
+    update(sessionId, { sessionUpdate: 'tool_call', toolCallId: 'call_a', title: 'Edit hello.txt', kind: 'edit', status: 'pending' });
+    send({ id: PERM_ID, method: 'session/request_permission', params: {
+      sessionId,
+      toolCall: { toolCallId: 'call_a', title: 'Edit hello.txt', kind: 'edit', status: 'pending' },
+      options: [{ optionId: 'allow_once', name: 'Allow', kind: 'allow_once' }, { optionId: 'reject_once', name: 'Reject', kind: 'reject_once' }],
+    } });
     return;
   }
   if (scenario === 'permission' || scenario === 'permcancel') {
@@ -71,6 +85,21 @@ createInterface({ input: process.stdin }).on('line', (line) => {
   }
   if (m.method === undefined) {
     // a response to our permission request
+    if (m.id === PERM_ID && pendingPrompt && scenario === 'editperm') {
+      const sid = pendingPrompt.sessionId;
+      const order = process.env.FAKE_EDIT_ORDER ?? 'after';
+      const never = () => update(sid, { sessionUpdate: 'tool_call_update', toolCallId: 'call_a', status: 'failed',
+        rawOutput: 'Tool call was approved but never executed', content: [{ type: 'content', content: { type: 'text', text: 'Tool call was approved but never executed' } }] });
+      const work = () => {
+        update(sid, { sessionUpdate: 'tool_call', toolCallId: 'call_b', title: 'Edit hello.txt', kind: 'edit', status: 'in_progress' });
+        update(sid, { sessionUpdate: 'tool_call_update', toolCallId: 'call_b', status: 'completed' });
+      };
+      if (order === 'before') { never(); work(); } else if (order === 'nonew') never(); else { work(); never(); }
+      chunk(sid, 'done');
+      reply(pendingPrompt.id, { stopReason: 'end_turn' });
+      pendingPrompt = null;
+      return;
+    }
     if (m.id === PERM_ID && pendingPrompt) {
       const o = m.result?.outcome;
       const picked = o?.outcome === 'selected' ? o.optionId : 'cancelled';

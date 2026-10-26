@@ -45,8 +45,20 @@ interface Live {
   loads: Map<string, Promise<void>>;
 }
 
-interface Turn { live: Live; messageId: string; text: string[]; started: boolean }
-interface Perm { sessionId: string; options: AcpPermissionOption[]; resolve: (d: AcpPermissionDecision) => void }
+interface Turn {
+  live: Live; messageId: string; text: string[]; started: boolean;
+  /** This turn's tool calls: title, and whether they have finished. */
+  calls: Map<string, { title: string; finished: boolean }>;
+  /** Calls the user allowed in this turn. */
+  approved: Set<string>;
+  /** A later call that does an approved call's work, mapped to the approved call's id (its step shows the work). */
+  alias: Map<string, string>;
+  /** Approved calls whose work another call did: their own later updates are dropped. */
+  takenOver: Set<string>;
+  /** Calls that ended "approved but never executed", not shown yet: shown failed at the turn's end unless another call did the work. */
+  held: Set<string>;
+}
+interface Perm { sessionId: string; toolCallId: string | null; options: AcpPermissionOption[]; resolve: (d: AcpPermissionDecision) => void }
 
 export interface AntigravityAdapterOptions {
   exePath: string;
@@ -199,6 +211,7 @@ export class AntigravityAdapter implements ProviderAdapter {
       if (turn.live !== live) continue;
       this.turns.delete(sid);
       this.settlePerms(sid);
+      this.flushHeld(sid, turn);
       if (!deliberate) this.crashedTurn = true; // an exit with nothing running is just "not running"
       // An unasked-for sign-in is reported as signed out, not as a crash.
       if (this.learned === false && deliberate) this.emit({ type: 'error', sessionRef: sid, message: ANTIGRAVITY_SIGNED_OUT });
@@ -253,10 +266,57 @@ export class AntigravityAdapter implements ProviderAdapter {
         const title = typeof u.title === 'string' && u.title ? u.title : known?.title ?? 'Using a tool';
         const kind = typeof u.kind === 'string' && u.kind ? u.kind : known?.kind ?? 'tool';
         this.toolInfo.set(u.toolCallId, { title, kind });
-        this.emit({ type: 'tool.call', sessionRef: sessionId, toolCallId: u.toolCallId, name: kind, summary: title, status: toolStatus(u.status) });
+        const id = this.stepOf(turn, u.toolCallId, title, u);
+        if (id === null) return;
+        const status = toolStatus(u.status);
+        const step = turn.calls.get(id);
+        if (step) step.finished = status !== 'running';
+        const shown = this.toolInfo.get(id) ?? { title, kind };
+        this.emit({ type: 'tool.call', sessionRef: sessionId, toolCallId: id, name: id === u.toolCallId ? kind : shown.kind, summary: id === u.toolCallId ? title : shown.title, status });
         return;
       }
     }
+  }
+
+  /**
+   * The step a tool-call update shows on, or null to drop it. After the user allows an edit, Antigravity 1.3.0 does
+   * the work in a NEW call with the same title and ends the approved one failed, "approved but never executed"
+   * (seen in the Task 7 end-to-end run). One edit then showed as a failed step and a done step. Here the new call
+   * reports on the approved call's step, and the approved call's own failure is dropped; an "approved but never
+   * executed" failure no other call makes up for is shown at the turn's end.
+   */
+  private stepOf(turn: Turn, id: string, title: string, u: any): string | null {
+    const target = turn.alias.get(id);
+    if (target) return target;
+    if (turn.takenOver.has(id)) return null;
+    if (!turn.calls.has(id)) {
+      for (const [other, c] of turn.calls) {
+        if (other === id || c.title !== title || turn.alias.has(other)) continue;
+        if (turn.held.has(other) || (turn.approved.has(other) && !c.finished)) {
+          turn.held.delete(other);
+          turn.alias.set(id, other);
+          turn.takenOver.add(other);
+          return other;
+        }
+      }
+      turn.calls.set(id, { title, finished: false });
+    }
+    if (u.status === 'failed' && neverExecuted(u)) {
+      const step = turn.calls.get(id);
+      if (step) step.finished = true;
+      turn.held.add(id);
+      return null;
+    }
+    return id;
+  }
+
+  /** Shows the held "approved but never executed" failures nothing made up for (the turn is ending). */
+  private flushHeld(sessionId: string, turn: Turn): void {
+    for (const id of turn.held) {
+      const info = this.toolInfo.get(id);
+      this.emit({ type: 'tool.call', sessionRef: sessionId, toolCallId: id, name: info?.kind ?? 'tool', summary: info?.title ?? 'Using a tool', status: 'failed' });
+    }
+    turn.held.clear();
   }
 
   private onPermission(sessionId: string, req: AcpPermissionRequest): Promise<AcpPermissionDecision> {
@@ -265,7 +325,7 @@ export class AntigravityAdapter implements ProviderAdapter {
     const known = typeof tc?.toolCallId === 'string' ? this.toolInfo.get(tc.toolCallId) : undefined;
     const summary = typeof tc?.title === 'string' && tc.title ? tc.title : known?.title ?? 'Use a tool';
     return new Promise((resolve) => {
-      this.perms.set(requestId, { sessionId, options: req.options, resolve });
+      this.perms.set(requestId, { sessionId, toolCallId: typeof tc?.toolCallId === 'string' ? tc.toolCallId : null, options: req.options, resolve });
       this.emit({ type: 'request.opened', sessionRef: sessionId, requestId, kind: 'permission', summary });
     });
   }
@@ -283,7 +343,10 @@ export class AntigravityAdapter implements ProviderAdapter {
   private runTurn(live: Live, sessionId: string, text: string): void {
     const n = (this.turnCount.get(sessionId) ?? 0) + 1;
     this.turnCount.set(sessionId, n);
-    const turn: Turn = { live, messageId: `${sessionId}:${n}`, text: [], started: false };
+    const turn: Turn = {
+      live, messageId: `${sessionId}:${n}`, text: [], started: false,
+      calls: new Map(), approved: new Set(), alias: new Map(), takenOver: new Set(), held: new Set(),
+    };
     this.turns.set(sessionId, turn);
     live.acp.prompt(sessionId, text).then(
       ({ stopReason }) => this.finishTurn(sessionId, turn, stopReason),
@@ -295,6 +358,7 @@ export class AntigravityAdapter implements ProviderAdapter {
     if (this.turns.get(sessionId) !== turn) return;
     this.turns.delete(sessionId);
     this.settlePerms(sessionId);
+    this.flushHeld(sessionId, turn);
     if (turn.text.length > 0) {
       this.emit({ type: 'message.completed', sessionRef: sessionId, messageId: turn.messageId, role: 'assistant', text: turn.text.join('') });
     }
@@ -307,6 +371,7 @@ export class AntigravityAdapter implements ProviderAdapter {
     if (this.turns.get(sessionId) !== turn) return; // a process exit already reported it
     this.turns.delete(sessionId);
     this.settlePerms(sessionId);
+    this.flushHeld(sessionId, turn);
     if (isAuthRequired(err)) this.learned = false;
     const message = isAuthRequired(err) ? ANTIGRAVITY_SIGNED_OUT : err instanceof Error ? err.message : String(err);
     this.emit({ type: 'error', sessionRef: sessionId, message });
@@ -389,6 +454,7 @@ export class AntigravityAdapter implements ProviderAdapter {
     if (!option) {
       console.warn(`[antigravity] no ${want === 'allow' ? 'allow-once' : 'reject'} option was offered (${p.options.map((o) => o.kind).join(', ')}); answered cancelled.`);
     }
+    if (option && want === 'allow' && p.toolCallId) this.turns.get(p.sessionId)?.approved.add(p.toolCallId);
     p.resolve(option ? { optionId: option.optionId } : 'cancelled');
     this.touchIdle();
   }
@@ -558,6 +624,13 @@ export class AntigravityAdapter implements ProviderAdapter {
 
 function isAuthRequired(err: unknown): boolean {
   return (err as { code?: unknown } | null)?.code === AUTH_REQUIRED_CODE;
+}
+
+/** Antigravity's "Tool call was approved but never executed" (in rawOutput or the call's content). */
+function neverExecuted(u: any): boolean {
+  let text = '';
+  try { text = JSON.stringify([u.rawOutput ?? null, u.content ?? null]); } catch { return false; }
+  return /approved but never executed/i.test(text);
 }
 
 function toolStatus(status: unknown): 'running' | 'done' | 'failed' {
