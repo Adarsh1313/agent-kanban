@@ -15,6 +15,24 @@ export interface PopoverProps {
   children: ReactNode;
 }
 
+/** Space between the anchor and the popover, and the least space kept from the window's edges. */
+const GAP = 6;
+const EDGE = 8;
+
+/**
+ * The popover's left edge: the asked alignment (its left edge on the anchor's, or right on right), else the other
+ * alignment when only that one fits, else clamped inside the window on both sides.
+ */
+function horizontal(r: DOMRect, w: number, viewport: number, align: 'left' | 'right'): number {
+  const max = viewport - w - EDGE;
+  const fits = (x: number) => x >= EDGE && x <= max;
+  const preferred = align === 'right' ? r.right - w : r.left;
+  const flipped = align === 'right' ? r.left : r.right - w;
+  if (fits(preferred)) return preferred;
+  if (fits(flipped)) return flipped;
+  return Math.max(EDGE, Math.min(preferred, max));
+}
+
 /**
  * Opens from its anchor (scales from the anchor, never from the centre), closes on an outside press or Escape.
  * Only one popover is open at a time. Stays mounted when closed so it can animate out.
@@ -28,13 +46,23 @@ export function Popover({ anchor, open, onClose, align = 'left', label, classNam
     const pop = ref.current;
     if (!pop || !anchor) return;
     const r = anchor.getBoundingClientRect();
-    const w = pop.offsetWidth || 300;
-    const left = Math.max(8, Math.min(align === 'right' ? r.right - w : r.left, window.innerWidth - w - 8));
-    const h = pop.offsetHeight;
-    // Below the anchor; above it when there is no room below (the sidebar's Settings sits at the bottom).
-    const above = r.bottom + 6 + h > window.innerHeight && r.top - 6 - h >= 8;
+    const left = horizontal(r, pop.offsetWidth || 300, window.innerWidth, align);
+    // The full content height, also while a max-height below makes it scroll (borders included).
+    const h = pop.scrollHeight + (pop.offsetHeight - pop.clientHeight);
+    const room = { below: window.innerHeight - r.bottom - GAP - EDGE, above: r.top - GAP - EDGE };
+    // Below the anchor; above it when it only fits there (the sidebar's Settings sits at the bottom); when it fits
+    // neither way (a short window), on the roomier side, capped to that space and scrolling inside.
+    const above = h > room.below && (h <= room.above || room.above > room.below);
+    const space = Math.max(0, above ? room.above : room.below);
+    if (h > space) {
+      pop.style.maxHeight = `${space}px`;
+      pop.style.overflowY = 'auto';
+    } else {
+      pop.style.maxHeight = '';
+      pop.style.overflowY = '';
+    }
     pop.style.position = 'fixed';
-    pop.style.top = `${above ? r.top - 6 - h : r.bottom + 6}px`;
+    pop.style.top = `${above ? r.top - GAP - Math.min(h, space) : r.bottom + GAP}px`;
     pop.style.left = `${left}px`;
     pop.style.setProperty('--origin', `${r.left + r.width / 2 - left}px ${above ? 'bottom' : 'top'}`);
   }, [anchor, align]);
@@ -42,12 +70,17 @@ export function Popover({ anchor, open, onClose, align = 'left', label, classNam
   useLayoutEffect(() => {
     if (!open) return;
     place();
-    // Follow the anchor when the window is resized or anything scrolls.
+    // Follow the anchor when the window is resized or anything outside the popover scrolls.
+    const onScroll = (e: Event) => { if (!(e.target instanceof Node && ref.current?.contains(e.target))) place(); };
     window.addEventListener('resize', place);
-    document.addEventListener('scroll', place, true);
+    document.addEventListener('scroll', onScroll, true);
+    // Content that changes while open (a model list arriving) can need another height or side.
+    const changed = new MutationObserver(place);
+    if (ref.current) changed.observe(ref.current, { childList: true, subtree: true, characterData: true });
     return () => {
       window.removeEventListener('resize', place);
-      document.removeEventListener('scroll', place, true);
+      document.removeEventListener('scroll', onScroll, true);
+      changed.disconnect();
     };
   }, [open, place]);
 

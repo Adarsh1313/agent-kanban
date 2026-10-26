@@ -95,6 +95,106 @@ describe('Popover', () => {
   });
 });
 
+describe('Popover placement', () => {
+  const realW = window.innerWidth;
+  const realH = window.innerHeight;
+  const viewport = (w: number, h: number) => {
+    Object.defineProperty(window, 'innerWidth', { value: w, configurable: true });
+    Object.defineProperty(window, 'innerHeight', { value: h, configurable: true });
+  };
+  afterEach(() => viewport(realW, realH));
+
+  /** jsdom has no layout: give the anchor a box and the popover a size, then open it. */
+  function placed(o: { anchor: { left: number; top: number; width?: number; height?: number }; w: number; h: number; align?: 'left' | 'right' }) {
+    function P({ open }: { open: boolean }) {
+      const [anchor, setAnchor] = useState<HTMLElement | null>(null);
+      return (
+        <>
+          <button ref={setAnchor}>Anchor</button>
+          <Popover anchor={anchor} open={open} onClose={() => {}} label="Placed" align={o.align}>
+            <button>First</button><button>Second</button>
+          </Popover>
+        </>
+      );
+    }
+    const view = render(<P open={false} />);
+    const { left, top, width = 40, height = 30 } = o.anchor;
+    screen.getByText('Anchor').getBoundingClientRect = () =>
+      ({ left, top, right: left + width, bottom: top + height, width, height, x: left, y: top, toJSON: () => ({}) }) as DOMRect;
+    const pop = screen.getByRole('dialog', { name: 'Placed', hidden: true });
+    let h = o.h;
+    Object.defineProperty(pop, 'offsetWidth', { get: () => o.w, configurable: true });
+    Object.defineProperty(pop, 'scrollHeight', { get: () => h, configurable: true });
+    view.rerender(<P open />);
+    return { pop, grow: (to: number) => { h = to; } };
+  }
+
+  it('fits below the anchor: placed below with no max-height', () => {
+    viewport(1000, 768);
+    const { pop } = placed({ anchor: { left: 100, top: 100 }, w: 260, h: 200 });
+    expect(pop.style.top).toBe('136px');
+    expect(pop.style.maxHeight).toBe('');
+    expect(pop.style.overflowY).toBe('');
+  });
+
+  it('fits only above: placed above, uncapped', () => {
+    viewport(1000, 500);
+    const { pop } = placed({ anchor: { left: 100, top: 400 }, w: 260, h: 200 });
+    expect(pop.style.top).toBe('194px');
+    expect(pop.style.maxHeight).toBe('');
+    expect(pop.style.getPropertyValue('--origin')).toMatch(/bottom$/);
+  });
+
+  it('a short window: on the roomier side, capped to the space there and scrolling inside; focus still moves in', () => {
+    viewport(1000, 500);
+    const { pop } = placed({ anchor: { left: 100, top: 300 }, w: 260, h: 400 });
+    // Below: 500 - 330 - 6 - 8 = 156; above: 300 - 6 - 8 = 286 → above, 286 px tall, its top 8 px from the window's.
+    expect(pop.style.maxHeight).toBe('286px');
+    expect(pop.style.overflowY).toBe('auto');
+    expect(pop.style.top).toBe('8px');
+    expect(pop.contains(document.activeElement)).toBe(true);
+  });
+
+  it('below wins a tie of no room either way, capped below', () => {
+    viewport(1000, 400);
+    const { pop } = placed({ anchor: { left: 100, top: 100 }, w: 260, h: 900 });
+    // Below: 400 - 130 - 14 = 256; above: 100 - 14 = 86.
+    expect(pop.style.top).toBe('136px');
+    expect(pop.style.maxHeight).toBe('256px');
+  });
+
+  it('content that grows while open is placed again', async () => {
+    viewport(1000, 500);
+    const { pop, grow } = placed({ anchor: { left: 100, top: 100 }, w: 260, h: 100 });
+    expect(pop.style.maxHeight).toBe('');
+    grow(600);
+    await act(async () => { pop.appendChild(document.createElement('div')); await Promise.resolve(); });
+    expect(pop.style.maxHeight).toBe('356px');
+  });
+
+  it('a right-aligned popover wider than the room left of its trigger flips to left alignment', () => {
+    viewport(1000, 768);
+    const { pop } = placed({ anchor: { left: 20, top: 100 }, w: 260, h: 100, align: 'right' });
+    expect(pop.style.left).toBe('20px');
+  });
+
+  it('a left-aligned popover near the right edge flips to right alignment', () => {
+    viewport(1000, 768);
+    const { pop } = placed({ anchor: { left: 900, top: 100 }, w: 260, h: 100 });
+    expect(pop.style.left).toBe('680px'); // 940 - 260
+  });
+
+  it('fits neither way: clamped inside the window on both sides', () => {
+    viewport(300, 768);
+    const right = placed({ anchor: { left: 120, top: 100 }, w: 260, h: 100, align: 'right' });
+    // Right-aligned: 160 - 260 < 8; left-aligned: 120 > 300 - 260 - 8 = 32 → clamped, the left edge kept in view.
+    expect(right.pop.style.left).toBe('8px');
+    cleanup();
+    const wide = placed({ anchor: { left: 120, top: 100 }, w: 400, h: 100 });
+    expect(wide.pop.style.left).toBe('8px');
+  });
+});
+
 describe('Menu', () => {
   it('moves between panes with back', () => {
     render(
