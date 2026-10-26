@@ -76,6 +76,11 @@ export interface ConnectServiceOptions {
   monitor: { check: (provider?: ProviderId) => Promise<ConnectionHealth[]> };
   registry: { ensure: (id: ProviderId, knownPath?: string) => Promise<UpdatableAdapter | undefined> };
   onUpdate: (s: ConnectState) => void;
+  /**
+   * Each health the check after an operation found, published even when only checkedAt changed (the monitor itself
+   * announces changes only): the page waits for a check newer than the operation before it trusts health again.
+   */
+  onHealth?: (h: ConnectionHealth) => void;
   /** Agent Kanban's home (AGENT_KANBAN_HOME): the Antigravity install goes under <home>/.agent-kanban. */
   home: string;
   now?: () => Date;
@@ -249,7 +254,12 @@ export class ConnectService {
     this.set(id, { phase: s.phase, step: null, progress: null, signInUrl: null, message: s.message ?? null, lastOp: op.kind, outcome });
     // Health is re-read at once; a result that contradicts this outcome (or an older failure) clears it, even when
     // the check finds nothing changed (so the monitor itself doesn't announce it).
-    void this.opts.monitor.check(id).then((hs) => { for (const h of hs ?? []) this.noteHealth(h); }).catch(() => {});
+    void this.opts.monitor.check(id).then((hs) => {
+      for (const h of hs ?? []) {
+        try { this.opts.onHealth?.(h); } catch (e) { console.error('[agent-kanban] health listener failed', e); }
+        this.noteHealth(h);
+      }
+    }).catch(() => {});
   }
 
   /** The outcome of an aborted operation: Cancel → back where it was; the 5-minute limit → the message. */

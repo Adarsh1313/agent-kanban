@@ -95,6 +95,8 @@ const connect = new ConnectService({
   monitor: connections,
   registry: adapters,
   onUpdate: (state) => broadcast({ type: 'connect.updated', state }),
+  // The check after an operation is always sent (newer checkedAt), so the card stops saying Checking… even when nothing changed.
+  onHealth: (health) => broadcast({ type: 'connection.updated', health }),
   home: akHome,
 });
 connectRef = connect;

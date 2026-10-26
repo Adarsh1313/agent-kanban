@@ -904,3 +904,31 @@ test('Antigravity sign-in: an agent that has not started after 180 s ends with i
   assert.equal(calls.aborted, true);
   assert.deepEqual([c.last('antigravity').phase, c.last('antigravity').message, c.last('antigravity').outcome], ['error', ANTIGRAVITY_DIDNT_START, 'failed']);
 });
+
+test('the check after an operation is always published, even when only checkedAt changed (the card leaves Checking…)', async () => {
+  const { ConnectionMonitor } = await import('../src/health.ts');
+  let clock = new Date('2026-10-22T10:00:00Z');
+  const monitorUpdates: ConnectionHealth[] = [];
+  const monitor = new ConnectionMonitor({
+    providers: ['codex'], findBinary: async () => '/bin/codex', getVersion: async () => '1.0.0', getLatest: async () => '1.0.0',
+    adapters: { ensure: async () => ({ id: 'codex', ping: async () => ({ ok: true, signedIn: true }) }) as never },
+    onUpdate: (h) => monitorUpdates.push(h), now: () => clock,
+  });
+  await monitor.check('codex'); // the health the page already holds
+  assert.equal(monitorUpdates.length, 1);
+  const published: ConnectionHealth[] = [];
+  const svc = new ConnectService({
+    run: fakeRunner(() => ({})).run, npmPath: async () => '/usr/bin/npm', findBinary: async (id) => `/bin/${id}`,
+    antigravity: { install: async () => ({ path: '/ak/agy', version: '1.3.0' }), adapter: async () => undefined },
+    openBrowser: () => {}, monitor, registry: { ensure: async () => undefined },
+    onUpdate: () => {}, onHealth: (h) => published.push(h), home: '/nonexistent-ak-home', now: () => new Date('2026-10-22T10:04:59Z'),
+  });
+  clock = new Date('2026-10-22T10:05:00Z');
+  svc.install('codex'); // already installed: picked up, done
+  for (let i = 0; i < 100 && published.length === 0; i++) await new Promise((r) => setTimeout(r, 5));
+  assert.equal(monitorUpdates.length, 1, 'the monitor itself announces nothing (no change)');
+  assert.equal(published.length, 1);
+  assert.equal(published[0]!.checkedAt, '2026-10-22T10:05:00.000Z');
+  assert.ok(Date.parse(published[0]!.checkedAt) > Date.parse(svc.get('codex').updatedAt), 'newer than the operation');
+  assert.equal(svc.get('codex').outcome, 'done');
+});

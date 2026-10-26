@@ -518,3 +518,12 @@ describe('final review fixes', () => {
     expect(await screen.findByText('Opened Google sign-in in your browser')).toBeTruthy();
   });
 });
+
+describe('cardView after an operation', () => {
+  it('a newer check with the same health ends Checking… (only checkedAt changed)', async () => {
+    const { cardView } = await import('../src/ui/connections/ConnectionsPage.tsx');
+    const done = cs('codex', { lastOp: 'signin', outcome: 'done', updatedAt: ago(0) });
+    expect(cardView(conn('codex', { checkedAt: ago(1) }), done, true)).toBe('checking');
+    expect(cardView(conn('codex', { checkedAt: new Date(NOW + 1000).toISOString() }), done, true)).toBe('connected');
+  });
+});
