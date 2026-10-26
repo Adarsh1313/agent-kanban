@@ -203,6 +203,17 @@ describe('Chat panel: opening and loading', () => {
   });
 });
 
+describe('Chat panel: permission copy', () => {
+  it('a file edit reads "wants to edit a file", another tool "wants to use a tool"', async () => {
+    thread([], [req({ action: 'edit', summary: 'Edit a.txt' }), req({ requestId: 'r2', action: 'tool', summary: 'Fetch a page' })]);
+    mount(seeded([chat({ title: 'Asks', column: 'needs_you', needsReason: 'permission' })]));
+    fireEvent.click(card('Asks'));
+    await waitFor(() => expect(within(panel()).getByText('Edit a.txt')).toBeTruthy());
+    expect(within(panel()).getByText('Claude Code wants to edit a file')).toBeTruthy();
+    expect(within(panel()).getByText('Claude Code wants to use a tool')).toBeTruthy();
+  });
+});
+
 describe('Chat panel: requests and composer', () => {
   it('Allow answers the permission; the card disappears on the following chat.updated', async () => {
     thread([], [req()]);

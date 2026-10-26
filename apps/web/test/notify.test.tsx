@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { applyEvent, applySnapshot, initialState, markAllNotificationsRead, markChatNotificationsRead, markNotificationRead, type AppNotification, type AppState } from '../src/state/reducer.ts';
 import { createStore, StoreProvider, type Store } from '../src/state/store.ts';
 import { Bell } from '../src/ui/notify/Bell.tsx';
-import { markAllRead, onRing, openNotification, reloadPrefs, resetAudioForTests, RING_GAP_MS, startNotifier } from '../src/ui/notify/notifier.ts';
+import { markAllRead, notificationText, onRing, openNotification, reloadPrefs, resetAudioForTests, RING_GAP_MS, startNotifier } from '../src/ui/notify/notifier.ts';
 import { chat } from './helpers.ts';
 
 /* ───────── Browser API fakes ───────── */
@@ -278,6 +278,20 @@ describe('notifier', () => {
 });
 
 /* ───────── Popover ───────── */
+
+describe('permission copy says what it is for', () => {
+  it('a reducer notification keeps the action; edit / tool / command (and unknown) read accordingly', () => {
+    let s = seeded().getState();
+    s = applyEvent(s, { type: 'notification', chatId: 'c1', kind: 'permission', action: 'edit' });
+    expect(s.notifications[0]!.action).toBe('edit');
+    const text = (action?: 'edit' | 'command' | 'tool') => notificationText(s, note({ ...(action ? { action } : {}) }));
+    expect(text('edit')).toBe('Claude Code wants to edit a file');
+    expect(text('tool')).toBe('Claude Code wants to use a tool');
+    expect(text('command')).toBe('Claude Code wants to run a command');
+    expect(text()).toBe('Claude Code wants to run a command');
+    expect(notificationText(s, note({ kind: 'finished', action: 'edit' }))).toBe('Claude Code finished. Ready for review');
+  });
+});
 
 describe('notifications popover', () => {
   it('lists newest first with the design copy, unread styling and relative time', () => {

@@ -9,6 +9,7 @@ import type {
   OpenRequest,
   Project,
   ProviderId,
+  RequestAction,
   ServerEvent,
   Settings,
   ToolCall,
@@ -27,6 +28,8 @@ export type AppNotification = {
   id: string;
   chatId: string;
   kind: Extract<ServerEvent, { type: 'notification' }>['kind'];
+  /** A permission's purpose (edit / command / tool), for its copy. */
+  action?: RequestAction;
   at: string;
   unread: boolean;
 };
@@ -307,7 +310,7 @@ export function applyEvent(s: AppState, e: ServerEvent, now: Date = new Date()):
     case 'request.opened': {
       const cur = s.requests[e.chatId] ?? [];
       if (cur.some((r) => r.requestId === e.requestId)) return mk([], {});
-      const req: OpenRequest = { requestId: e.requestId, kind: e.kind, summary: e.summary, createdAt: now.toISOString() };
+      const req: OpenRequest = { requestId: e.requestId, kind: e.kind, summary: e.summary, createdAt: now.toISOString(), ...(e.action ? { action: e.action } : {}) };
       return mk([requestKey(e.chatId, e.requestId), chatKey(e.chatId)], { requests: { ...s.requests, [e.chatId]: [...cur, req] } });
     }
     case 'request.closed': {
@@ -326,7 +329,7 @@ export function applyEvent(s: AppState, e: ServerEvent, now: Date = new Date()):
     case 'connect.updated':
       return mk([], { connect: mergeConnect(s.connect, [e.state]) });
     case 'notification': {
-      const item: AppNotification = { id: `n${s.sync.seq + 1}`, chatId: e.chatId, kind: e.kind, at: now.toISOString(), unread: true };
+      const item: AppNotification = { id: `n${s.sync.seq + 1}`, chatId: e.chatId, kind: e.kind, ...(e.action ? { action: e.action } : {}), at: now.toISOString(), unread: true };
       return mk([chatKey(e.chatId)], { notifications: [item, ...s.notifications].slice(0, MAX_NOTIFICATIONS) });
     }
   }

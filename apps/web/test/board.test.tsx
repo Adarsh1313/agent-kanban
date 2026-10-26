@@ -146,6 +146,22 @@ describe('Board: movement', () => {
   });
 });
 
+describe('Board: permission badge', () => {
+  it('says what the open permission is for (edit / tool), and run a command when unknown', () => {
+    const r = (requestId: string, action?: 'edit' | 'tool') => ({ requestId, kind: 'permission' as const, summary: 's', createdAt: '2026-10-23T11:00:00.000Z', ...(action ? { action } : {}) });
+    const store = seeded([
+      chat({ id: 'e', title: 'Edits', column: 'needs_you', needsReason: 'permission' }),
+      chat({ id: 't', title: 'Tools', column: 'needs_you', needsReason: 'permission' }),
+      chat({ id: 'u', title: 'Unknown', column: 'needs_you', needsReason: 'permission' }),
+    ]);
+    act(() => store.setState((s) => ({ ...s, requests: { e: [r('1', 'edit')], t: [r('2', 'tool')], u: [r('3')] } })));
+    mount(store);
+    expect(within(card('Edits')).getByText('Wants to edit a file')).toBeTruthy();
+    expect(within(card('Tools')).getByText('Wants to use a tool')).toBeTruthy();
+    expect(within(card('Unknown')).getByText('Wants to run a command')).toBeTruthy();
+  });
+});
+
 describe('Board: a chat that is still starting', () => {
   it('a new Antigravity chat waiting for its session says the first start can take a couple of minutes; others say Getting started…', () => {
     mount(seeded([

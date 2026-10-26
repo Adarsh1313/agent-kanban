@@ -1,4 +1,5 @@
 import { markAllNotificationsRead, markChatNotificationsRead, markNotificationRead, openChatIn, type AppNotification, type AppState } from '../../state/reducer.ts';
+import type { RequestAction } from '@agent-kanban/shared';
 import type { Store } from '../../state/store.ts';
 import { providerName } from '../primitives/ProviderLogo.tsx';
 import { reducedMotion } from '../primitives/motion.ts';
@@ -16,10 +17,15 @@ const NOTE_TEXT: Record<AppNotification['kind'], string> = {
 /** The chat's title, or "A chat" while the chat is not loaded. */
 export const notificationTitle = (s: AppState, n: AppNotification): string => s.chats[n.chatId]?.title || 'A chat';
 
+/** What a permission asks for: "wants to edit a file", "wants to run a command" (also when unknown) or "wants to use a tool". */
+export function permissionText(action: RequestAction | undefined): string {
+  return action === 'edit' ? 'wants to edit a file' : action === 'tool' ? 'wants to use a tool' : NOTE_TEXT.permission;
+}
+
 /** "Claude Code wants to run a command" (the provider is "An agent" while the chat is not loaded). */
 export function notificationText(s: AppState, n: AppNotification): string {
   const chat = s.chats[n.chatId];
-  return `${chat ? providerName(chat.provider) : 'An agent'} ${NOTE_TEXT[n.kind]}`;
+  return `${chat ? providerName(chat.provider) : 'An agent'} ${n.kind === 'permission' ? permissionText(n.action) : NOTE_TEXT[n.kind]}`;
 }
 
 /** Opens the notification's chat in the side panel and marks it read (here and in other tabs). */
