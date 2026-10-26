@@ -89,7 +89,7 @@ describe('applyEvent', () => {
 
   it('connect.updated stores the provider state; an older one (a late fetch) does not replace a newer one', () => {
     const st = (phase: ConnectState['phase'], updatedAt: string): ConnectState =>
-      ({ provider: 'codex', phase, step: null, progress: null, signInUrl: null, message: null, updatedAt });
+      ({ provider: 'codex', phase, step: null, progress: null, signInUrl: null, message: null, lastOp: null, outcome: null, updatedAt });
     let s = applyEvent(initialState(), { type: 'connect.updated', state: st('installing', '2026-10-23T11:00:01.000Z') });
     expect(s.connect.codex!.phase).toBe('installing');
     s = applySnapshot(s, { chats: [], usage: [], suggested: null, connections: [], history: [], projects: [], connect: [st('idle', '2026-10-23T11:00:00.000Z')] });

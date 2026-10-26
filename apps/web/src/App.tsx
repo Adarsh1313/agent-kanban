@@ -3,6 +3,7 @@ import { api, readToken } from './api/client.ts';
 import { connectSocket } from './api/socket.ts';
 import { applyEvent } from './state/reducer.ts';
 import { loadAll, noteChatFolder, refetchGaps, syncMissing, useStoreInstance } from './state/store.ts';
+import { applyConnectEvent } from './ui/connections/ConnectionsPage.tsx';
 import { Shell } from './ui/shell/Shell.tsx';
 
 export function App() {
@@ -22,7 +23,9 @@ export function App() {
     const conn = connectSocket({
       token,
       onEvent: (e) => {
-        store.setState((s) => applyEvent(s, e));
+        // A live connect.updated may announce a finished install / sign-in / update / sign-out.
+        if (e.type === 'connect.updated') applyConnectEvent(store, e.state);
+        else store.setState((s) => applyEvent(s, e));
         // Only events that name a chat can refer to one the store lacks.
         if ('chatId' in e) void syncMissing(store, api).catch(() => {});
         if (e.type === 'message.delta') void refetchGaps(store, api).catch(() => {});

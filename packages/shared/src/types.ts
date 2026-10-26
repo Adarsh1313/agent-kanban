@@ -86,6 +86,9 @@ export type ServerEvent =
   | { type: 'notification'; chatId: string; kind: 'permission' | 'question' | 'finished' | 'limit' | 'error' };
 
 export type ConnectPhase = 'idle' | 'installing' | 'signing_in' | 'signing_out' | 'updating' | 'error';
+export type ConnectOp = 'install' | 'update' | 'signin' | 'signout';
+/** How the last operation ended: 'failed' also covers a sign-in that ran out of time (phase 'idle' with its message). */
+export type ConnectOutcome = 'done' | 'cancelled' | 'failed';
 
 /** What Agent Kanban is doing for a provider right now (install, sign-in, sign-out, update) and how far it got. */
 export interface ConnectState {
@@ -99,6 +102,10 @@ export interface ConnectState {
   signInUrl: string | null;
   /** Error or outcome text to show on the card. */
   message: string | null;
+  /** The operation that ran last (null while none has, or after a health check made its outcome moot). */
+  lastOp: ConnectOp | null;
+  /** How it ended; null while it runs (and as for lastOp). */
+  outcome: ConnectOutcome | null;
   updatedAt: string;
 }
 

@@ -67,11 +67,17 @@ const usage = new UsageService({
   readers, store, onUpdate: (reading) => broadcast({ type: 'usage.updated', reading }),
 });
 const chats = new ChatService({ store, adapters, usage, broadcast: (e) => broadcast(e), claudeHome: join(home, '.claude') });
+/** Set once ConnectService exists; the monitor's first check runs after that. */
+let connectRef: ConnectService | null = null;
 const connections = new ConnectionMonitor({
   providers: PROVIDERS,
   findBinary: findProvider,
   getVersion: makeGetVersion(() => findInstalledAntigravity(akHome)?.version ?? null), getLatest, adapters,
-  onUpdate: (health) => broadcast({ type: 'connection.updated', health }),
+  onUpdate: (health) => {
+    broadcast({ type: 'connection.updated', health });
+    // A check that shows the last connect failure no longer holds clears it (e.g. signed in from a terminal).
+    connectRef?.noteHealth(health);
+  },
 });
 const settings = new SettingsStore(store);
 const connect = new ConnectService({
@@ -91,6 +97,7 @@ const connect = new ConnectService({
   onUpdate: (state) => broadcast({ type: 'connect.updated', state }),
   home: akHome,
 });
+connectRef = connect;
 const api = createApi({ chats, usage, history: () => readAllHistory(home), token, connections, adapters, connect, settings });
 broadcast = api.broadcast;
 

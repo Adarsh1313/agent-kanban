@@ -1,7 +1,7 @@
 // ConnectService: installs, signs in, signs out and updates each provider from the app, using only the
 // official tools (npm for Claude Code and Codex, Google's pinned release for Antigravity, each tool's own
 // sign-in). It never reads, stores or forwards tokens: it starts the tool's sign-in and watches the tool's status.
-import type { ConnectPhase, ConnectState, ProviderId } from '@agent-kanban/shared';
+import type { ConnectionHealth, ConnectOp, ConnectOutcome, ConnectPhase, ConnectState, ProviderId } from '@agent-kanban/shared';
 import type { CommandRunner, RunningCommand } from './run.ts';
 import type { InstallOptions, InstalledAntigravity } from './antigravity-install.ts';
 
@@ -147,7 +147,10 @@ export function npmFailureMessage(id: ProviderId, output: string, errorCode?: st
   return installFailed(id);
 }
 
-interface Op { ac: AbortController; done?: Promise<void> }
+interface Op { ac: AbortController; kind: ConnectOp; done?: Promise<void> }
+
+const OP_OF: Partial<Record<ConnectPhase, ConnectOp>> = { installing: 'install', updating: 'update', signing_in: 'signin', signing_out: 'signout' };
+type Finish = { phase: 'idle' | 'error'; message?: string | null; outcome?: ConnectOutcome };
 
 export class ConnectService {
   private opts: ConnectServiceOptions;
@@ -162,7 +165,7 @@ export class ConnectService {
     this.opts = opts;
     this.now = opts.now ?? (() => new Date());
     for (const id of PROVIDERS) {
-      this.state.set(id, { provider: id, phase: 'idle', step: null, progress: null, signInUrl: null, message: null, updatedAt: this.now().toISOString() });
+      this.state.set(id, { provider: id, phase: 'idle', step: null, progress: null, signInUrl: null, message: null, lastOp: null, outcome: null, updatedAt: this.now().toISOString() });
     }
   }
 
@@ -222,9 +225,9 @@ export class ConnectService {
 
   private start(id: ProviderId, phase: ConnectPhase, job: (op: Op) => Promise<void>): ConnectState {
     if (this.ops.has(id)) throw new ConnectBusyError(busyMessage(id));
-    const op: Op = { ac: new AbortController() };
+    const op: Op = { ac: new AbortController(), kind: OP_OF[phase]! };
     this.ops.set(id, op);
-    this.set(id, { phase, step: null, progress: null, signInUrl: null, message: null });
+    this.set(id, { phase, step: null, progress: null, signInUrl: null, message: null, lastOp: null, outcome: null });
     op.done = job(op).catch((e) => {
       console.error(`[agent-kanban] ${APP[id]} ${phase} failed`, e);
       if (this.ops.get(id) === op) this.finish(id, op, { phase: 'error', message: phase === 'signing_in' ? SIGN_IN_DIDNT_FINISH : 'Something went wrong. Try again.' });
@@ -233,17 +236,36 @@ export class ConnectService {
   }
 
   /** Ends the operation (a new one may start right away) and publishes its final state, then re-checks health. */
-  private finish(id: ProviderId, op: Op, s: { phase: 'idle' | 'error'; message?: string | null }): void {
+  private finish(id: ProviderId, op: Op, s: Finish): void {
     if (this.ops.get(id) !== op) return;
     this.ops.delete(id);
-    this.set(id, { phase: s.phase, step: null, progress: null, signInUrl: null, message: s.message ?? null });
+    const outcome = s.outcome ?? (s.phase === 'error' ? 'failed' : 'done');
+    this.set(id, { phase: s.phase, step: null, progress: null, signInUrl: null, message: s.message ?? null, lastOp: op.kind, outcome });
     void this.opts.monitor.check(id).catch(() => {});
   }
 
   /** The outcome of an aborted operation: Cancel → back where it was; the 5-minute limit → the message. */
   private finishAborted(id: ProviderId, op: Op): void {
-    const r = op.ac.signal.reason;
-    this.finish(id, op, { phase: 'idle', message: r instanceof TimedOut ? SIGN_IN_DIDNT_FINISH : null });
+    const timedOut = op.ac.signal.reason instanceof TimedOut;
+    this.finish(id, op, { phase: 'idle', message: timedOut ? SIGN_IN_DIDNT_FINISH : null, outcome: timedOut ? 'failed' : 'cancelled' });
+  }
+
+  /**
+   * A health check that contradicts the last operation's failure (signed in after a failed or timed-out
+   * sign-in, installed after a failed install, …) clears its message and outcome, so the card stops showing it.
+   */
+  noteHealth(h: ConnectionHealth): void {
+    const id = h.provider;
+    const s = this.state.get(id);
+    if (!s || this.ops.has(id) || !s.lastOp || s.outcome === 'done' || (s.message === null && s.outcome === null)) return;
+    const connected = h.status === 'connected' || h.status === 'update_available';
+    const moot =
+      s.lastOp === 'install' ? h.installed
+        : s.lastOp === 'update' ? h.installed && !h.updateAvailable
+          : s.lastOp === 'signin' ? connected || h.signedIn === true
+            : h.installed && h.signedIn === false;
+    if (s.outcome === 'cancelled' && s.message === null) return;
+    if (moot) this.set(id, { phase: 'idle', message: null, outcome: null });
   }
 
   /** Runs a command to the end, killed on abort (or after `timeoutMs`). */
@@ -462,7 +484,7 @@ export class ConnectService {
       const limit = setTimeout(() => op.ac.abort(new Error('Sign-out timed out.')), ANTIGRAVITY_SIGN_OUT_TIMEOUT_MS);
       try {
         const done = await adapter.signOut(signal);
-        this.finish(id, op, { phase: 'idle', message: done ? null : ANTIGRAVITY_SIGN_OUT_IN_APP });
+        this.finish(id, op, done ? { phase: 'idle' } : { phase: 'idle', message: ANTIGRAVITY_SIGN_OUT_IN_APP, outcome: 'failed' });
       } catch (e) {
         if (signal.reason instanceof Cancelled) return this.finishAborted(id, op);
         console.error('[agent-kanban] Antigravity sign-out failed', e);

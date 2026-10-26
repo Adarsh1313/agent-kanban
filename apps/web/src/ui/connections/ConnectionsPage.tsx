@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from 'react';
 import type { ConnectionHealth, ConnectState, ProviderId } from '@agent-kanban/shared';
 import { api, type ConnectAction } from '../../api/client.ts';
-import { applySettings, mergeConnect, type AppState } from '../../state/reducer.ts';
+import { applyEvent, applySettings, mergeConnect, type AppState } from '../../state/reducer.ts';
 import { refreshHistory, refreshProjects, useStore, useStoreInstance, type Store } from '../../state/store.ts';
 import { Icon, Popover, PROVIDER_IDS, ProviderLogo, providerName, StatusIcon, SwapText, Switch, toast } from '../primitives/index.ts';
 import { cssMs, reducedMotion } from '../primitives/motion.ts';
@@ -64,6 +64,32 @@ function cardView(h: ConnectionHealth | undefined, c: ConnectState | undefined, 
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
+const RUNNING = new Set(['installing', 'updating', 'signing_in', 'signing_out']);
+
+/**
+ * The toast for an operation that just finished, seen live (an event moving a running phase to idle with
+ * outcome 'done'); null otherwise. Never used for loads or resyncs, so a finished operation is not announced twice.
+ */
+export function connectDoneToast(prev: ConnectState | undefined, next: ConnectState, health: ConnectionHealth | undefined): string | null {
+  if (!prev || !RUNNING.has(prev.phase) || next.phase !== 'idle' || next.outcome !== 'done') return null;
+  if (Date.parse(next.updatedAt) < Date.parse(prev.updatedAt)) return null; // an older state the store ignores
+  const name = providerName(next.provider);
+  switch (next.lastOp) {
+    case 'signin': return `${name} is connected. Its chats now show in Recent chats`;
+    case 'update': return health?.latestVersion ? `${name} updated to ${health.latestVersion}` : `${name} updated`;
+    case 'signout': return `Signed out of ${name}`;
+    default: return null;
+  }
+}
+
+/** Applies a live connect.updated event, toasting an operation that just finished. */
+export function applyConnectEvent(store: Store, state: ConnectState): void {
+  const s = store.getState();
+  const text = connectDoneToast(s.connect[state.provider], state, s.connections[state.provider]);
+  store.setState((cur) => applyEvent(cur, { type: 'connect.updated', state }));
+  if (text) toast(text);
+}
+
 /** Asks the server to check one provider again; the answer goes into the store. A failure toasts the server's text and keeps the card. */
 export async function checkConnection(store: Store, provider: ProviderId): Promise<ConnectionHealth[] | null> {
   try {
@@ -122,10 +148,10 @@ const cardState = (id: ProviderId) => (s: AppState) => ({
 });
 
 /** The install / update progress bar: scaleX via --p (design/views.css); no value when it can't be measured. */
-function Progress({ value, label }: { value: number | null; label: string }) {
+function Progress({ value, label, step }: { value: number | null; label: string; step: string }) {
   const p = value === null ? 0 : Math.max(0, Math.min(1, value));
   return (
-    <div className="progress" role="progressbar" aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={value === null ? undefined : Math.round(p * 100)}>
+    <div className="progress" role="progressbar" aria-label={label} aria-valuetext={step} aria-valuemin={0} aria-valuemax={100} aria-valuenow={value === null ? undefined : Math.round(p * 100)}>
       <i style={{ '--p': p } as CSSProperties} />
     </div>
   );
@@ -138,7 +164,8 @@ function ConnectionCard({ id }: { id: ProviderId }) {
   const [upToDate, setUpToDate] = useState(false);
   /** The action whose request is in flight (its button is aria-disabled; repeat presses are ignored). */
   const [pending, setPending] = useState<ConnectAction | null>(null);
-  const saving = useRef(false);
+  /** One request at a time per switch. */
+  const saving = useRef<Record<'showChats' | 'suggest', boolean>>({ showChats: false, suggest: false });
   const [confirm, setConfirm] = useState(false);
   const signOutRef = useRef<HTMLButtonElement>(null);
   const name = providerName(id);
@@ -147,13 +174,25 @@ function ConnectionCard({ id }: { id: ProviderId }) {
   const installed = health?.installed === true;
   const phase = connect?.phase ?? 'idle';
   const message = phase === 'idle' || phase === 'error' ? connect?.message ?? null : null;
+  // Try again re-runs what failed; without a record of it, the next step the health check points to.
+  const lastOp = connect?.lastOp ?? null;
+  const retry: ConnectAction = lastOp === 'install' || lastOp === 'update' || lastOp === 'signin' ? lastOp : installed ? 'signin' : 'install';
 
-  // A sign-out that finished without a message worked.
-  const lastPhase = useRef(phase);
-  useEffect(() => {
-    if (lastPhase.current === 'signing_out' && phase === 'idle' && !connect?.message) toast(`Signed out of ${name}`);
-    lastPhase.current = phase;
-  }, [phase, connect?.message, name]);
+  // The view changed under the focus (its button is gone): focus moves to the card's first action, else the card.
+  const sectionRef = useRef<HTMLElement>(null);
+  const focusInside = useRef(false);
+  const prevView = useRef(view);
+  useLayoutEffect(() => {
+    const sec = sectionRef.current;
+    if (sec && prevView.current !== view && focusInside.current) {
+      const active = document.activeElement;
+      if (!active || active === document.body || !document.contains(active)) {
+        (sec.querySelector<HTMLElement>('.conn-foot button') ?? sec).focus({ preventScroll: true });
+      }
+    }
+    prevView.current = view;
+    focusInside.current = !!sec && sec.contains(document.activeElement);
+  });
   // Another state (a new version, a sign-out) makes an earlier "Up to date" stale.
   useEffect(() => { setUpToDate(false); }, [view, health?.version]);
 
@@ -176,18 +215,19 @@ function ConnectionCard({ id }: { id: ProviderId }) {
     try {
       const ok = await runConnect(store, id, action);
       if (ok && action === 'open') toast('Opened the sign-in page again');
+      if (ok && action === 'signin') toast(`Opened ${OPENED[id]} in your browser`);
     } finally {
       setPending(null);
     }
   };
 
   const toggle = async (key: 'showChats' | 'suggest', on: boolean) => {
-    if (saving.current) return;
-    saving.current = true;
+    if (saving.current[key]) return;
+    saving.current[key] = true;
     try {
       await setProviderSetting(store, id, key, on);
     } finally {
-      saving.current = false;
+      saving.current[key] = false;
     }
   };
 
@@ -196,6 +236,7 @@ function ConnectionCard({ id }: { id: ProviderId }) {
     'aria-busy': pending === action || undefined,
     onClick: () => void run(action),
   });
+  const forName = <>{' '}<span className="sr-only">for {name}</span></>;
 
   const checkedText = <small className="conn-checked">{health ? `Checked ${agoLabel(health.checkedAt, now)}` : ''}</small>;
   // aria-disabled, not disabled, while checking: focus stays on the button (check() ignores repeat presses).
@@ -238,7 +279,7 @@ function ConnectionCard({ id }: { id: ProviderId }) {
       foot = (
         <>
           {health?.updateAvailable && health.latestVersion
-            ? <button className="btn" type="button" {...busyProps('update')}><Icon name="refresh" size="sm" />Update to {health.latestVersion}</button>
+            ? <button className="btn" type="button" {...busyProps('update')}><Icon name="refresh" size="sm" />Update to {health.latestVersion}{forName}</button>
             : (
               <button className="btn ghost refresh" type="button" onClick={check} aria-disabled={checking || undefined} aria-busy={checking || undefined}>
                 {checking ? <><StatusIcon state="running" />Checking…</> : upToDate ? <><Icon name="check" size="sm" />Up to date</> : <><Icon name="refresh" size="sm" />Check for updates</>}
@@ -281,10 +322,10 @@ function ConnectionCard({ id }: { id: ProviderId }) {
       body = (
         <>
           <SwapText text={step} className="step-text" render={(t) => <><Icon name={t === 'Installed' ? 'check' : 'refresh'} size="sm" />{t}</>} />
-          <Progress value={connect?.progress ?? null} label={view === 'updating' ? 'Update progress' : 'Install progress'} />
+          <Progress value={connect?.progress ?? null} step={step} label={view === 'updating' ? 'Update progress' : 'Install progress'} />
         </>
       );
-      foot = <><span className="grow" /><button className="btn ghost" type="button" {...busyProps('cancel')}>Cancel</button></>;
+      foot = <><span className="grow" /><button className="btn ghost" type="button" {...busyProps('cancel')}>Cancel{forName}</button></>;
       break;
     }
     case 'signin':
@@ -296,9 +337,9 @@ function ConnectionCard({ id }: { id: ProviderId }) {
       );
       foot = (
         <>
-          {connect?.signInUrl && <button className="link-btn" type="button" {...busyProps('open')}><Icon name="external" size="sm" />Open the browser again</button>}
+          {connect?.signInUrl && <button className="link-btn" type="button" {...busyProps('open')}><Icon name="external" size="sm" />Open the browser again{forName}</button>}
           <span className="grow" />
-          <button className="btn ghost" type="button" {...busyProps('cancel')}>Cancel</button>
+          <button className="btn ghost" type="button" {...busyProps('cancel')}>Cancel{forName}</button>
         </>
       );
       break;
@@ -306,7 +347,8 @@ function ConnectionCard({ id }: { id: ProviderId }) {
       body = <span className="step-text"><StatusIcon state="running" />{connect?.step ?? 'Signing out…'}</span>;
       break;
     case 'error':
-      foot = <>{checkedText}<span className="grow" />{checkNow}<button className="btn primary" type="button" {...busyProps(installed ? 'signin' : 'install')}>Try again</button></>;
+      if (!message) body = <span className="step-text conn-error" role="alert"><Icon name="x" size="sm" />Something went wrong. Try again.</span>;
+      foot = <>{checkedText}<span className="grow" />{checkNow}<button className="btn primary" type="button" {...busyProps(retry)}>Try again{forName}</button></>;
       break;
     case 'unknown':
     case 'checking':
@@ -315,21 +357,23 @@ function ConnectionCard({ id }: { id: ProviderId }) {
   }
 
   return (
-    <section className="conn" data-conn={id} data-state={dot} aria-label={name}>
+    <section className="conn" data-conn={id} data-state={dot} aria-label={name} ref={sectionRef} tabIndex={-1} onFocus={() => { focusInside.current = true; }}>
       <div className="conn-head">
         <ProviderLogo id={id} />
         <div className="t"><h4 className="conn-name">{name}</h4><small>{VENDOR[id]}</small></div>
         <span className="conn-state" role="status"><i /><span>{word}</span></span>
       </div>
       <div className="conn-body">
-        {message && <span className="step-text conn-error" role="alert"><Icon name="x" size="sm" />{message}</span>}
+        {message && (phase === 'error'
+          ? <span className="step-text conn-error" role="alert"><Icon name="x" size="sm" />{message}</span>
+          : <div className="conn-note conn-msg" role="status"><Icon name="help" />{message}</div>)}
         {body}
         {health?.message && <div className="conn-note"><Icon name="help" />{health.message}</div>}
         {id === 'antigravity' && <div className="conn-note"><Icon name="help" />{ANTIGRAVITY_SERVER}</div>}
       </div>
       <div className="conn-foot">{foot}</div>
       {view === 'connected' && (
-        <Popover anchor={signOutRef.current} open={confirm} onClose={() => setConfirm(false)} align="right" label={`Sign out of ${name}?`} className="confirm" role="alertdialog">
+        <Popover anchor={signOutRef.current} open={confirm} onClose={() => setConfirm(false)} align="right" label={`Sign out of ${name}?`} className="confirm" role="dialog">
           <b>Sign out of {name}?</b>
           <p>Agent Kanban stops starting {name} chats and reading its usage. Your chats stay in {name}, and running chats keep going there.</p>
           <div className="row">

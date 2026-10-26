@@ -51,7 +51,7 @@ describe('store', () => {
   it('loadAll loads the connect states and settings', async () => {
     const on = { claude: true, codex: true, antigravity: true };
     const settings = { onboarded: true, showChats: { ...on, codex: false }, suggest: on };
-    const st = { provider: 'codex' as const, phase: 'installing' as const, step: 'Downloading Codex…', progress: 0.3, signInUrl: null, message: null, updatedAt: '2026-10-23T11:00:00.000Z' };
+    const st = { provider: 'codex' as const, phase: 'installing' as const, step: 'Downloading Codex…', progress: 0.3, signInUrl: null, message: null, lastOp: null, outcome: null, updatedAt: '2026-10-23T11:00:00.000Z' };
     const store = createStore(initialState());
     await loadAll(store, fakeApi({ connectStates: async () => [st], settings: async () => settings }));
     expect(store.getState().connect.codex).toEqual(st);

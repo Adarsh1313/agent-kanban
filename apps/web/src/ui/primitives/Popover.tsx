@@ -11,7 +11,7 @@ export interface PopoverProps {
   /** Accessible name. */
   label: string;
   className?: string;
-  role?: 'dialog' | 'alertdialog' | 'menu' | 'listbox';
+  role?: 'dialog' | 'menu' | 'listbox';
   children: ReactNode;
 }
 

@@ -4,8 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError, api } from '../src/api/client.ts';
 import { applyEvent, applySnapshot, initialState } from '../src/state/reducer.ts';
 import { createStore, StoreProvider, type Store } from '../src/state/store.ts';
-import { ConnectionsPage } from '../src/ui/connections/ConnectionsPage.tsx';
-import { Toasts } from '../src/ui/primitives/toast.tsx';
+import { applyConnectEvent, ConnectionsPage } from '../src/ui/connections/ConnectionsPage.tsx';
+import { dismissToast, toast, Toasts } from '../src/ui/primitives/toast.tsx';
 import { usageSummary } from '../src/ui/usage/model.ts';
 
 vi.mock('../src/api/client.ts', async (orig) => {
@@ -32,7 +32,7 @@ const hist = (provider: ProviderId, n: number): HistoryChat[] =>
 const ON = { claude: true, codex: true, antigravity: true };
 const SETTINGS: Settings = { onboarded: true, showChats: ON, suggest: ON };
 const cs = (provider: ProviderId, over: Partial<ConnectState> = {}): ConnectState => ({
-  provider, phase: 'idle', step: null, progress: null, signInUrl: null, message: null, updatedAt: ago(0), ...over,
+  provider, phase: 'idle', step: null, progress: null, signInUrl: null, message: null, lastOp: null, outcome: null, updatedAt: ago(0), ...over,
 });
 
 function seeded(connections: ConnectionHealth[], usage: UsageReading[] = [], history: HistoryChat[] = [], connect: ConnectState[] = [], settings: Settings | null = SETTINGS): Store {
@@ -60,7 +60,12 @@ beforeEach(() => {
   mocked.projects.mockResolvedValue([]);
   try { localStorage.clear(); } catch { /* none */ }
 });
-afterEach(() => { cleanup(); });
+afterEach(() => {
+  cleanup();
+  // Toasts live in module state: clear the ones this test left.
+  const last = toast('');
+  for (let i = 1; i <= last; i++) dismissToast(i);
+});
 
 describe('usageSummary', () => {
   it('reads both windows, or says why it cannot', () => {
@@ -174,7 +179,7 @@ describe('connections page', () => {
 
     mocked.checkConnections.mockResolvedValueOnce([conn('claude', { latestVersion: '1.1.0', updateAvailable: true, status: 'update_available' })]);
     fireEvent.click(btn('claude', 'Up to date for Claude Code'));
-    await waitFor(() => expect(btn('claude', 'Update to 1.1.0')).toBeTruthy());
+    await waitFor(() => expect(btn('claude', 'Update to 1.1.0 for Claude Code')).toBeTruthy());
   });
 
   it('a failed check toasts the server text and leaves the card unchanged', async () => {
@@ -217,7 +222,7 @@ describe('connections actions', () => {
     // The step text crossfades: the old text blurs out first, then the new one comes in.
     await waitFor(() => expect(card('antigravity').querySelector('.step-text')!.textContent).toBe('Checking the download'));
 
-    fireEvent.click(btn('antigravity', 'Cancel'));
+    fireEvent.click(btn('antigravity', 'Cancel for Antigravity'));
     expect(mocked.connect).toHaveBeenLastCalledWith('antigravity', 'cancel');
   });
 
@@ -225,11 +230,11 @@ describe('connections actions', () => {
     mocked.connect.mockResolvedValue(cs('antigravity', { phase: 'installing' }));
     const store = seeded(ALL());
     mount(store);
-    live(store, cs('antigravity', { phase: 'error', message: 'The download didn’t finish. Try again.' }));
+    live(store, cs('antigravity', { phase: 'error', message: 'The download didn’t finish. Try again.', lastOp: 'install', outcome: 'failed' }));
     expect(card('antigravity').dataset.state).toBe('error');
     expect(within(card('antigravity')).getByRole('status').textContent).toBe('Needs attention');
     expect(within(card('antigravity')).getByRole('alert').textContent).toBe('The download didn’t finish. Try again.');
-    fireEvent.click(btn('antigravity', 'Try again'));
+    fireEvent.click(btn('antigravity', 'Try again for Antigravity'));
     expect(mocked.connect).toHaveBeenCalledWith('antigravity', 'install');
   });
 
@@ -244,15 +249,15 @@ describe('connections actions', () => {
     expect(within(card('codex')).getByRole('status').textContent).toBe('Waiting for sign-in');
     expect(card('codex').textContent).toContain('Finish signing in in your browser');
     expect(card('codex').textContent).toContain('We opened chatgpt.com. This page updates on its own when you’re done.');
-    expect(within(card('codex')).queryByRole('button', { name: 'Open the browser again' })).toBeNull();
+    expect(within(card('codex')).queryByRole('button', { name: 'Open the browser again for Codex' })).toBeNull();
 
     live(store, cs('codex', { phase: 'signing_in', step: 'Finish signing in in your browser', signInUrl: 'https://auth.openai.com/oauth/authorize?x=1' }));
     expect(card('codex').querySelector('a[href]')).toBeNull();
-    fireEvent.click(btn('codex', 'Open the browser again'));
+    fireEvent.click(btn('codex', 'Open the browser again for Codex'));
     expect(mocked.connect).toHaveBeenLastCalledWith('codex', 'open');
     expect(await screen.findByText('Opened the sign-in page again')).toBeTruthy();
 
-    fireEvent.click(btn('codex', 'Cancel'));
+    fireEvent.click(btn('codex', 'Cancel for Codex'));
     expect(mocked.connect).toHaveBeenLastCalledWith('codex', 'cancel');
   });
 
@@ -260,7 +265,11 @@ describe('connections actions', () => {
     const msg = "Sign-in didn't finish. Try again, and keep the browser window open until it says you're done.";
     mount(seeded([conn('codex', { status: 'signed_out', signedIn: false })], [], [], [cs('codex', { message: msg })]));
     expect(card('codex').dataset.state).toBe('signedout');
-    expect(within(card('codex')).getByRole('alert').textContent).toBe(msg);
+    // An idle message is a neutral note (role=status), not an alert.
+    expect(within(card('codex')).queryByRole('alert')).toBeNull();
+    const note = card('codex').querySelector('.conn-msg')!;
+    expect(note.getAttribute('role')).toBe('status');
+    expect(note.textContent).toBe(msg);
     expect(btn('codex', 'Sign in to Codex')).toBeTruthy();
   });
 
@@ -268,13 +277,13 @@ describe('connections actions', () => {
     mount(seeded(ALL(), [], [], [cs('codex', { phase: 'error', message: 'Couldn’t install Codex. Try again, or install Codex yourself.' })]));
     expect(card('codex').dataset.state).toBe('connected');
     expect(within(card('codex')).getByRole('alert').textContent).toBe('Couldn’t install Codex. Try again, or install Codex yourself.');
-    expect(btn('codex', 'Update to 0.157.0')).toBeTruthy();
+    expect(btn('codex', 'Update to 0.157.0 for Codex')).toBeTruthy();
   });
 
   it('Update to x.y.z calls the update route and shows its progress', async () => {
     mocked.connect.mockResolvedValue(cs('codex', { phase: 'updating', step: 'Downloading Codex…', progress: 0.1 }));
     mount(seeded(ALL()));
-    fireEvent.click(btn('codex', 'Update to 0.157.0'));
+    fireEvent.click(btn('codex', 'Update to 0.157.0 for Codex'));
     expect(mocked.connect).toHaveBeenCalledWith('codex', 'update');
     await waitFor(() => expect(within(card('codex')).getByRole('status').textContent).toBe('Updating'));
     expect(within(card('codex')).getByRole('progressbar', { name: 'Update progress' }).getAttribute('aria-valuenow')).toBe('10');
@@ -286,7 +295,7 @@ describe('connections actions', () => {
     mount(store);
     const so = btn('claude', 'Sign out of Claude Code');
     fireEvent.click(so);
-    const pop = screen.getByRole('alertdialog', { name: 'Sign out of Claude Code?' });
+    const pop = screen.getByRole('dialog', { name: 'Sign out of Claude Code?' });
     expect(pop.dataset.state).toBe('open');
     expect(pop.textContent).toContain('Agent Kanban stops starting Claude Code chats and reading its usage. Your chats stay in Claude Code, and running chats keep going there.');
     expect(document.activeElement).toBe(within(pop).getByRole('button', { name: 'Cancel' }));
@@ -298,7 +307,7 @@ describe('connections actions', () => {
     fireEvent.click(within(pop).getByRole('button', { name: 'Sign out' }));
     expect(mocked.connect).toHaveBeenCalledWith('claude', 'signout');
     await waitFor(() => expect(within(card('claude')).getByRole('status').textContent).toBe('Signing out'));
-    live(store, cs('claude', { phase: 'idle', updatedAt: new Date(NOW + 1000).toISOString() }));
+    act(() => applyConnectEvent(store, cs('claude', { phase: 'idle', lastOp: 'signout', outcome: 'done', updatedAt: new Date(NOW + 1000).toISOString() })));
     expect(await screen.findByText('Signed out of Claude Code')).toBeTruthy();
   });
 
@@ -306,7 +315,7 @@ describe('connections actions', () => {
     mocked.connect.mockRejectedValue(new ApiError('Antigravity is busy. Wait for it to finish or cancel it.', 409));
     mount(seeded([conn('antigravity')]));
     fireEvent.click(btn('antigravity', 'Sign out of Antigravity'));
-    fireEvent.click(within(screen.getByRole('alertdialog', { name: 'Sign out of Antigravity?' })).getByRole('button', { name: 'Sign out' }));
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Sign out of Antigravity?' })).getByRole('button', { name: 'Sign out' }));
     expect(await screen.findByText('Antigravity is busy. Wait for it to finish or cancel it.')).toBeTruthy();
     expect(card('antigravity').dataset.state).toBe('connected');
     expect(within(card('antigravity')).getByRole('status').textContent).toBe('Connected');
@@ -376,5 +385,90 @@ describe('more agents, coming later', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Request' }));
     expect(await screen.findByText('Thanks. We’ve noted Goose')).toBeTruthy();
     expect(input.value).toBe('');
+  });
+});
+
+describe('connections fix round 1', () => {
+  const later = (sec: number) => new Date(NOW + sec * 1000).toISOString();
+
+  it('live transitions toast: signed in, updated to <version>; a cancel, a failure, a load or a resync does not', async () => {
+    const store = seeded(ALL(), [], [], [cs('claude', { phase: 'signing_in' }), cs('codex', { phase: 'updating' })]);
+    mount(store);
+    act(() => applyConnectEvent(store, cs('claude', { lastOp: 'signin', outcome: 'done', updatedAt: later(1) })));
+    expect(await screen.findByText('Claude Code is connected. Its chats now show in Recent chats')).toBeTruthy();
+    act(() => applyConnectEvent(store, cs('codex', { lastOp: 'update', outcome: 'done', updatedAt: later(1) })));
+    expect(await screen.findByText('Codex updated to 0.157.0')).toBeTruthy();
+
+    // A sign-in that was cancelled is not announced.
+    act(() => store.setState((s) => applyEvent(s, { type: 'connect.updated', state: cs('antigravity', { phase: 'signing_in', updatedAt: later(2) }) })));
+    act(() => applyConnectEvent(store, cs('antigravity', { lastOp: 'signin', outcome: 'cancelled', updatedAt: later(3) })));
+    // A resync that finds a finished sign-in is not announced either.
+    act(() => store.setState((s) => applyEvent(s, { type: 'connect.updated', state: cs('antigravity', { phase: 'signing_in', updatedAt: later(4) }) })));
+    act(() => store.setState((s) => applySnapshot(s, { chats: [], usage: [], suggested: null, connections: ALL(), history: [], projects: [], connect: [cs('antigravity', { lastOp: 'signin', outcome: 'done', updatedAt: later(5) })] })));
+    expect(screen.queryByText('Antigravity is connected. Its chats now show in Recent chats')).toBeNull();
+    expect(screen.queryAllByText(/is connected|updated to/)).toHaveLength(2);
+  });
+
+  it('nothing toasts on mount, even when the last operation was done', () => {
+    mount(seeded(ALL(), [], [], [cs('claude', { lastOp: 'signin', outcome: 'done' })]));
+    expect(screen.queryByText(/is connected/)).toBeNull();
+  });
+
+  it('Try again re-runs the operation that failed', () => {
+    mocked.connect.mockResolvedValue(cs('codex', { phase: 'signing_in' }));
+    mount(seeded([conn('codex', { status: 'signed_out', signedIn: false })], [], [], [cs('codex', { phase: 'error', message: 'x', lastOp: 'signin', outcome: 'failed' })]));
+    fireEvent.click(btn('codex', 'Try again for Codex'));
+    expect(mocked.connect).toHaveBeenCalledWith('codex', 'signin');
+  });
+
+  it('an error with no message says Something went wrong', () => {
+    mount(seeded([ALL()[2]!], [], [], [cs('antigravity', { phase: 'error', lastOp: 'install', outcome: 'failed' })]));
+    expect(within(card('antigravity')).getByRole('alert').textContent).toBe('Something went wrong. Try again.');
+  });
+
+  it('Sign in toasts that the browser was opened', async () => {
+    mocked.connect.mockResolvedValue(cs('codex', { phase: 'signing_in' }));
+    mount(seeded([conn('codex', { status: 'signed_out', signedIn: false })]));
+    fireEvent.click(btn('codex', 'Sign in to Codex'));
+    expect(await screen.findByText('Opened chatgpt.com in your browser')).toBeTruthy();
+  });
+
+  it('the progress bar reads out the current step', () => {
+    mount(seeded(ALL(), [], [], [cs('antigravity', { phase: 'installing', step: 'Checking the download', progress: 0.7 })]));
+    expect(within(card('antigravity')).getByRole('progressbar').getAttribute('aria-valuetext')).toBe('Checking the download');
+  });
+
+  it('when the view changes under the focus, focus moves to the card’s first action', async () => {
+    mocked.connect.mockResolvedValue(cs('antigravity', { phase: 'installing', step: 'Downloading Antigravity…', progress: 0 }));
+    mount(seeded(ALL()));
+    const install = btn('antigravity', 'Install Antigravity');
+    install.focus();
+    fireEvent.click(install);
+    await waitFor(() => expect(card('antigravity').dataset.state).toBe('installing'));
+    expect(document.activeElement).toBe(btn('antigravity', 'Cancel for Antigravity'));
+  });
+
+  it('the Sign out button says it opens a dialog, and the confirm is a dialog', () => {
+    mount(seeded(ALL()));
+    const so = btn('claude', 'Sign out of Claude Code');
+    expect(so.getAttribute('aria-haspopup')).toBe('dialog');
+    fireEvent.click(so);
+    expect(screen.getByRole('dialog', { name: 'Sign out of Claude Code?' })).toBeTruthy();
+  });
+
+  it('each switch has its own pending request: the other switch still works meanwhile', async () => {
+    let answer!: (v: Settings) => void;
+    mocked.patchSettings.mockReturnValueOnce(new Promise((r) => { answer = r; }));
+    mocked.patchSettings.mockResolvedValueOnce({ ...SETTINGS, suggest: { ...ON, codex: false } });
+    mount(seeded(ALL()));
+    const show = within(card('codex')).getByRole('switch', { name: 'Show Codex chats in Recent chats' });
+    const sug = within(card('codex')).getByRole('switch', { name: 'Suggest Codex for new chats' });
+    fireEvent.click(show);
+    fireEvent.click(show); // ignored while its request runs
+    fireEvent.click(sug);
+    expect(mocked.patchSettings).toHaveBeenCalledTimes(2);
+    expect(mocked.patchSettings).toHaveBeenLastCalledWith({ suggest: { codex: false } });
+    await act(async () => answer({ ...SETTINGS, showChats: { ...ON, codex: false }, suggest: { ...ON, codex: false } }));
+    await waitFor(() => expect(show.getAttribute('aria-checked')).toBe('false'));
   });
 });

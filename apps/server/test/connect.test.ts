@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import type { AddressInfo } from 'node:net';
-import type { ConnectState, ProviderId } from '@agent-kanban/shared';
+import type { ConnectionHealth, ConnectState, ProviderId } from '@agent-kanban/shared';
 import {
   ConnectService, ConnectBusyError, SIGN_IN_TIMEOUT_MS, POLL_MS, SIGN_IN_DIDNT_FINISH, NETWORK_FAILED,
   ANTIGRAVITY_SIGN_OUT_IN_APP, findHttpsUrl, SIGN_IN_HOSTS, NPM_TIMEOUT_MS, RECYCLE_RETRY_MS, npmFailureMessage,
@@ -719,4 +719,118 @@ test('Antigravity sign-out while a chat runs on the agent → busy (409), nothin
   await c.svc.signOut('antigravity');
   await flush();
   assert.equal(fa.calls.signOut, 1);
+});
+
+// ---- lastOp / outcome (R12) ----
+
+const outcome = (s: ConnectState) => [s.lastOp, s.outcome, s.phase];
+
+test('each operation records lastOp and its outcome (done / failed / cancelled); a new operation resets them', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const ok = make({ script: (cmd) => (cmd === '/usr/bin/npm' ? { out: NPM_OK } : {}), installed: false });
+  ok.svc.install('codex');
+  assert.deepEqual([ok.last('codex').lastOp, ok.last('codex').outcome], [null, null], 'reset while running');
+  await flush();
+  assert.deepEqual(outcome(ok.last('codex')), ['install', 'done', 'idle']);
+  ok.svc.update('codex');
+  assert.deepEqual([ok.last('codex').lastOp, ok.last('codex').outcome], [null, null]);
+  await flush();
+  assert.deepEqual(outcome(ok.last('codex')), ['update', 'done', 'idle']);
+  ok.svc.signOut('codex');
+  await flush();
+  assert.deepEqual(outcome(ok.last('codex')), ['signout', 'done', 'idle']);
+  assert.deepEqual(ok.checks, ['codex', 'codex', 'codex'], 'every finished operation re-checks health (connection.updated)');
+
+  const bad = make({ script: () => ({ out: 'npm error code EACCES\n', code: 1 }), installed: false });
+  bad.svc.install('codex');
+  await flush();
+  assert.deepEqual(outcome(bad.last('codex')), ['install', 'failed', 'error']);
+
+  const cancelled = make({ script: () => ({ hang: true }), installed: false });
+  cancelled.svc.install('codex');
+  await flush();
+  cancelled.svc.cancel('codex');
+  await flush();
+  assert.deepEqual(outcome(cancelled.last('codex')), ['install', 'cancelled', 'idle']);
+
+  let signedIn = false;
+  const si = make({ script: loginScript('codex', () => signedIn) });
+  si.svc.signIn('codex');
+  await flush();
+  signedIn = true;
+  t.mock.timers.tick(POLL_MS);
+  await flush();
+  assert.deepEqual(outcome(si.last('codex')), ['signin', 'done', 'idle']);
+
+  const sc = make({ script: loginScript('codex', () => false) });
+  sc.svc.signIn('codex');
+  await flush();
+  sc.svc.cancel('codex');
+  await flush();
+  assert.deepEqual(outcome(sc.last('codex')), ['signin', 'cancelled', 'idle']);
+});
+
+test('a timed-out sign-in is a failure (idle with the message); Antigravity without logout is a failed sign-out', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const c = make({ script: loginScript('codex', () => false) });
+  c.svc.signIn('codex');
+  await flush();
+  for (let elapsed = 0; elapsed < SIGN_IN_TIMEOUT_MS; elapsed += POLL_MS) { t.mock.timers.tick(POLL_MS); await flush(10); }
+  await flush();
+  assert.deepEqual(outcome(c.last('codex')), ['signin', 'failed', 'idle']);
+  assert.equal(c.last('codex').message, SIGN_IN_DIDNT_FINISH);
+
+  const no = make({ script: () => ({}), adapter: fakeAdapter({ signedOut: false }).adapter });
+  no.svc.signOut('antigravity');
+  await flush();
+  assert.deepEqual(outcome(no.last('antigravity')), ['signout', 'failed', 'idle']);
+});
+
+const health = (provider: ProviderId, over: Partial<ConnectionHealth> = {}): ConnectionHealth => ({
+  provider, installed: true, path: '/bin/x', version: '1', latestVersion: '1', updateAvailable: false, signedIn: true, processOk: true,
+  status: 'connected', message: null, checkedAt: new Date().toISOString(), ...over,
+});
+
+test('a health check that contradicts a failure clears its message and outcome (I1)', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  // A failed sign-in, then the provider turns out signed in (e.g. finished in a terminal).
+  const c = make({ script: (cmd, args) => (args[0] === 'login' && args.length === 1 ? { code: 1 } : loginScript('codex', () => false)(cmd, args)) });
+  c.svc.signIn('codex');
+  await flush();
+  t.mock.timers.tick(POLL_MS);
+  await flush();
+  assert.equal(c.last('codex').phase, 'error');
+  c.svc.noteHealth(health('codex', { status: 'signed_out', signedIn: false }));
+  assert.equal(c.last('codex').phase, 'error', 'a check that agrees changes nothing');
+  const n = c.updates.length;
+  c.svc.noteHealth(health('codex'));
+  assert.deepEqual([c.last('codex').phase, c.last('codex').message, c.last('codex').outcome, c.last('codex').lastOp], ['idle', null, null, 'signin']);
+  assert.equal(c.updates.length, n + 1, 'published as connect.updated');
+  c.svc.noteHealth(health('codex'));
+  assert.equal(c.updates.length, n + 1, 'nothing left to clear');
+
+  // A failed install, then the CLI is found.
+  const i = make({ script: () => ({ out: 'npm error code E500\n', code: 1 }), installed: false });
+  i.svc.install('codex');
+  await flush();
+  i.svc.noteHealth(health('codex', { installed: false, status: 'not_installed', signedIn: null }));
+  assert.equal(i.last('codex').outcome, 'failed');
+  i.svc.noteHealth(health('codex', { status: 'signed_out', signedIn: false }));
+  assert.deepEqual([i.last('codex').phase, i.last('codex').message, i.last('codex').outcome], ['idle', null, null]);
+
+  // "Sign out in the Antigravity app", then it shows signed out.
+  const a = make({ script: () => ({}), adapter: fakeAdapter({ signedOut: false }).adapter });
+  a.svc.signOut('antigravity');
+  await flush();
+  a.svc.noteHealth(health('antigravity', { status: 'signed_out', signedIn: false }));
+  assert.equal(a.last('antigravity').message, null);
+
+  // Nothing is cleared while an operation runs.
+  const r = make({ script: () => ({ hang: true }), installed: false });
+  r.svc.install('codex');
+  await flush();
+  r.svc.noteHealth(health('codex'));
+  assert.equal(r.last('codex').phase, 'installing');
+  r.svc.cancel('codex');
+  await flush();
 });
