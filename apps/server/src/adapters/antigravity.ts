@@ -336,7 +336,7 @@ export class AntigravityAdapter implements ProviderAdapter {
       live.sessions.add(sessionId);
       this.sessionCwd.set(sessionId, input.cwd);
       this.emit({ type: 'session.started', sessionRef: sessionId });
-      this.runTurn(live, sessionId, input.prompt);
+      this.runTurn(live, sessionId, withFolder(input.cwd, input.prompt));
       return { sessionRef: sessionId };
     });
   }
@@ -599,6 +599,16 @@ function abortable<T>(p: Promise<T>, signal: AbortSignal): Promise<T> {
  */
 const activeTemp = new Set<string>();
 let tempCounter = 0;
+
+/**
+ * agy-acp-server 1.3.0 hands its harness the workspaces [cwd, ~/.gemini/config/skills, ~/.gemini/antigravity-cli/skills, ...]
+ * and the model takes the first one in sorted order as its working folder, which is almost never the chat's folder
+ * (".gemini" sorts before most names), so it created files in ~/.gemini/antigravity-cli/skills (seen in the Task 7
+ * end-to-end run). Naming the folder in a new chat's first prompt makes it read, write and run commands there.
+ */
+export function withFolder(cwd: string, prompt: string): string {
+  return `The working folder for this chat is ${cwd}. Unless asked otherwise, read and write files there and run commands there.\n\n${prompt}`;
+}
 
 export function spawnAntigravity(exePath: string, tempDir: string): JsonRpcProcess {
   const name = `ak-${process.pid}-${++tempCounter}`;

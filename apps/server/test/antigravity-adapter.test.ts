@@ -86,6 +86,31 @@ test('a turn maps to session.started, turn.started, deltas, tool calls, message.
   } finally { await adapter.dispose(); }
 });
 
+test('the first prompt of a new chat names its folder (the agent otherwise works in a skills folder); later ones are sent as typed', async () => {
+  const { adapter, procs, waitFor, events } = make('turn');
+  const prompts: string[] = [];
+  try {
+    const started = adapter.startChat({ cwd, prompt: 'create hello.txt' });
+    // Capture session/prompt text as the fake agent receives it.
+    for (let i = 0; i < 500 && procs.length === 0; i++) await new Promise((r) => setTimeout(r, 5));
+    const p = procs[0]!;
+    const request = p.request.bind(p);
+    p.request = ((method: string, params: any, t?: number) => {
+      if (method === 'session/prompt') prompts.push(params.prompt[0].text);
+      return request(method, params, t);
+    }) as typeof p.request;
+    await started;
+    await waitFor((e) => e.type === 'turn.completed');
+    const n = events.length;
+    await adapter.sendMessage('sess_1', 'again');
+    await waitFor((e) => e.type === 'turn.completed', n);
+    assert.equal(prompts.length, 2);
+    assert.ok(prompts[0]!.includes(cwd), prompts[0]);
+    assert.ok(prompts[0]!.endsWith('\n\ncreate hello.txt'), prompts[0]);
+    assert.equal(prompts[1], 'again');
+  } finally { await adapter.dispose(); }
+});
+
 test('a second turn gets a new message id', async () => {
   const { adapter, events, waitFor } = make('turn');
   try {
