@@ -58,12 +58,20 @@ test('installed 0.163.0, latest 0.163.0, ping ok and signed in is connected', as
   });
 });
 
-test('a newer latest version gives update_available with the message', async () => {
+test('a newer latest version gives update_available; the message does not repeat the update (the card shows it from latestVersion)', async () => {
   const s = setup({ latest: async () => '0.164.0' });
   const [h] = await s.monitor.check();
   assert.equal(h!.status, 'update_available');
   assert.equal(h!.updateAvailable, true);
-  assert.equal(h!.message, 'Codex 0.164.0 is available (you have 0.163.0).');
+  assert.equal(h!.latestVersion, '0.164.0');
+  assert.equal(h!.message, null);
+});
+
+test('update_available keeps other adapter notes in the message (e.g. the Codex model note)', async () => {
+  const s = setup({ latest: async () => '0.164.0', ping: async () => ({ ok: true, signedIn: true, message: 'Model list unavailable.' }) });
+  const [h] = await s.monitor.check();
+  assert.equal(h!.status, 'update_available');
+  assert.equal(h!.message, 'Connected. Model list unavailable.');
 });
 
 test('version comparison is numeric, and an older latest is not an update', async () => {

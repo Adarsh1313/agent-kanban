@@ -87,6 +87,11 @@ test('GET /api/projects and /api/projects/info (known paths only)', async () => 
     const ok = await f('/api/projects/info?path=' + encodeURIComponent(dir));
     assert.equal(ok.status, 200);
     assert.deepEqual(((await ok.json()) as ProjectInfo).stack, ['Go']);
+    // Another spelling of the same folder (trailing separator; on Windows also other case and forward slashes).
+    const other = process.platform === 'win32' ? dir.toUpperCase().replaceAll('\\', '/') + '/' : dir + '/';
+    const alias = await f('/api/projects/info?path=' + encodeURIComponent(other));
+    assert.equal(alias.status, 200);
+    assert.deepEqual(((await alias.json()) as ProjectInfo).stack, ['Go']);
     const no = await f('/api/projects/info?path=' + encodeURIComponent(tmpdir()));
     assert.equal(no.status, 404);
     assert.deepEqual(await no.json(), { error: 'Not found.' });

@@ -205,8 +205,9 @@ export class ConnectionMonitor {
     }
     const ok = { ...common, signedIn: ping.signedIn, processOk: true };
     if (ping.signedIn === false) return this.publish({ ...ok, status: 'signed_out', message: `${name} isn't signed in.` });
-    if (updateAvailable) return this.publish({ ...ok, status: 'update_available', message: `${name} ${latestVersion} is available (you have ${version}).` });
-    return this.publish({ ...ok, status: 'connected', message: ping.message ? `Connected. ${ping.message}` : null });
+    // The update itself shows from latestVersion ("Update available: X"), so the message carries only other notes.
+    const message = ping.message ? `Connected. ${ping.message}` : null;
+    return this.publish({ ...ok, status: updateAvailable ? 'update_available' : 'connected', message });
   }
 
   /** Stores the new health and tells the listener only when something other than checkedAt changed. */

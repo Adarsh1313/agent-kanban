@@ -15,7 +15,7 @@ import type { SettingsStore } from './settings.ts';
 import type { ChatService } from './chats.ts';
 import type { UsageService } from './usage/service.ts';
 // suggest() lives in shared so the web app can recompute "Most room" from usage.updated events.
-import { suggest } from '@agent-kanban/shared';
+import { folderKey, suggest } from '@agent-kanban/shared';
 
 const PROVIDERS: ProviderId[] = ['claude', 'codex', 'antigravity'];
 const MAX_BODY = 1_000_000;
@@ -190,7 +190,8 @@ export function createApi(opts: {
     if (match('GET', '/api/projects')) return { status: 200, body: buildProjects(chats.listChats(), await visibleHistory()) };
     if (match('GET', '/api/projects/info')) {
       const path = url.searchParams.get('path');
-      const known = path ? buildProjects(chats.listChats(), await visibleHistory()).find((p) => p.id === path) : undefined;
+      const key = path ? folderKey(path) : '';
+      const known = key ? buildProjects(chats.listChats(), await visibleHistory()).find((p) => folderKey(p.id) === key) : undefined;
       if (!known) throw new HttpError(404, 'Not found.');
       return { status: 200, body: await projectInfo(known.path) };
     }
