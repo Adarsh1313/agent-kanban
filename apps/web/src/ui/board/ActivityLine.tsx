@@ -9,8 +9,8 @@ const STARTING = 'Getting started…';
 const stepIcon = (call: ToolCall, current: boolean): IconName =>
   call.status === 'failed' ? 'x' : current ? toolIcon(call.name) : 'check';
 
-/** A running card's current step, with "Show more" listing the last few steps. */
-export function ActivityLine({ calls }: { calls: ToolCall[] | undefined }) {
+/** A running card's current step, with "Show more" listing the last few steps. `starting` replaces "Getting started…". */
+export function ActivityLine({ calls, starting }: { calls: ToolCall[] | undefined; starting?: string }) {
   const [open, setOpen] = useState(false);
   const cur = currentCall(calls);
   const recent = (calls ?? []).slice(-SHOWN_STEPS);
@@ -18,7 +18,7 @@ export function ActivityLine({ calls }: { calls: ToolCall[] | undefined }) {
     <div className="activity">
       <div className="activity-line">
         <Icon name={cur ? toolIcon(cur.name) : 'clock'} size="sm" />
-        <SwapText text={cur?.summary || STARTING} className="now" title />
+        <SwapText text={cur?.summary || starting || STARTING} className="now" title />
         {recent.length > 0 && (
           <button className="more-toggle" type="button" aria-expanded={open}
             onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }}>

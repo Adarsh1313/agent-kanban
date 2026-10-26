@@ -378,19 +378,17 @@ describe('New chat: fix round 1', () => {
     expect(mocked.startChat).toHaveBeenCalledWith(expect.objectContaining({ provider: 'antigravity', cwd: '/elsewhere/new', prompt: 'Go' }));
   });
 
-  it('Antigravity: the footer says its limits are unavailable, and while it starts that it can take a couple of minutes', async () => {
-    let resolve!: (c: unknown) => void;
-    mocked.startChat.mockReturnValue(new Promise((r) => { resolve = r; }));
+  it('Antigravity: the footer says its limits are unavailable; the dialog closes as soon as the server answers (the card shows the slow start)', async () => {
+    mocked.startChat.mockResolvedValue(chat());
     const unavailable: UsageReading = { provider: 'antigravity', status: 'unavailable', readAt: '2026-10-23T11:00:00.000Z', windows: [] };
     mount(seeded({ connections: [conn('antigravity')], usage: [unavailable] }));
     act(() => openNewChat({ cwd: '/elsewhere/new' }));
-    const hint = () => dialog().querySelector('.dlg-hint')!.textContent;
-    expect(hint()).toBe('Antigravity: Limits unavailable');
+    expect(dialog().querySelector('.dlg-hint')!.textContent).toBe('Antigravity: Limits unavailable');
     fireEvent.change(promptBox(), { target: { value: 'Go' } });
     fireEvent.click(start());
     await flush();
-    expect(hint()).toBe('Starting Antigravity… This can take a couple of minutes the first time.');
-    await act(async () => { resolve(chat()); });
+    expect(screen.queryByText(/couple of minutes/)).toBeNull();
+    expect(dialog().dataset.state).toBe('closed');
   });
 
   it('when only Antigravity is connected, a new chat starts on it', async () => {

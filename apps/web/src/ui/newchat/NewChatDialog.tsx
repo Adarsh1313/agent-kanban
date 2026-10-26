@@ -315,9 +315,9 @@ export function NewChatDialog() {
     }
   }
 
-  // Antigravity's first start unpacks Google's agent (about 1-2 minutes measured), so say why "Starting…" lasts.
-  const hint = busy && provider === 'antigravity' ? 'Starting Antigravity… This can take a couple of minutes the first time.'
-    : emptyHint ? 'Write what the agent should do first.' : !provider && noProviderHint && note ? note : provider ? `${providerName(provider)}: ${usageText(st.usage[provider])}` : '';
+  // The server answers as soon as the card exists, so the dialog closes at once for every provider; the card says
+  // when Antigravity's slow first start is what it is waiting for.
+  const hint = emptyHint ? 'Write what the agent should do first.' : !provider && noProviderHint && note ? note : provider ? `${providerName(provider)}: ${usageText(st.usage[provider])}` : '';
 
   return (
     <>

@@ -37,7 +37,11 @@ async function act(store: Store, run: () => Promise<Chat | void>): Promise<boole
 }
 
 /** Only the user moves cards to Done; Done cards can only go back to Review. */
-export const dropAllowed = (from: Column, to: Column) => (from === 'done' ? to === 'review' : to === 'done');
+export const ANTIGRAVITY_STARTING = 'Starting Antigravity… This can take a couple of minutes the first time.';
+/** While a new chat waits for its provider session (no sessionRef yet), Antigravity's slow first start is named. */
+const startingText = (chat: Chat) => (chat.provider === 'antigravity' && !chat.sessionRef ? ANTIGRAVITY_STARTING : undefined);
+
+export const dropAllowed =(from: Column, to: Column) => (from === 'done' ? to === 'review' : to === 'done');
 
 export function ReasonBadge({ chat }: { chat: Chat }) {
   const now = useStore((s) => s.now);
@@ -233,7 +237,7 @@ export function Card({ id, fresh, onArrived }: { id: string; fresh: boolean; onA
           <Icon name="clock" size="sm" /><span className="tnum">{duration(took)}</span>
         </div>
       )}
-      {column === 'running' && <ActivityLine calls={calls} />}
+      {column === 'running' && <ActivityLine calls={calls} starting={startingText(chat)} />}
       <div className="card-actions">
         {column === 'running' && <ActionButton label={busy === 'stop' ? 'Stopping…' : 'Stop agent'} icon="stop" disabled={busy === 'stop'} onClick={() => void run('stop')} />}
         {resumable && <ActionButton label="Resume" icon="resume" text="Resume" disabled={busy === 'resume'} onClick={() => void run('resume')} />}

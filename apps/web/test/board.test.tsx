@@ -7,7 +7,7 @@ import { applyEvent, applySnapshot, initialState, type AppState } from '../src/s
 import { createStore, StoreProvider, type Store } from '../src/state/store.ts';
 import { setHistoryHandler, setNewChatHandler, setRowMenuHandler } from '../src/ui/actions.ts';
 import { Board } from '../src/ui/board/Board.tsx';
-import { HINT_AGENT_COLUMNS, HINT_DONE_BACK, RESUME_TEXT } from '../src/ui/board/Card.tsx';
+import { ANTIGRAVITY_STARTING, HINT_AGENT_COLUMNS, HINT_DONE_BACK, RESUME_TEXT } from '../src/ui/board/Card.tsx';
 import { clockTime } from '../src/ui/board/format.ts';
 import { flip } from '../src/ui/primitives/flip.ts';
 import { Toasts } from '../src/ui/primitives/toast.tsx';
@@ -143,6 +143,19 @@ describe('Board: movement', () => {
     expect(card('Mover')).toBe(el);
     expect(within(column('Review')).getByRole('article', { name: 'Mover' })).toBe(el);
     expect(column('Running').querySelector('.card')).toBeNull();
+  });
+});
+
+describe('Board: a chat that is still starting', () => {
+  it('a new Antigravity chat waiting for its session says the first start can take a couple of minutes; others say Getting started…', () => {
+    mount(seeded([
+      chat({ id: 'a', title: 'Slow start', provider: 'antigravity', sessionRef: null, column: 'running' }),
+      chat({ id: 'b', title: 'Has session', provider: 'antigravity', sessionRef: 's9', column: 'running' }),
+      chat({ id: 'c', title: 'Claude start', provider: 'claude', sessionRef: null, column: 'running' }),
+    ]));
+    expect(within(card('Slow start')).getByText(ANTIGRAVITY_STARTING)).toBeTruthy();
+    expect(within(card('Has session')).getByText('Getting started…')).toBeTruthy();
+    expect(within(card('Claude start')).getByText('Getting started…')).toBeTruthy();
   });
 });
 
