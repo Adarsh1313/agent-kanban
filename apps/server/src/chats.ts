@@ -171,13 +171,14 @@ export class ChatService {
     }
     const chat = this.mustGet(chatId);
     const adapter = this.adapters.get(chat.provider);
-    if (adapter && chat.sessionRef) {
-      try { await adapter.stop(chat.sessionRef); } catch { /* still park the card as stopped */ }
-    }
+    // Park the card at once; the agent may take a while to end its turn (Antigravity's stop waits up to 10 s).
     this.closeRequests(chatId);
     this.live.delete(chatId);
     this.touch(chatId);
     this.transition(chatId, { type: 'user.stop' });
+    if (adapter && chat.sessionRef) {
+      try { await adapter.stop(chat.sessionRef); } catch { /* the card is already parked as stopped */ }
+    }
   }
 
   markDone(chatId: string): Chat {

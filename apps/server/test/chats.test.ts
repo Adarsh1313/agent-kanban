@@ -829,3 +829,21 @@ test('a start that fails after the user stopped it keeps the card stopped: the e
     assert.equal(store.listMessages(chat.id).at(-1)!.text, "Codex couldn't continue: it broke");
   }
 });
+
+test('stop parks the card at once, before the agent has ended its turn', async () => {
+  const { store, adapter, events, svc } = setup();
+  const chat = await startOf(svc, { provider: 'codex', cwd: '/w', prompt: 'p' });
+  let finish!: () => void;
+  adapter.stop = (ref: string) => { adapter.calls.push(`stop:${ref}`); return new Promise<void>((r) => { finish = r; }); };
+  let resolved = false;
+  const stopping = svc.stop(chat.id).then(() => { resolved = true; });
+  await new Promise((r) => setTimeout(r, 5));
+  assert.equal(resolved, false, 'the agent is still stopping');
+  assert.deepEqual([store.getChat(chat.id)!.column, store.getChat(chat.id)!.needsReason], ['needs_you', 'stopped']);
+  assert.ok(events.some((e) => e.type === 'chat.updated' && e.chat.needsReason === 'stopped'));
+  adapter.emit({ type: 'stopped', sessionRef: 's1' });
+  finish();
+  await stopping;
+  assert.deepEqual([store.getChat(chat.id)!.column, store.getChat(chat.id)!.needsReason], ['needs_you', 'stopped']);
+  assert.ok(adapter.calls.includes('stop:s1'));
+});
