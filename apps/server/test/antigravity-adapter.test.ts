@@ -233,6 +233,17 @@ test('stop while a permission is open answers it cancelled and ends stopped', as
   } finally { await adapter.dispose(); }
 });
 
+test('stop waits for the cancelled turn to end, so a Send right after it is not refused as busy', async () => {
+  const { adapter, events, waitFor } = make('cancel', { FAKE_CANCEL_DELAY_MS: '150' });
+  try {
+    await adapter.startChat({ cwd, prompt: 'hi' });
+    await waitFor((e) => e.type === 'message.delta');
+    await adapter.stop('sess_1');
+    assert.ok(events.some((e) => e.type === 'stopped'), 'the turn ended before stop resolved');
+    await adapter.sendMessage('sess_1', 'again');
+  } finally { await adapter.dispose(); }
+});
+
 test('a crash mid-turn emits "Antigravity stopped unexpectedly." and the next send restarts it', async () => {
   const { adapter, procs, events, waitFor } = make((n) => (n === 0 ? 'crash' : 'turn'), { FAKE_LOADABLE: 'sess_1' });
   try {

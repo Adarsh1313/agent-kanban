@@ -30,6 +30,8 @@ export const ANTIGRAVITY_SIGNED_OUT = "Antigravity isn't signed in.";
 const BUSY = 'Antigravity is still working on the last message. Wait for it to finish, or stop it first.';
 const NO_LIMITS = "Antigravity doesn't report its limits.";
 const QUIET_MS = 120_000;
+/** stop() waits at most this long for the cancelled turn to end. */
+const STOP_WAIT_MS = 10_000;
 const IDLE_MS = 10 * 60_000;
 const SETTINGS_MAX_BYTES = 64 * 1024;
 // Startup is slow (see above): requests get a generous default; pings their own short timeout.
@@ -55,6 +57,9 @@ interface Turn {
   approvedAt: Map<string, number>;
   /** Calls that ended "approved but never executed": decided when the turn ends (see flushHeld). */
   held: Set<string>;
+  /** Resolves once the turn has ended (finished, failed or its process exited). */
+  done: Promise<void>;
+  end: () => void;
 }
 interface Perm { sessionId: string; toolCallId: string | null; options: AcpPermissionOption[]; resolve: (d: AcpPermissionDecision) => void }
 
@@ -208,6 +213,7 @@ export class AntigravityAdapter implements ProviderAdapter {
     for (const [sid, turn] of [...this.turns]) {
       if (turn.live !== live) continue;
       this.turns.delete(sid);
+      turn.end();
       this.settlePerms(sid);
       this.flushHeld(sid, turn);
       if (!deliberate) this.crashedTurn = true; // an exit with nothing running is just "not running"
@@ -320,9 +326,11 @@ export class AntigravityAdapter implements ProviderAdapter {
   private runTurn(live: Live, sessionId: string, text: string): void {
     const n = (this.turnCount.get(sessionId) ?? 0) + 1;
     this.turnCount.set(sessionId, n);
+    let end!: () => void;
+    const done = new Promise<void>((r) => { end = r; });
     const turn: Turn = {
       live, messageId: `${sessionId}:${n}`, text: [], started: false,
-      seq: 0, calls: new Map(), approvedAt: new Map(), held: new Set(),
+      seq: 0, calls: new Map(), approvedAt: new Map(), held: new Set(), done, end,
     };
     this.turns.set(sessionId, turn);
     live.acp.prompt(sessionId, text).then(
@@ -334,6 +342,7 @@ export class AntigravityAdapter implements ProviderAdapter {
   private finishTurn(sessionId: string, turn: Turn, stopReason: AcpStopReason): void {
     if (this.turns.get(sessionId) !== turn) return;
     this.turns.delete(sessionId);
+    turn.end();
     this.settlePerms(sessionId);
     this.flushHeld(sessionId, turn);
     if (turn.text.length > 0) {
@@ -347,6 +356,7 @@ export class AntigravityAdapter implements ProviderAdapter {
   private failTurn(sessionId: string, turn: Turn, err: unknown): void {
     if (this.turns.get(sessionId) !== turn) return; // a process exit already reported it
     this.turns.delete(sessionId);
+    turn.end();
     this.settlePerms(sessionId);
     this.flushHeld(sessionId, turn);
     if (isAuthRequired(err)) this.learned = false;
@@ -442,6 +452,10 @@ export class AntigravityAdapter implements ProviderAdapter {
     if (!turn) return;
     this.settlePerms(sessionRef);
     turn.live.acp.cancel(sessionRef); // the prompt then ends 'cancelled' -> stopped
+    // Wait for that, so a Send right after Stop isn't refused as busy (bounded: a stuck agent can't hold Stop).
+    let timer: NodeJS.Timeout | undefined;
+    const wait = new Promise<void>((r) => { timer = setTimeout(r, STOP_WAIT_MS); timer.unref?.(); });
+    try { await Promise.race([turn.done, wait]); } finally { clearTimeout(timer); }
   }
 
   async listModels(): Promise<ModelOption[]> { return []; } // Antigravity picks its model
@@ -590,6 +604,7 @@ export class AntigravityAdapter implements ProviderAdapter {
     this.listeners.clear();
     for (const p of this.perms.values()) p.resolve('cancelled');
     this.perms.clear();
+    for (const t of this.turns.values()) t.end();
     this.turns.clear();
     const starting = this.starting;
     const proc = this.live?.proc ?? this.startingProc;

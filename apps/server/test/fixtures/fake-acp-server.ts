@@ -12,6 +12,7 @@
 // FAKE_PERM_OPTIONS=always: the permission request offers allow_always (no allow_once) and reject_once.
 // FAKE_NEW_DELAY_MS: session/new answers after this delay.
 // FAKE_VERSION: agentInfo.version (default 1.3.0).
+// FAKE_CANCEL_DELAY_MS: a cancelled prompt answers 'cancelled' after this delay.
 // FAKE_STOP: the stop reason the default turn ends with (default end_turn).
 // editperm: shaped like the real 1.3.0 run (Task 7): call_a "create_file" (kind other) asks permission as
 //   "Run create_file?"; after Allow the work runs in a separate call_b "edit_file" (kind edit) and call_a ends failed
@@ -169,8 +170,11 @@ createInterface({ input: process.stdin }).on('line', (line) => {
     case 'session/cancel':
       if (scenario === 'permcancel') { cancelRequested = true; return; }
       if (pendingPrompt && pendingPrompt.sessionId === p.sessionId) {
-        reply(pendingPrompt.id, { stopReason: 'cancelled' });
+        const pending = pendingPrompt;
         pendingPrompt = null;
+        const after = Number(process.env.FAKE_CANCEL_DELAY_MS ?? 0);
+        if (after > 0) setTimeout(() => reply(pending.id, { stopReason: 'cancelled' }), after);
+        else reply(pending.id, { stopReason: 'cancelled' });
       }
       return;
     default:

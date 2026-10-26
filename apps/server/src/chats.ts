@@ -68,6 +68,12 @@ export class ChatService {
   private resuming = new Map<string, Promise<void>>();
   /** Chats stopped while their session was still starting: stopped as soon as the session arrives. */
   private stopAfterStart = new Set<string>();
+  /**
+   * Chats stopped while starting whose first turn may still report: its turn.started / request.opened are dropped and
+   * its terminal event (turn.completed / stopped / error) ends it without moving the card. Cleared by that terminal
+   * event or the user's next message, not when the start settles.
+   */
+  private userStopped = new Set<string>();
   /** Last time this process drove or heard from each chat (ms). Distinguishes our own .jsonl writes from another app's. */
   private lastOwn = new Map<string, number>();
   /** Errors already reported, per chat: one failed resume is shared by concurrent callers of the SAME chat only. */
@@ -125,6 +131,7 @@ export class ChatService {
       throw new ActiveElsewhereError();
     }
     this.touch(chatId);
+    this.userStopped.delete(chatId); // the user moved on: the new turn's events count
     this.addMessage(chatId, 'user', text);
     this.transition(chatId, { type: 'user.message' });
     if (!chat.sessionRef) await this.begin(chat, text);
@@ -156,6 +163,7 @@ export class ChatService {
     if (this.pending.has(chatId)) {
       // Still starting (a cold Antigravity can take minutes): park the card now; begin() stops the turn once the session arrives.
       this.stopAfterStart.add(chatId);
+      this.userStopped.add(chatId);
       this.closeRequests(chatId);
       this.touch(chatId);
       this.transition(chatId, { type: 'user.stop' });
@@ -332,6 +340,14 @@ export class ChatService {
     return this.store.getChat(chatId)!;
   }
 
+  /** A failure the user no longer waits for (they stopped the chat or marked it done): store the copy, move nothing. */
+  private failQuietly(chatId: string, provider: ProviderId, err: unknown | null): void {
+    this.closeRequests(chatId);
+    this.live.delete(chatId);
+    this.userStopped.delete(chatId);
+    this.addMessage(chatId, 'assistant', this.errorCopy(provider, err));
+  }
+
   /** Start a provider session for a chat that has none, and claim its sessionRef. Never throws. */
   // Callers wait with `while (this.pending.has(id)) await ...` inline: no await when idle, so same-tick calls queue correctly.
 
@@ -350,7 +366,11 @@ export class ChatService {
       }
     } catch (err) {
       // Nobody awaits a start: any failure (also from ensure) belongs on the card, never an unhandled rejection.
-      try { this.fail(chat.id, chat.provider, err); } catch { /* the chat is gone */ }
+      try {
+        // Stopped, or marked done, while starting: the card stays where the user put it; the error is kept quietly.
+        if (this.stopAfterStart.has(chat.id) || this.store.getChat(chat.id)?.column === 'done') this.failQuietly(chat.id, chat.provider, err);
+        else this.fail(chat.id, chat.provider, err);
+      } catch { /* the chat is gone */ }
     } finally {
       this.stopAfterStart.delete(chat.id);
       this.pending.delete(chat.id);
@@ -450,6 +470,16 @@ export class ChatService {
 
   private handle(chatId: string, provider: ProviderId, e: AdapterEvent): void {
     this.touch(chatId);
+    if (this.userStopped.has(chatId)) {
+      // The turn the user stopped while it was starting: it must not reopen the card or ask anything.
+      if (e.type === 'turn.started' || e.type === 'request.opened') return;
+      if (e.type === 'turn.completed' || e.type === 'stopped' || e.type === 'error') {
+        this.userStopped.delete(chatId);
+        if (e.type !== 'turn.completed') this.live.delete(chatId);
+        this.settle(chatId);
+        return;
+      }
+    }
     switch (e.type) {
       case 'message.delta': {
         const ids = this.idsFor(chatId);

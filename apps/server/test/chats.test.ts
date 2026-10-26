@@ -771,3 +771,61 @@ test('Antigravity history continue: a failure that is not the agent answering (s
   await assert.rejects(svc.continueHistory(h, 'go on'), (e: Error) => !(e instanceof CantContinueError) && /timed out/.test(e.message));
   assert.equal(store.listChats().length, 0);
 });
+
+test('stop while starting: the first turn\'s turn.started and request.opened are dropped, its stopped/turn.completed ends it quietly', async () => {
+  for (const terminal of ['stopped', 'turn.completed', 'error'] as const) {
+    const { store, adapter, events, svc } = setup();
+    let open!: (v: { sessionRef: string }) => void;
+    adapter.startChat = () => { adapter.calls.push('startChat'); return new Promise((r) => { open = r; }); };
+    const chat = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+    await svc.stop(chat.id);
+    // The adapter's first turn started before the stop reached it: its events arrive around the session.
+    adapter.emit({ type: 'turn.started', sessionRef: 's1' });
+    open({ sessionRef: 's1' });
+    await svc.started(chat.id);
+    adapter.emit({ type: 'turn.started', sessionRef: 's1' });
+    adapter.emit({ type: 'request.opened', sessionRef: 's1', requestId: 'r1', kind: 'permission', summary: 'Edit a', action: 'edit' });
+    const stopped = () => [store.getChat(chat.id)!.column, store.getChat(chat.id)!.needsReason];
+    assert.deepEqual(stopped(), ['needs_you', 'stopped']);
+    assert.equal(store.listOpenRequests(chat.id).length, 0);
+    const before = events.length;
+    adapter.emit(terminal === 'error' ? { type: 'error', sessionRef: 's1', message: 'boom' } : { type: terminal, sessionRef: 's1' });
+    assert.deepEqual(stopped(), ['needs_you', 'stopped'], terminal);
+    assert.ok(!events.slice(before).some((e) => e.type === 'notification'), `${terminal}: no notification`);
+    assert.ok(!events.slice(before).some((e) => e.type === 'chat.updated'), `${terminal}: no card change`);
+    // After the terminal event the chat behaves normally again.
+    adapter.emit({ type: 'turn.started', sessionRef: 's1' });
+    assert.equal(store.getChat(chat.id)!.column, 'running', `${terminal}: later turns move the card`);
+  }
+});
+
+test('stop while starting, then Send: the new turn is not dropped', async () => {
+  const { store, adapter, svc } = setup();
+  let open!: (v: { sessionRef: string }) => void;
+  adapter.startChat = () => { adapter.calls.push('startChat'); return new Promise((r) => { open = r; }); };
+  const chat = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+  await svc.stop(chat.id);
+  open({ sessionRef: 's1' });
+  await svc.started(chat.id);
+  await svc.send(chat.id, 'again');
+  adapter.emit({ type: 'request.opened', sessionRef: 's1', requestId: 'r2', kind: 'permission', summary: 'Edit b' });
+  assert.deepEqual([store.getChat(chat.id)!.column, store.getChat(chat.id)!.needsReason], ['needs_you', 'permission']);
+});
+
+test('a start that fails after the user stopped it keeps the card stopped: the error is stored quietly', async () => {
+  for (const how of ['stop', 'done'] as const) {
+    const { store, adapter, events, svc } = setup();
+    let reject!: (e: Error) => void;
+    adapter.startChat = () => new Promise((_, j) => { reject = j; });
+    const chat = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+    if (how === 'stop') await svc.stop(chat.id); else svc.markDone(chat.id);
+    const before = events.length;
+    reject(new Error('it broke'));
+    await svc.started(chat.id);
+    const got = store.getChat(chat.id)!;
+    assert.deepEqual([got.column, got.needsReason], how === 'stop' ? ['needs_you', 'stopped'] : ['done', null]);
+    assert.ok(!events.slice(before).some((e) => e.type === 'notification'), `${how}: no notification`);
+    assert.ok(!events.slice(before).some((e) => e.type === 'chat.updated'), `${how}: no card change`);
+    assert.equal(store.listMessages(chat.id).at(-1)!.text, "Codex couldn't continue: it broke");
+  }
+});
