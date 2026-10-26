@@ -89,6 +89,7 @@ const pct = (left: number | undefined) => (left === undefined ? '—' : `${Math.
 
 /** "82% of 5-hour · 64% of weekly left" (the design's wording), with "—" for a window with no reading. */
 export function usageText(r: UsageReading | undefined): string {
+  if (r?.status === 'unavailable') return 'Limits unavailable';
   return `${pct(windowOf(r, 'five_hour')?.leftPct)} of 5-hour · ${pct(windowOf(r, 'weekly')?.leftPct)} of weekly left`;
 }
 
@@ -322,7 +323,9 @@ export function NewChatDialog() {
     }
   }
 
-  const hint = emptyHint ? 'Write what the agent should do first.' : !provider && noProviderHint && note ? note : provider ? `${providerName(provider)}: ${usageText(st.usage[provider])}` : '';
+  // Antigravity's first start unpacks Google's agent (about 1-2 minutes measured), so say why "Starting…" lasts.
+  const hint = busy && provider === 'antigravity' ? 'Starting Antigravity… This can take a couple of minutes the first time.'
+    : emptyHint ? 'Write what the agent should do first.' : !provider && noProviderHint && note ? note : provider ? `${providerName(provider)}: ${usageText(st.usage[provider])}` : '';
 
   return (
     <>
