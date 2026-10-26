@@ -66,6 +66,15 @@ test('start creates a running chat, stores sessionRef, broadcasts', async () => 
   assert.equal(store.listMessages(chat.id)[0].role, 'user');
 });
 
+test('a permission carries what it is for to the stored request, request.opened and the notification', async () => {
+  const { store, adapter, events, svc } = setup();
+  const chat = await startOf(svc, { provider: 'codex', cwd: '/w', prompt: 'p' });
+  adapter.emit({ type: 'request.opened', sessionRef: 's1', requestId: 'r1', kind: 'permission', summary: 'Edit a.txt', action: 'edit' });
+  assert.equal(store.listOpenRequests(chat.id)[0]!.action, 'edit');
+  assert.ok(events.some((e) => e.type === 'request.opened' && e.action === 'edit'));
+  assert.ok(events.some((e) => e.type === 'notification' && e.kind === 'permission' && e.action === 'edit'));
+});
+
 test('request.opened -> needs_you/permission with notification', async () => {
   const { store, adapter, events, svc } = setup();
   const chat = await startOf(svc, { provider: 'codex', cwd: '/w', prompt: 'p' });

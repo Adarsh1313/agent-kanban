@@ -242,7 +242,7 @@ export class CodexAdapter implements ProviderAdapter {
     const summary: string = isCommand ? (params.command ?? params.reason ?? 'Run a command') : (params.reason ?? 'Edit files');
     return new Promise((resolve) => {
       this.approvals.set(requestId, { threadId: params.threadId, resolve: (decision) => resolve({ decision }) });
-      this.emit({ type: 'request.opened', sessionRef: params.threadId, requestId, kind: 'permission', summary });
+      this.emit({ type: 'request.opened', sessionRef: params.threadId, requestId, kind: 'permission', summary, action: isCommand ? 'command' : 'edit' });
     });
   }
 

@@ -5,7 +5,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AdapterEvent } from '@agent-kanban/shared';
-import { AntigravityAdapter, pickOption, withFolder } from '../src/adapters/antigravity.ts';
+import { acpAction, AntigravityAdapter, pickOption, withFolder } from '../src/adapters/antigravity.ts';
 import { JsonRpcProcess } from '../src/adapters/jsonrpc.ts';
 import { ConnectionMonitor, makeGetVersion } from '../src/health.ts';
 
@@ -156,6 +156,7 @@ for (const [decision, expected] of [
       assert.ok(req.type === 'request.opened');
       assert.equal(req.kind, 'permission');
       assert.equal(req.summary, 'Run npm test');
+      assert.equal(req.action, 'command'); // ACP kind execute
       assert.ok(!events.some((e) => e.type === 'turn.completed'));
       await adapter.respondToRequest('sess_1', req.requestId, decision);
       const done = await waitFor((e) => e.type === 'message.completed');
@@ -173,6 +174,7 @@ for (const order of ['after', 'before'] as const) {
       await adapter.startChat({ cwd, prompt: 'create hello.txt' });
       const req = await waitFor((e) => e.type === 'request.opened');
       assert.ok(req.type === 'request.opened');
+      assert.equal(req.action, 'edit'); // ACP kind edit: "wants to edit a file"
       await adapter.respondToRequest('sess_1', req.requestId, 'allow');
       await waitFor((e) => e.type === 'turn.completed');
       const calls = events.filter((e) => e.type === 'tool.call');
@@ -546,4 +548,10 @@ test('a session the agent accepts clears a learned signed-out (signed in elsewhe
     assert.equal((await adapter.ping()).signedIn, true);
     assert.equal(procs.length, 2);
   } finally { await adapter.dispose(); }
+});
+
+test('acpAction maps ACP tool kinds to edit / command / tool', () => {
+  for (const k of ['edit', 'delete', 'move']) assert.equal(acpAction(k), 'edit');
+  assert.equal(acpAction('execute'), 'command');
+  for (const k of ['read', 'search', 'fetch', 'think', 'other', undefined]) assert.equal(acpAction(k), 'tool');
 });

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { query as sdkQuery } from '@anthropic-ai/claude-agent-sdk';
 import type { CanUseTool, PermissionResult, Query, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
-import type { AdapterEvent, ModelOption, UsageReading } from '@agent-kanban/shared';
+import type { AdapterEvent, ModelOption, RequestAction, UsageReading } from '@agent-kanban/shared';
 import type { PingResult, ProviderAdapter } from './adapter.ts';
 import { resolveSpawnTarget } from './spawn-target.ts';
 import { claudeUsageToReading } from '../usage/parse.ts';
@@ -144,6 +144,7 @@ export class ClaudeAdapter implements ProviderAdapter {
         type: 'request.opened', sessionRef: chat.sessionRef!, requestId,
         kind: toolName === 'AskUserQuestion' ? 'question' : 'permission',
         summary: requestSummary(toolName, input),
+        ...(toolName === 'AskUserQuestion' ? {} : { action: claudeAction(toolName) }),
       });
       if (chat.sessionRef === null) chat.deferred.push(() => { if (chat.pending.has(requestId)) announce(); });
       else announce();
@@ -456,6 +457,13 @@ function toolSummary(name: string, input: Record<string, unknown>): string {
 function questionAnswers(input: Record<string, unknown>, reply: string): Record<string, string> {
   const questions = Array.isArray(input.questions) ? (input.questions as Array<{ question?: unknown }>) : [];
   return Object.fromEntries(questions.filter((q) => typeof q?.question === 'string').map((q) => [q.question as string, reply]));
+}
+
+/** What a Claude Code tool's permission is for: its file-editing tools, its shell tools, or any other tool. */
+export function claudeAction(name: string): RequestAction {
+  if (['Edit', 'Write', 'MultiEdit', 'NotebookEdit'].includes(name)) return 'edit';
+  if (['Bash', 'BashOutput', 'KillShell', 'KillBash'].includes(name)) return 'command';
+  return 'tool';
 }
 
 function requestSummary(name: string, input: Record<string, unknown>): string {

@@ -476,10 +476,12 @@ export class ChatService {
         let open = this.requests.get(chatId);
         if (!open) { open = new Map(); this.requests.set(chatId, open); }
         open.set(e.requestId, { kind: e.kind, summary: e.summary });
-        this.store.addRequest(chatId, { requestId: e.requestId, kind: e.kind, summary: e.summary });
+        // A permission says what it is for (edit / command / tool) so the card and notification copy can match.
+        const action = e.kind === 'permission' && e.action ? { action: e.action } : {};
+        this.store.addRequest(chatId, { requestId: e.requestId, kind: e.kind, summary: e.summary, ...action });
         this.transition(chatId, e);
-        this.broadcast({ type: 'request.opened', chatId, requestId: e.requestId, kind: e.kind, summary: e.summary });
-        this.broadcast({ type: 'notification', chatId, kind: e.kind });
+        this.broadcast({ type: 'request.opened', chatId, requestId: e.requestId, kind: e.kind, summary: e.summary, ...action });
+        this.broadcast({ type: 'notification', chatId, kind: e.kind, ...action });
         return;
       }
       case 'turn.completed': {

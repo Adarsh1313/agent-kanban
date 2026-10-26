@@ -9,6 +9,12 @@ export interface ChatState {
   needsReason: NeedsReason | null;
 }
 
+/**
+ * What a permission request is for, so the copy can say "wants to edit a file", "wants to run a command" or
+ * "wants to use a tool". Missing (older requests) reads as a command.
+ */
+export type RequestAction = 'edit' | 'command' | 'tool';
+
 export type AdapterEvent =
   | { type: 'session.started'; sessionRef: string }
   | { type: 'stopped'; sessionRef: string }
@@ -16,7 +22,7 @@ export type AdapterEvent =
   | { type: 'message.delta'; sessionRef: string; messageId: string; text: string }
   | { type: 'message.completed'; sessionRef: string; messageId: string; role: 'assistant'; text: string }
   | { type: 'tool.call'; sessionRef: string; toolCallId: string; name: string; summary: string; status: 'running' | 'done' | 'failed' }
-  | { type: 'request.opened'; sessionRef: string; requestId: string; kind: 'permission' | 'question'; summary: string }
+  | { type: 'request.opened'; sessionRef: string; requestId: string; kind: 'permission' | 'question'; summary: string; action?: RequestAction }
   | { type: 'turn.completed'; sessionRef: string }
   | { type: 'limit.reached'; sessionRef: string; resetsAt?: string }
   | { type: 'error'; sessionRef: string; message: string };
@@ -49,7 +55,7 @@ export interface Chat {
 export interface Message { id: string; chatId: string; role: 'user' | 'assistant'; text: string; createdAt: string }
 
 /** A permission or question the agent is waiting on (read back after a page reload). */
-export interface OpenRequest { requestId: string; kind: 'permission' | 'question'; summary: string; createdAt: string }
+export interface OpenRequest { requestId: string; kind: 'permission' | 'question'; summary: string; createdAt: string; action?: RequestAction }
 
 export interface ToolCall { id: string; chatId: string; name: string; summary: string; status: 'running' | 'done' | 'failed'; createdAt: string }
 
@@ -78,12 +84,12 @@ export type ServerEvent =
   | { type: 'message.delta'; chatId: string; messageId: string; text: string; offset: number }
   | { type: 'message.completed'; chatId: string; message: Message }
   | { type: 'tool.call'; chatId: string; toolCall: ToolCall }
-  | { type: 'request.opened'; chatId: string; requestId: string; kind: 'permission' | 'question'; summary: string }
+  | { type: 'request.opened'; chatId: string; requestId: string; kind: 'permission' | 'question'; summary: string; action?: RequestAction }
   | { type: 'request.closed'; chatId: string; requestId: string }
   | { type: 'usage.updated'; reading: UsageReading }
   | { type: 'connection.updated'; health: ConnectionHealth }
   | { type: 'connect.updated'; state: ConnectState }
-  | { type: 'notification'; chatId: string; kind: 'permission' | 'question' | 'finished' | 'limit' | 'error' };
+  | { type: 'notification'; chatId: string; kind: 'permission' | 'question' | 'finished' | 'limit' | 'error'; action?: RequestAction };
 
 export type ConnectPhase = 'idle' | 'installing' | 'signing_in' | 'signing_out' | 'updating' | 'error';
 export type ConnectOp = 'install' | 'update' | 'signin' | 'signout';

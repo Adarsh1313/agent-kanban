@@ -68,6 +68,7 @@ test('approval request waits for respondToRequest', async () => {
     assert.ok(req.type === 'request.opened');
     assert.equal(req.kind, 'permission');
     assert.equal(req.summary, 'npm test');
+    assert.equal(req.action, 'command');
     assert.equal(req.requestId, '900');
     assert.ok(!events.some((e) => e.type === 'turn.completed'));
     await adapter.respondToRequest('thr_1', req.requestId, 'allow');
@@ -82,6 +83,7 @@ test('file change approval opens a request and accept completes the turn', async
     const req = await waitFor((e) => e.type === 'request.opened');
     assert.ok(req.type === 'request.opened');
     assert.equal(req.summary, 'Edit a.txt');
+    assert.equal(req.action, 'edit');
     assert.equal(req.requestId, '901');
     await adapter.respondToRequest('thr_1', req.requestId, 'allow');
     await waitFor((e) => e.type === 'turn.completed');

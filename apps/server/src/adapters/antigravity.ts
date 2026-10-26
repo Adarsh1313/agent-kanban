@@ -15,7 +15,7 @@ import { mkdirSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
-import type { AdapterEvent, ModelOption, UsageReading } from '@agent-kanban/shared';
+import type { AdapterEvent, ModelOption, RequestAction, UsageReading } from '@agent-kanban/shared';
 import type { PingResult, ProviderAdapter } from './adapter.ts';
 import { JsonRpcProcess } from './jsonrpc.ts';
 import { AcpClient, AUTH_REQUIRED_CODE } from './acp.ts';
@@ -324,9 +324,10 @@ export class AntigravityAdapter implements ProviderAdapter {
     const tc = req.toolCall;
     const known = typeof tc?.toolCallId === 'string' ? this.toolInfo.get(tc.toolCallId) : undefined;
     const summary = typeof tc?.title === 'string' && tc.title ? tc.title : known?.title ?? 'Use a tool';
+    const action = acpAction(typeof tc?.kind === 'string' && tc.kind ? tc.kind : known?.kind);
     return new Promise((resolve) => {
       this.perms.set(requestId, { sessionId, toolCallId: typeof tc?.toolCallId === 'string' ? tc.toolCallId : null, options: req.options, resolve });
-      this.emit({ type: 'request.opened', sessionRef: sessionId, requestId, kind: 'permission', summary });
+      this.emit({ type: 'request.opened', sessionRef: sessionId, requestId, kind: 'permission', summary, action });
     });
   }
 
@@ -624,6 +625,13 @@ export class AntigravityAdapter implements ProviderAdapter {
 
 function isAuthRequired(err: unknown): boolean {
   return (err as { code?: unknown } | null)?.code === AUTH_REQUIRED_CODE;
+}
+
+/** What an ACP tool call's permission is for, from its `kind` (edit / delete / move change files; execute runs a command). */
+export function acpAction(kind: string | undefined): RequestAction {
+  if (kind === 'edit' || kind === 'delete' || kind === 'move') return 'edit';
+  if (kind === 'execute') return 'command';
+  return 'tool';
 }
 
 /** Antigravity's "Tool call was approved but never executed" (in rawOutput or the call's content). */
