@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import type { ConnectionHealth, ModelOption, Project, ProviderId, UsageReading } from '@agent-kanban/shared';
+import { folderKey } from '@agent-kanban/shared';
 import { ApiError, api } from '../../api/client.ts';
 import type { AppState } from '../../state/reducer.ts';
 import { baseName, focusedProvider, suggestFor } from '../../state/selectors.ts';
@@ -44,17 +45,8 @@ const STATUS_TEXT: Record<ConnectionHealth['status'], string> = {
 
 export const isConnected = (c: ConnectionHealth | undefined) => c?.status === 'connected' || c?.status === 'update_available';
 
-/** Folder paths compare without trailing separators, and case-insensitively for Windows drive paths. */
-function samePath(a: string, b: string): boolean {
-  const norm = (p: string) => {
-    const t = p.trim().replace(/[\\/]+$/, '');
-    return /^[a-z]:/i.test(t) ? t.replace(/\//g, '\\').toLowerCase() : t;
-  };
-  return norm(a) === norm(b);
-}
-
 export const findProject = (projects: Project[], path: string) =>
-  path.trim() ? projects.find((p) => p.id.trim() !== '' && (samePath(p.id, path) || samePath(p.path, path))) : undefined;
+  path.trim() ? projects.find((p) => p.id.trim() !== '' && (folderKey(p.id) === folderKey(path) || folderKey(p.path) === folderKey(path))) : undefined;
 
 /** Folders a chat can start in (history can carry chats with no folder). */
 const usable = (projects: Project[]) => projects.filter((p) => p.id.trim() !== '');

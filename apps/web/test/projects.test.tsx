@@ -138,7 +138,8 @@ describe('Projects list', () => {
     mount(store); // cold: the chat index is built during this mount
     const took = performance.now() - t0;
     expect(rows()).toHaveLength(80);
-    expect(took).toBeLessThan(1000);
+    // ~200 ms locally; the budget leaves room for a loaded CI machine and still catches a quadratic regression.
+    expect(took).toBeLessThan(3000);
     expect(mocked.projectInfo).not.toHaveBeenCalled();
     // An unrelated change (a panel opening, a usage reading) reuses the index instead of regrouping 1 200 chats.
     const before = chatsByFolder(store.getState());

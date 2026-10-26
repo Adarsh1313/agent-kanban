@@ -5,7 +5,7 @@ import { ApiError, api } from '../src/api/client.ts';
 import { applySnapshot, initialState, type AppState } from '../src/state/reducer.ts';
 import { createStore, StoreProvider, type Store } from '../src/state/store.ts';
 import { openNewChat } from '../src/ui/actions.ts';
-import { allowedProviders, NewChatDialog, resetModelsCache } from '../src/ui/newchat/NewChatDialog.tsx';
+import { allowedProviders, findProject, NewChatDialog, resetModelsCache } from '../src/ui/newchat/NewChatDialog.tsx';
 import { Toasts } from '../src/ui/primitives/toast.tsx';
 import { Shell } from '../src/ui/shell/Shell.tsx';
 import { chat } from './helpers.ts';
@@ -70,6 +70,16 @@ describe('allowedProviders', () => {
   it('a new folder allows any connected provider, Antigravity included; update_available counts as connected', () => {
     const s = seeded({ connections: [conn('claude', 'update_available'), conn('codex', 'degraded'), conn('antigravity')] }).getState();
     expect(allowedProviders(s, undefined)).toEqual(['claude', 'antigravity']);
+  });
+});
+
+describe('findProject', () => {
+  it('matches a folder however it is spelled (the shared folderKey: case, slashes, trailing separator, UNC)', () => {
+    const ps = [project('C:\\Work\\Alpha', ['claude']), project('\\\\server\\Share\\x', ['codex']), project('/work/beta', ['codex'])];
+    expect(findProject(ps, 'c:/work/alpha/')?.id).toBe('C:\\Work\\Alpha');
+    expect(findProject(ps, '\\\\SERVER\\share\\x\\')?.id).toBe('\\\\server\\Share\\x');
+    expect(findProject(ps, '/work/beta/')?.id).toBe('/work/beta');
+    expect(findProject(ps, '/Work/beta')).toBeUndefined();
   });
 });
 
