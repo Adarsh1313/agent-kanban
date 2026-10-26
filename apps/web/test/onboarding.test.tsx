@@ -5,7 +5,8 @@ import { ApiError, api } from '../src/api/client.ts';
 import { applyEvent, applySnapshot, initialState } from '../src/state/reducer.ts';
 import { createStore, StoreProvider, type Store } from '../src/state/store.ts';
 import { setNewChatHandler } from '../src/ui/actions.ts';
-import { Onboarding, replayOnboarding } from '../src/ui/onboarding/Onboarding.tsx';
+import { notificationsLine, Onboarding, replayOnboarding } from '../src/ui/onboarding/Onboarding.tsx';
+import { setPrefs } from '../src/ui/notify/notifier.ts';
 import { dismissToast, toast, Toasts } from '../src/ui/primitives/toast.tsx';
 import { hasOpenLayer } from '../src/ui/primitives/layers.ts';
 import { Sidebar } from '../src/ui/shell/Sidebar.tsx';
@@ -287,6 +288,31 @@ describe('finish', () => {
     await waitFor(() => expect(document.activeElement).toBe(document.getElementById('main')));
     expect(location.hash).toBe('#/board');
     await waitFor(() => expect(dialog()).toBeNull());
+  });
+
+  it('the notifications line says what will reach the user: blocked desktop notifications are not called on', () => {
+    vi.stubGlobal('Notification', { permission: 'denied', requestPermission: async () => 'denied' });
+    try {
+      setPrefs({ desktop: true, sound: true });
+      mount(seeded([conn('claude')]));
+      toReady();
+      expect(screen.getByText('Sound on; desktop notifications are blocked in your browser')).toBeTruthy();
+      expect(screen.queryByText(/^Notifications on/)).toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+      setPrefs({ desktop: false, sound: true });
+    }
+  });
+
+  it('notificationsLine covers every combination', () => {
+    expect(notificationsLine({ desktop: true, sound: true }, 'granted')).toBe('Notifications on, with sound');
+    expect(notificationsLine({ desktop: true, sound: false }, 'granted')).toBe('Notifications on');
+    expect(notificationsLine({ desktop: true, sound: true }, 'denied')).toBe('Sound on; desktop notifications are blocked in your browser');
+    expect(notificationsLine({ desktop: false, sound: true }, 'unsupported')).toBe('Sound on; this browser can’t show desktop notifications');
+    expect(notificationsLine({ desktop: false, sound: true }, 'default')).toBe('Sound on; desktop notifications off');
+    expect(notificationsLine({ desktop: false, sound: true }, 'granted')).toBe('Sound on; desktop notifications off');
+    expect(notificationsLine({ desktop: true, sound: false }, 'denied')).toBe('Notifications off. Turn them on from the bell any time');
+    expect(notificationsLine({ desktop: false, sound: false }, 'granted')).toBe('Notifications off. Turn them on from the bell any time');
   });
 
   it('a failed write toasts the server text and stays on the last step', async () => {

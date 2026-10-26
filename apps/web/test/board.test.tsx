@@ -146,6 +146,19 @@ describe('Board: movement', () => {
   });
 });
 
+describe('Board: card hover actions and long titles', () => {
+  it('while the actions show (hover or focus inside), the title reserves room for them, with tokens only', async () => {
+    const { readFileSync } = await import('node:fs');
+    const css = readFileSync('src/styles/app.css', 'utf8'); // vitest runs from apps/web
+    const rule = (sel: RegExp) => new RegExp(sel.source + String.raw`[^{]*\{\s*padding-inline-end: (calc\([^;]*\));\s*\}`).exec(css)?.[1];
+    const icons = rule(/\.card:hover \.card-title, \.card:focus-within \.card-title/);
+    const wide = rule(/\.card:has\(\.card-actions \.btn:not\(\.icon-only\)\):hover \.card-title,\s*\.card:has\(\.card-actions \.btn:not\(\.icon-only\)\):focus-within \.card-title/);
+    expect(icons).toBeDefined();
+    expect(wide).toBeDefined();
+    for (const v of [icons!, wide!]) expect(v.replace(/var\(--space-\d\)/g, '')).not.toMatch(/px|rem|em/);
+  });
+});
+
 describe('Board: actions', () => {
   it('Stop calls api.stop and applies the returned chat', async () => {
     const c = chat({ title: 'Stoppable' });

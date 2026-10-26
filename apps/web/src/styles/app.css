@@ -30,6 +30,11 @@ html, body { overflow: hidden; }
 .col-cards, .card-slot { display: contents; }
 .card[aria-current="true"] { border-color: var(--color-ink); }
 .card-meta .card-proj { display: inline-flex; align-items: center; gap: var(--space-1); min-width: 0; }
+/* The hover actions sit over the end of the title's line: while they show, the title wraps short of them
+   (three 24 px icons, or Resume with text and two icons). */
+.card:hover .card-title, .card:focus-within .card-title { padding-inline-end: calc(var(--space-8) * 2 + var(--space-3)); }
+.card:has(.card-actions .btn:not(.icon-only)):hover .card-title,
+.card:has(.card-actions .btn:not(.icon-only)):focus-within .card-title { padding-inline-end: calc(var(--space-8) * 4 + var(--space-4)); }
 .no-results { flex: 1; display: grid; place-items: center; text-align: center; color: var(--color-text-muted); align-self: stretch; }
 .no-results h3 { margin: var(--space-2) 0 var(--space-1); color: var(--color-text); font-size: var(--text-title); font-weight: var(--weight-semibold); }
 .no-results p { margin: 0 0 var(--space-3); font-size: var(--text-body); }

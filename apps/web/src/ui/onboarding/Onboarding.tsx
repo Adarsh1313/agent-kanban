@@ -252,10 +252,15 @@ function CountUp({ to }: { to: number | null }) {
 /* ───────── Notifications ───────── */
 
 const useNotifyPrefs = () => useSyncExternalStore(subscribePrefs, getPrefs, getPrefs);
-const notificationsOn = (support: DesktopSupport) => {
-  const p = getPrefs();
-  return (p.desktop && support === 'granted') || p.sound;
-};
+/** The Ready step's notifications line: what will actually reach the user, desktop notifications only when the browser allows them. */
+export function notificationsLine(p: { desktop: boolean; sound: boolean }, support: DesktopSupport): string {
+  const desktop = p.desktop && support === 'granted';
+  if (desktop) return `Notifications on${p.sound ? ', with sound' : ''}`;
+  if (!p.sound) return 'Notifications off. Turn them on from the bell any time';
+  if (support === 'denied') return 'Sound on; desktop notifications are blocked in your browser';
+  if (support === 'unsupported') return 'Sound on; this browser can’t show desktop notifications';
+  return 'Sound on; desktop notifications off';
+}
 
 /* ───────── The flow ───────── */
 
@@ -478,7 +483,7 @@ export function Onboarding() {
       const lines = [
         `${ids.length} agent${ids.length === 1 ? '' : 's'} connected: ${ids.map(providerName).join(', ')}`,
         `${chatsN} chats from ${shownProjects.length} projects in the sidebar`,
-        notificationsOn(support) ? `Notifications on${prefs.sound ? ', with sound' : ''}` : 'Notifications off. Turn them on from the bell any time',
+        notificationsLine(prefs, support),
       ];
       pane = (
         <>
