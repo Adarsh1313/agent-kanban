@@ -10,8 +10,31 @@ const CLOSE_CAP_MS = 5_000;
 const KILL_ESCALATE_MS = 3_000;
 const EXIT_GRACE_MS = 100;
 const STDERR_LINES = 20;
+const MAX_LINE_CHARS = 1024 * 1024; // stdout lines longer than this are dropped unparsed
 
-/** Line-delimited JSON-RPC over a child process's stdio. Messages are sent without "jsonrpc"; both forms are accepted. */
+/**
+ * Kills a child process and everything it started: `taskkill /T /F` on Windows (or the injected one),
+ * SIGTERM elsewhere. Never throws.
+ */
+export function killTree(child: ChildProcess, taskkill?: (pid: number) => ChildProcess): void {
+  const pid = child.pid;
+  if ((process.platform === 'win32' || taskkill) && pid !== undefined) {
+    try {
+      const k = taskkill ? taskkill(pid) : spawn('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
+      const fallback = () => { try { child.kill(); } catch { /* already gone */ } };
+      k.on('error', fallback);
+      k.on('exit', (code) => { if (code !== 0) fallback(); });
+      return;
+    } catch { /* fall through */ }
+  }
+  try { child.kill('SIGTERM'); } catch { /* already gone */ }
+}
+
+/**
+ * Line-delimited JSON-RPC over a child process's stdio. By default messages are sent without "jsonrpc" (Codex);
+ * `{ jsonrpc: '2.0' }` adds the field to every outgoing message (ACP). Both forms are accepted on input.
+ * Stdout lines that are not JSON objects go to `onTextLine` listeners and never break framing.
+ */
 export class JsonRpcProcess {
   private child: ChildProcess;
   private nextId = 1;
@@ -27,17 +50,31 @@ export class JsonRpcProcess {
   private timedOut = false;
   private lastNoteAt = Date.now();
   private taskkill: ((pid: number) => ChildProcess) | undefined;
+  private jsonrpc: '2.0' | undefined;
+  private textLineFns: Array<(line: string) => void> = [];
+  private stderrLineFns: Array<(line: string) => void> = [];
+  private warnedLongLine = false;
+  /** POSIX: the child leads its own process group, and close() kills the whole group (its children too). */
+  private group: boolean;
 
-  constructor(command: string, args: string[], opts: { cwd?: string; env?: NodeJS.ProcessEnv; requestTimeoutMs?: number; taskkill?: (pid: number) => ChildProcess } = {}) {
+  /**
+   * `group: true` (POSIX only; Windows already kills the tree with taskkill /T): the child is started detached as the
+   * leader of its own process group, and close() signals the group, so programs it started (e.g. a PyInstaller
+   * bootloader's real process) don't outlive it.
+   */
+  constructor(command: string, args: string[], opts: { cwd?: string; env?: NodeJS.ProcessEnv; requestTimeoutMs?: number; taskkill?: (pid: number) => ChildProcess; jsonrpc?: '2.0'; group?: boolean } = {}) {
     this.taskkill = opts.taskkill;
+    this.group = opts.group === true && process.platform !== 'win32' && !opts.taskkill;
+    this.jsonrpc = opts.jsonrpc;
     this.defaultTimeoutMs = opts.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
     const target = resolveSpawnTarget(command);
-    this.child = spawn(target.command, [...target.args, ...args], { cwd: opts.cwd, env: opts.env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+    this.child = spawn(target.command, [...target.args, ...args], { cwd: opts.cwd, env: opts.env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, detached: this.group });
     createInterface({ input: this.child.stdout! }).on('line', (line) => this.onLine(line));
     createInterface({ input: this.child.stderr! }).on('line', (line) => {
       if (!line.trim()) return;
       this.stderrRing.push(line);
       if (this.stderrRing.length > STDERR_LINES) this.stderrRing.shift();
+      for (const fn of this.stderrLineFns) { try { fn(line); } catch { /* a listener's bug must not break reading */ } }
     });
     this.child.stdin!.on('error', () => {});
     this.child.on('error', () => this.handleExit(null));
@@ -76,6 +113,10 @@ export class JsonRpcProcess {
 
   onNotification(fn: (method: string, params: any) => void): void { this.notificationFns.push(fn); }
   onRequest(fn: (method: string, params: any, id: number | string) => Promise<unknown>): void { this.requestFn = fn; }
+  /** Called with each non-empty stdout line that is not a JSON object (e.g. a sign-in link printed as plain text). */
+  onTextLine(fn: (line: string) => void): void { this.textLineFns.push(fn); }
+  /** Called with each non-empty stderr line (Antigravity prints its sign-in link there). */
+  onStderrLine(fn: (line: string) => void): void { this.stderrLineFns.push(fn); }
   onExit(fn: (code: number | null) => void): void {
     if (this.exited) fn(this.exitCode);
     else this.exitFns.push(fn);
@@ -92,7 +133,7 @@ export class JsonRpcProcess {
     });
     this.killTree();
     if (process.platform !== 'win32') {
-      escalate = setTimeout(() => { try { this.child.kill('SIGKILL'); } catch { /* already gone */ } }, KILL_ESCALATE_MS);
+      escalate = setTimeout(() => this.signal('SIGKILL'), KILL_ESCALATE_MS);
     }
     await done;
     clearTimeout(cap);
@@ -100,31 +141,36 @@ export class JsonRpcProcess {
   }
 
   private killTree(): void {
-    const pid = this.child.pid;
-    if ((process.platform === 'win32' || this.taskkill) && pid !== undefined) {
-      try {
-        const k = this.taskkill ? this.taskkill(pid) : spawn('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
-        const fallback = () => { try { this.child.kill(); } catch { /* already gone */ } };
-        k.on('error', fallback);
-        k.on('exit', (code) => { if (code !== 0) fallback(); });
-        return;
-      } catch { /* fall through */ }
-    }
-    try { this.child.kill('SIGTERM'); } catch { /* already gone */ }
+    if (this.group) this.signal('SIGTERM');
+    else killTree(this.child, this.taskkill);
   }
 
-  private write(msg: unknown): void {
-    this.child.stdin!.write(JSON.stringify(msg) + '\n');
+  /** Sends `sig` to the child's process group when it leads one, else to the child. Never throws. */
+  private signal(sig: NodeJS.Signals): void {
+    const pid = this.child.pid;
+    if (this.group && pid !== undefined) {
+      try { process.kill(-pid, sig); return; } catch { /* the group is gone; try the child itself */ }
+    }
+    try { this.child.kill(sig); } catch { /* already gone */ }
+  }
+
+  private write(msg: object): void {
+    const framed = this.jsonrpc ? { jsonrpc: this.jsonrpc, ...msg } : msg;
+    this.child.stdin!.write(JSON.stringify(framed) + '\n');
   }
 
   private onLine(line: string): void {
     if (!line.trim()) return;
+    if (line.length > MAX_LINE_CHARS) {
+      if (!this.warnedLongLine) { this.warnedLongLine = true; console.warn(`[jsonrpc] dropped a stdout line over ${MAX_LINE_CHARS} characters`); }
+      return;
+    }
     let m: any;
-    try { m = JSON.parse(line); } catch { return; }
-    if (m === null || typeof m !== 'object') return;
+    try { m = JSON.parse(line); } catch { m = undefined; }
+    if (m === null || typeof m !== 'object') { this.emitText(line); return; }
     if (typeof m.method === 'string') {
       if (m.id !== undefined) void this.handleServerRequest(m.id, m.method, m.params);
-      else { this.lastNoteAt = Date.now(); this.timedOut = false; for (const fn of this.notificationFns) fn(m.method, m.params); }
+      else { this.lastNoteAt = Date.now(); this.timedOut = false; for (const fn of this.notificationFns) { try { fn(m.method, m.params); } catch { /* a listener's bug must not break framing */ } } }
       return;
     }
     if (m.id === undefined) return;
@@ -132,8 +178,12 @@ export class JsonRpcProcess {
     if (!p) return;
     this.pending.delete(m.id);
     clearTimeout(p.timer);
-    if (m.error) p.reject(new Error(m.error.message ?? 'request failed'));
+    if (m.error) p.reject(Object.assign(new Error(m.error.message ?? 'request failed'), { code: m.error.code }));
     else p.resolve(m.result);
+  }
+
+  private emitText(line: string): void {
+    for (const fn of this.textLineFns) { try { fn(line); } catch { /* a listener's bug must not break framing */ } }
   }
 
   private async handleServerRequest(id: number | string, method: string, params: any): Promise<void> {
@@ -143,7 +193,8 @@ export class JsonRpcProcess {
       const result = await this.requestFn(method, params, id);
       if (!this.exited) this.write({ id, result });
     } catch (e) {
-      if (!this.exited) this.write({ id, error: { code: -32603, message: e instanceof Error ? e.message : 'failed' } });
+      const code = typeof (e as any)?.code === 'number' ? (e as any).code : -32603;
+      if (!this.exited) this.write({ id, error: { code, message: e instanceof Error ? e.message : 'failed' } });
     }
   }
 

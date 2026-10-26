@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Chat, HistoryChat, UsageReading, ServerEvent } from '@agent-kanban/shared';
 import { createApi } from '../src/api.ts';
-import { ActiveElsewhereError } from '../src/chats.ts';
+import { ActiveElsewhereError, CantContinueError } from '../src/chats.ts';
 import { suggest } from '@agent-kanban/shared';
 
 const chat = (id = 'c1'): Chat => ({
@@ -249,15 +249,19 @@ test('POST /api/chats with a folder that does not exist, or a file, is 400', asy
   } finally { s.close(); }
 });
 
-test('Antigravity chats are refused with 400 for new chats and history continue', async () => {
-  const s = await setup();
+test('Antigravity chats start, and a history continue Antigravity refuses answers 409', async () => {
+  let started: any = null;
+  const s = await setup({
+    start: async (input: any) => { started = input; return chat(); },
+    continueHistory: async () => { throw new CantContinueError("This Antigravity chat can't be continued here yet. Start a new chat in the same folder."); },
+  });
   try {
     const a = await s.f('/api/chats', { method: 'POST', body: JSON.stringify({ provider: 'antigravity', cwd: dir, prompt: 'hi' }) });
-    assert.equal(a.status, 400);
-    assert.deepEqual(await a.json(), { error: "Antigravity chats aren't supported yet." });
+    assert.equal(a.status, 201);
+    assert.equal(started.provider, 'antigravity');
     const b = await s.f('/api/history/continue', { method: 'POST', body: JSON.stringify({ provider: 'antigravity', sessionRef: 'ag1', text: 'go' }) });
-    assert.equal(b.status, 400);
-    assert.deepEqual(await b.json(), { error: "Antigravity chats aren't supported yet." });
+    assert.equal(b.status, 409);
+    assert.deepEqual(await b.json(), { error: "This Antigravity chat can't be continued here yet. Start a new chat in the same folder." });
   } finally { s.close(); }
 });
 

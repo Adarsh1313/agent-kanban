@@ -6,7 +6,6 @@ import { useStore, useStoreInstance } from '../../state/store.ts';
 import { openHistoryChat, openNewChat } from '../actions.ts';
 import { ReasonBadge, errorText } from '../board/Card.tsx';
 import { copyText } from '../chat/ChatActionsMenu.tsx';
-import { UNSUPPORTED } from '../newchat/NewChatDialog.tsx';
 import { Icon, PROVIDER_IDS, ProviderLogo, providerName, StatusIcon } from '../primitives/index.ts';
 import { cssMs, reducedMotion } from '../primitives/motion.ts';
 import { navigate } from '../shell/route.ts';
@@ -113,12 +112,11 @@ function ProviderCards({ project, stats, worked, now }: { project: Project; stat
         const server = project.providers.find((p) => p.provider === id);
         const lastAt = mine?.lastAt || server?.lastUsedAt || '';
         const model = mine?.lastModel ?? server?.lastModel ?? null;
-        const unsupported = UNSUPPORTED[id];
         return (
           <div className="know" key={id}>
             <div className="h"><ProviderLogo id={id} />{providerName(id)}<span className="r">{plural(mine?.chats ?? 0, 'chat')}</span></div>
             <p>Last used {agoLabel(lastAt, now)}{model ? ` · ${model}` : ''}</p>
-            <button className="btn" type="button" disabled={!!unsupported} title={unsupported}
+            <button className="btn" type="button"
               onClick={() => openNewChat({ cwd: project.path, provider: id })}>
               <Icon name="plus" size="sm" />New {providerName(id)} chat
             </button>

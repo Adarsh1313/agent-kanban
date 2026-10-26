@@ -7,7 +7,7 @@ import { applyEvent, applySnapshot, initialState, type AppState } from '../src/s
 import { createStore, StoreProvider, type Store } from '../src/state/store.ts';
 import { setHistoryHandler, setNewChatHandler, setRowMenuHandler } from '../src/ui/actions.ts';
 import { Board } from '../src/ui/board/Board.tsx';
-import { HINT_AGENT_COLUMNS, HINT_DONE_BACK, RESUME_TEXT } from '../src/ui/board/Card.tsx';
+import { ANTIGRAVITY_STARTING, HINT_AGENT_COLUMNS, HINT_DONE_BACK, RESUME_TEXT } from '../src/ui/board/Card.tsx';
 import { clockTime } from '../src/ui/board/format.ts';
 import { flip } from '../src/ui/primitives/flip.ts';
 import { Toasts } from '../src/ui/primitives/toast.tsx';
@@ -143,6 +143,48 @@ describe('Board: movement', () => {
     expect(card('Mover')).toBe(el);
     expect(within(column('Review')).getByRole('article', { name: 'Mover' })).toBe(el);
     expect(column('Running').querySelector('.card')).toBeNull();
+  });
+});
+
+describe('Board: permission badge', () => {
+  it('says what the open permission is for (edit / tool), and run a command when unknown', () => {
+    const r = (requestId: string, action?: 'edit' | 'tool') => ({ requestId, kind: 'permission' as const, summary: 's', createdAt: '2026-10-23T11:00:00.000Z', ...(action ? { action } : {}) });
+    const store = seeded([
+      chat({ id: 'e', title: 'Edits', column: 'needs_you', needsReason: 'permission' }),
+      chat({ id: 't', title: 'Tools', column: 'needs_you', needsReason: 'permission' }),
+      chat({ id: 'u', title: 'Unknown', column: 'needs_you', needsReason: 'permission' }),
+    ]);
+    act(() => store.setState((s) => ({ ...s, requests: { e: [r('1', 'edit')], t: [r('2', 'tool')], u: [r('3')] } })));
+    mount(store);
+    expect(within(card('Edits')).getByText('Wants to edit a file')).toBeTruthy();
+    expect(within(card('Tools')).getByText('Wants to use a tool')).toBeTruthy();
+    expect(within(card('Unknown')).getByText('Wants to run a command')).toBeTruthy();
+  });
+});
+
+describe('Board: a chat that is still starting', () => {
+  it('a new Antigravity chat waiting for its session says the first start can take a couple of minutes; others say Getting started…', () => {
+    mount(seeded([
+      chat({ id: 'a', title: 'Slow start', provider: 'antigravity', sessionRef: null, column: 'running' }),
+      chat({ id: 'b', title: 'Has session', provider: 'antigravity', sessionRef: 's9', column: 'running' }),
+      chat({ id: 'c', title: 'Claude start', provider: 'claude', sessionRef: null, column: 'running' }),
+    ]));
+    expect(within(card('Slow start')).getByText(ANTIGRAVITY_STARTING)).toBeTruthy();
+    expect(within(card('Has session')).getByText('Getting started…')).toBeTruthy();
+    expect(within(card('Claude start')).getByText('Getting started…')).toBeTruthy();
+  });
+});
+
+describe('Board: card hover actions and long titles', () => {
+  it('while the actions show (hover or focus inside), the title reserves room for them, with tokens only', async () => {
+    const { readFileSync } = await import('node:fs');
+    const css = readFileSync('src/styles/app.css', 'utf8'); // vitest runs from apps/web
+    const rule = (sel: RegExp) => new RegExp(sel.source + String.raw`[^{]*\{\s*padding-inline-end: (calc\([^;]*\));\s*\}`).exec(css)?.[1];
+    const icons = rule(/\.card:hover \.card-title, \.card:focus-within \.card-title/);
+    const wide = rule(/\.card:has\(\.card-actions \.btn:not\(\.icon-only\)\):hover \.card-title,\s*\.card:has\(\.card-actions \.btn:not\(\.icon-only\)\):focus-within \.card-title/);
+    expect(icons).toBeDefined();
+    expect(wide).toBeDefined();
+    for (const v of [icons!, wide!]) expect(v.replace(/var\(--space-\d\)/g, '')).not.toMatch(/px|rem|em/);
   });
 });
 

@@ -7,11 +7,15 @@ import { statSync } from 'node:fs';
 import { timingSafeEqual } from 'node:crypto';
 import { WebSocketServer, WebSocket } from 'ws';
 import type { ConnectionHealth, HistoryChat, ModelOption, ProviderId, ServerEvent } from '@agent-kanban/shared';
-import { ActiveElsewhereError } from './chats.ts';
+import { ActiveElsewhereError, CantContinueError } from './chats.ts';
+import { ConnectBusyError, ConnectStateError } from './connect/service.ts';
+import type { ConnectService } from './connect/service.ts';
+import { SettingsError } from './settings.ts';
+import type { SettingsStore } from './settings.ts';
 import type { ChatService } from './chats.ts';
 import type { UsageService } from './usage/service.ts';
 // suggest() lives in shared so the web app can recompute "Most room" from usage.updated events.
-import { suggest } from '@agent-kanban/shared';
+import { folderKey, suggest } from '@agent-kanban/shared';
 
 const PROVIDERS: ProviderId[] = ['claude', 'codex', 'antigravity'];
 const MAX_BODY = 1_000_000;
@@ -75,12 +79,6 @@ function provider(body: Record<string, unknown>): ProviderId {
   return v as ProviderId;
 }
 
-/** A provider the app can run chats on (Antigravity history is listed, but chats can't be started or continued yet). */
-function chatProvider(body: Record<string, unknown>): ProviderId {
-  const p = provider(body);
-  if (p === 'antigravity') throw new HttpError(400, "Antigravity chats aren't supported yet.");
-  return p;
-}
 
 function existingFolder(cwd: string): string {
   let ok = false;
@@ -95,6 +93,8 @@ export function createApi(opts: {
   history: () => Promise<HistoryChat[]>;
   connections?: { latest: () => ConnectionHealth[]; check: (provider?: ProviderId) => Promise<ConnectionHealth[]> };
   adapters?: { get(id: ProviderId): ProviderAdapter | undefined };
+  connect?: Pick<ConnectService, 'states' | 'install' | 'signIn' | 'signOut' | 'update' | 'cancel' | 'openSignInPage'>;
+  settings?: SettingsStore;
   /** Folder holding the built web app (default apps/web/dist). */
   webDist?: string;
   token: string;
@@ -124,7 +124,14 @@ export function createApi(opts: {
   }, pingMs);
   ping.unref();
 
-  const usageBody = (readings: ReturnType<UsageService['latest']>) => ({ readings, suggested: suggest(readings, PROVIDERS) });
+  const settings = opts.settings;
+  // The "Suggest it for new chats" switches limit which providers "Most room" may pick.
+  const usageBody = (readings: ReturnType<UsageService['latest']>) => ({ readings, suggested: suggest(readings, settings ? settings.suggestable() : PROVIDERS) });
+  // History of providers whose "Show its chats" switch is off is left out of Recent chats and Projects.
+  const visibleHistory = async (): Promise<HistoryChat[]> => {
+    const all = await history();
+    return settings ? settings.filterHistory(all) : all;
+  };
 
   // A provider's model list rarely changes: a non-empty answer is reused for 5 minutes (an empty one is asked again).
   const modelCache = new Map<ProviderId, { at: number; models: ModelOption[] }>();
@@ -180,10 +187,11 @@ export function createApi(opts: {
       }
       return { status: 200, body: chats.patch(m[0]!, patch) };
     }
-    if (match('GET', '/api/projects')) return { status: 200, body: buildProjects(chats.listChats(), await history()) };
+    if (match('GET', '/api/projects')) return { status: 200, body: buildProjects(chats.listChats(), await visibleHistory()) };
     if (match('GET', '/api/projects/info')) {
       const path = url.searchParams.get('path');
-      const known = path ? buildProjects(chats.listChats(), await history()).find((p) => p.id === path) : undefined;
+      const key = path ? folderKey(path) : '';
+      const known = key ? buildProjects(chats.listChats(), await visibleHistory()).find((p) => folderKey(p.id) === key) : undefined;
       if (!known) throw new HttpError(404, 'Not found.');
       return { status: 200, body: await projectInfo(known.path) };
     }
@@ -191,7 +199,7 @@ export function createApi(opts: {
     if (match('POST', '/api/chats')) {
       const b = await readJson(req);
       const input: { provider: ProviderId; cwd: string; prompt: string; model?: string } = {
-        provider: chatProvider(b), cwd: str(b, 'cwd'), prompt: str(b, 'prompt'),
+        provider: provider(b), cwd: str(b, 'cwd'), prompt: str(b, 'prompt'),
       };
       if (b.model !== undefined) {
         if (typeof b.model !== 'string' || b.model.trim() === '') throw new HttpError(400, 'Model must be a non-empty string.');
@@ -219,10 +227,10 @@ export function createApi(opts: {
     if ((m = match('POST', '/api/chats/:id/done'))) return { status: 200, body: chats.markDone(m[0]!) };
     if ((m = match('POST', '/api/chats/:id/undone'))) return { status: 200, body: chats.dragOutOfDone(m[0]!) };
     if ((m = match('POST', '/api/chats/:id/archive'))) return { status: 200, body: chats.archive(m[0]!) };
-    if (match('GET', '/api/history')) return { status: 200, body: await history() };
+    if (match('GET', '/api/history')) return { status: 200, body: await visibleHistory() };
     if (match('POST', '/api/history/continue')) {
       const b = await readJson(req);
-      const p = chatProvider(b); const ref = str(b, 'sessionRef'); const text = str(b, 'text');
+      const p = provider(b); const ref = str(b, 'sessionRef'); const text = str(b, 'text');
       const h = (await history()).find((x) => x.provider === p && x.sessionRef === ref);
       if (!h) throw new HttpError(404, 'Chat not found.');
       return { status: 200, body: await chats.continueHistory(h, text) };
@@ -237,6 +245,36 @@ export function createApi(opts: {
       const b = await readJson(req);
       const only = b.provider === undefined ? undefined : provider(b);
       return { status: 200, body: (await opts.connections?.check(only)) ?? [] };
+    }
+    if (match('GET', '/api/connect')) return { status: 200, body: opts.connect?.states() ?? [] };
+    if ((m = match('POST', '/api/connect/:provider/:action'))) {
+      const id = m[0] as ProviderId;
+      if (!PROVIDERS.includes(id)) throw new HttpError(400, 'Unknown provider. Use claude, codex or antigravity.');
+      const c = opts.connect;
+      if (!c) throw new HttpError(404, 'Not found.');
+      const actions: Record<string, () => unknown> = {
+        install: () => c.install(id), signin: () => c.signIn(id), signout: () => c.signOut(id),
+        update: () => c.update(id), cancel: () => c.cancel(id), open: () => c.openSignInPage(id),
+      };
+      const run = Object.hasOwn(actions, m[1]!) ? actions[m[1]!] : undefined;
+      if (!run) throw new HttpError(404, 'Not found.');
+      return { status: 202, body: await run() };
+    }
+    if (match('GET', '/api/settings')) {
+      if (!settings) throw new HttpError(404, 'Not found.');
+      return { status: 200, body: settings.get() };
+    }
+    if (match('PATCH', '/api/settings')) {
+      if (!settings) throw new HttpError(404, 'Not found.');
+      const b = await readJson(req);
+      let next;
+      try { next = settings.patch(b); } catch (e) {
+        if (e instanceof SettingsError) throw new HttpError(400, e.message);
+        throw e;
+      }
+      // Other open pages (a second tab) follow the change.
+      broadcast({ type: 'settings.updated', settings: next });
+      return { status: 200, body: next };
     }
     throw new HttpError(404, 'Not found.');
   }
@@ -312,7 +350,7 @@ export function createApi(opts: {
           return send(err.status, { error: err.message });
         }
         const msg = err instanceof Error ? err.message : '';
-        if (err instanceof ActiveElsewhereError) return send(409, { error: msg });
+        if (err instanceof ActiveElsewhereError || err instanceof CantContinueError || err instanceof ConnectBusyError || err instanceof ConnectStateError) return send(409, { error: msg });
         if (msg === 'That request is no longer open.') return send(409, { error: msg });
         if (msg === 'Chat not found.') return send(404, { error: msg });
         console.error(err);

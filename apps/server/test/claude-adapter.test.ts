@@ -2,7 +2,7 @@ import { test, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ClaudeAdapter, readClaudeUsage } from '../src/adapters/claude.ts';
+import { ClaudeAdapter, claudeAction, readClaudeUsage } from '../src/adapters/claude.ts';
 import { claudeUsageToReading } from '../src/usage/parse.ts';
 
 type Opts = any;
@@ -106,6 +106,7 @@ test('deny resolves canUseTool with the declined message', async () => {
   const req = ev.find((e) => e.type === 'request.opened');
   assert.equal(req.kind, 'permission');
   assert.equal(req.summary, 'Running npm test');
+  assert.equal(req.action, 'command');
   await a.respondToRequest(sessionRef, req.requestId, 'deny');
   await tick();
   assert.deepEqual(outcome, { behavior: 'deny', message: 'The user declined.' });
@@ -669,4 +670,10 @@ test('a listModels failure backs off like a failed ping', async () => {
     assert.deepEqual(await a.listModels(), []);
     assert.equal(f.calls.length, 1, 'not recreated inside the backoff');
   } finally { mock.timers.reset(); await a.dispose(); }
+});
+
+test('a permission says what it is for: file edits, shell commands, any other tool', () => {
+  for (const n of ['Edit', 'Write', 'MultiEdit', 'NotebookEdit']) assert.equal(claudeAction(n), 'edit');
+  for (const n of ['Bash', 'BashOutput', 'KillShell', 'PowerShell']) assert.equal(claudeAction(n), 'command');
+  for (const n of ['WebFetch', 'mcp__x__y', 'Read']) assert.equal(claudeAction(n), 'tool');
 });

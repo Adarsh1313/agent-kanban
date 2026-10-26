@@ -7,6 +7,7 @@ import { useStore, useStoreInstance, type Store } from '../../state/store.ts';
 import { openRowMenu } from '../actions.ts';
 import { Icon, ProviderLogo, type IconName, Tooltip, providerName, toast } from '../primitives/index.ts';
 import { cssMs, cssValue, reducedMotion } from '../primitives/motion.ts';
+import { permissionText } from '../notify/notifier.ts';
 import { ActivityLine } from './ActivityLine.tsx';
 import { clockTime, duration, limitResetsAt, relativeTime } from './format.ts';
 
@@ -37,13 +38,19 @@ async function act(store: Store, run: () => Promise<Chat | void>): Promise<boole
 }
 
 /** Only the user moves cards to Done; Done cards can only go back to Review. */
+export const ANTIGRAVITY_STARTING = 'Starting Antigravity… This can take a couple of minutes the first time.';
+/** While a new chat waits for its provider session (no sessionRef yet), Antigravity's slow first start is named. */
+const startingText = (chat: Chat) => (chat.provider === 'antigravity' && !chat.sessionRef ? ANTIGRAVITY_STARTING : undefined);
+
 export const dropAllowed = (from: Column, to: Column) => (from === 'done' ? to === 'review' : to === 'done');
 
 export function ReasonBadge({ chat }: { chat: Chat }) {
   const now = useStore((s) => s.now);
   const resets = useStore((s) => (chat.needsReason === 'limit' ? limitResetsAt(s.usage[chat.provider], s.now) : null));
+  // The newest open permission says what it is for (edit / command / tool); unknown reads as a command.
+  const action = useStore((s) => (chat.needsReason === 'permission' ? s.requests[chat.id]?.filter((r) => r.kind === 'permission').at(-1)?.action : undefined));
   switch (chat.needsReason) {
-    case 'permission': return <span className="badge needs">Wants to run a command</span>;
+    case 'permission': { const t = permissionText(action); return <span className="badge needs">{t[0]!.toUpperCase() + t.slice(1)}</span>; }
     case 'question': return <span className="badge needs">Asked you a question</span>;
     case 'stopped': return <span className="badge quiet"><Icon name="stop" size="sm" />Stopped</span>;
     case 'limit': return <span className="badge danger">{resets ? `Limit reached · resets ${clockTime(resets, now)}` : 'Limit reached'}</span>;
@@ -233,7 +240,7 @@ export function Card({ id, fresh, onArrived }: { id: string; fresh: boolean; onA
           <Icon name="clock" size="sm" /><span className="tnum">{duration(took)}</span>
         </div>
       )}
-      {column === 'running' && <ActivityLine calls={calls} />}
+      {column === 'running' && <ActivityLine calls={calls} starting={startingText(chat)} />}
       <div className="card-actions">
         {column === 'running' && <ActionButton label={busy === 'stop' ? 'Stopping…' : 'Stop agent'} icon="stop" disabled={busy === 'stop'} onClick={() => void run('stop')} />}
         {resumable && <ActionButton label="Resume" icon="resume" text="Resume" disabled={busy === 'resume'} onClick={() => void run('resume')} />}

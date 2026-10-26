@@ -5,7 +5,7 @@ import { ApiError, api } from '../src/api/client.ts';
 import { applySnapshot, initialState, type AppState } from '../src/state/reducer.ts';
 import { createStore, StoreProvider, type Store } from '../src/state/store.ts';
 import { openNewChat } from '../src/ui/actions.ts';
-import { allowedProviders, NewChatDialog, resetModelsCache } from '../src/ui/newchat/NewChatDialog.tsx';
+import { allowedProviders, findProject, NewChatDialog, resetModelsCache } from '../src/ui/newchat/NewChatDialog.tsx';
 import { Toasts } from '../src/ui/primitives/toast.tsx';
 import { Shell } from '../src/ui/shell/Shell.tsx';
 import { chat } from './helpers.ts';
@@ -67,9 +67,19 @@ describe('allowedProviders', () => {
     expect(allowedProviders(s, PROJECTS[0])).toEqual(['claude']);
     expect(allowedProviders(s, PROJECTS[1])).toEqual(['claude', 'codex']);
   });
-  it('a new folder allows any connected, supported provider; update_available counts as connected', () => {
+  it('a new folder allows any connected provider, Antigravity included; update_available counts as connected', () => {
     const s = seeded({ connections: [conn('claude', 'update_available'), conn('codex', 'degraded'), conn('antigravity')] }).getState();
-    expect(allowedProviders(s, undefined)).toEqual(['claude']);
+    expect(allowedProviders(s, undefined)).toEqual(['claude', 'antigravity']);
+  });
+});
+
+describe('findProject', () => {
+  it('matches a folder however it is spelled (the shared folderKey: case, slashes, trailing separator, UNC)', () => {
+    const ps = [project('C:\\Work\\Alpha', ['claude']), project('\\\\server\\Share\\x', ['codex']), project('/work/beta', ['codex'])];
+    expect(findProject(ps, 'c:/work/alpha/')?.id).toBe('C:\\Work\\Alpha');
+    expect(findProject(ps, '\\\\SERVER\\share\\x\\')?.id).toBe('\\\\server\\Share\\x');
+    expect(findProject(ps, '/work/beta/')?.id).toBe('/work/beta');
+    expect(findProject(ps, '/Work/beta')).toBeUndefined();
   });
 });
 
@@ -88,7 +98,7 @@ describe('New chat dialog', () => {
     expect(row('Codex').getAttribute('aria-disabled')).toBe('true');
     expect(within(row('Codex')).getByText('Hasn’t worked on alpha yet')).toBeTruthy();
     expect(row('Antigravity').getAttribute('aria-disabled')).toBe('true');
-    expect(within(row('Antigravity')).getByText("Antigravity chats aren't supported yet.")).toBeTruthy();
+    expect(within(row('Antigravity')).getByText('Not signed in')).toBeTruthy();
     // A disabled row does nothing.
     fireEvent.click(row('Codex'));
     expect(chip(/^Provider: Claude Code$/)).toBeTruthy();
@@ -256,7 +266,7 @@ describe('New chat dialog', () => {
     fireEvent.click(chip(/^Provider:/));
     const pop = listbox('Provider');
     expect(within(pop).getByRole('option', { name: /Codex/ }).getAttribute('aria-disabled')).toBeNull();
-    expect(within(within(pop).getByRole('option', { name: /Antigravity/ })).getByText("Antigravity chats aren't supported yet.")).toBeTruthy();
+    expect(within(within(pop).getByRole('option', { name: /Antigravity/ })).getByText('Not installed')).toBeTruthy();
     fireEvent.click(within(pop).getByRole('option', { name: /Codex/ }));
     fireEvent.change(promptBox(), { target: { value: 'Hello' } });
     fireEvent.click(start());
@@ -280,12 +290,12 @@ describe('New chat dialog', () => {
   });
 
   it('any other error toasts the server text and keeps the dialog and the prompt', async () => {
-    mocked.startChat.mockRejectedValue(new ApiError("Antigravity chats aren't supported yet.", 400));
+    mocked.startChat.mockRejectedValue(new ApiError('Unknown provider. Use claude, codex or antigravity.', 400));
     mount(seeded());
     act(() => openNewChat());
     fireEvent.change(promptBox(), { target: { value: 'Keep me' } });
     fireEvent.click(start());
-    await waitFor(() => expect(document.querySelector('.toast')?.textContent).toContain("Antigravity chats aren't supported yet."));
+    await waitFor(() => expect(document.querySelector('.toast')?.textContent).toContain('Unknown provider. Use claude, codex or antigravity.'));
     expect(dialog().dataset.state).toBe('open');
     expect(promptBox().value).toBe('Keep me');
     expect((start() as HTMLButtonElement).disabled).toBe(false);
@@ -351,29 +361,46 @@ describe('New chat: loading and odd data', () => {
 });
 
 describe('New chat: fix round 1', () => {
-  it('a connected Antigravity is disabled with its reason; status text shows for providers that are not connected', () => {
+  it('a connected Antigravity can be picked for a new folder; status text shows for providers that are not connected', async () => {
+    mocked.startChat.mockResolvedValue({ id: 'c9' } as never);
     mount(seeded({ connections: [conn('claude'), conn('codex', 'not_installed'), conn('antigravity')] }));
     act(() => openNewChat({ cwd: '/elsewhere/new' }));
     fireEvent.click(chip(/^Provider:/));
     const pop = listbox('Provider');
     const ag = within(pop).getByRole('option', { name: /Antigravity/ });
-    expect(ag.getAttribute('aria-disabled')).toBe('true');
-    expect(within(ag).getByText("Antigravity chats aren't supported yet.")).toBeTruthy();
+    expect(ag.getAttribute('aria-disabled')).toBeNull();
     expect(within(within(pop).getByRole('option', { name: /Codex/ })).getByText('Not installed')).toBeTruthy();
+    fireEvent.click(ag);
+    expect(chip(/^Provider: Antigravity$/)).toBeTruthy();
+    fireEvent.change(promptBox(), { target: { value: 'Go' } });
+    fireEvent.click(start());
+    await flush();
+    expect(mocked.startChat).toHaveBeenCalledWith(expect.objectContaining({ provider: 'antigravity', cwd: '/elsewhere/new', prompt: 'Go' }));
   });
 
-  it('when only Antigravity is connected the note says to connect Claude Code or Codex; Ctrl+Enter focuses the provider chip and shows it', () => {
-    mount(seeded({ connections: [conn('antigravity')] }));
-    act(() => openNewChat());
-    const text = "Antigravity chats aren't supported yet. Connect Claude Code or Codex on the Connections page.";
-    expect(within(dialog()).getByText(text)).toBeTruthy();
-    expect((start() as HTMLButtonElement).disabled).toBe(true);
-    expect(start().getAttribute('aria-describedby')).toBe('dlg-note');
+  it('Antigravity: the footer says its limits are unavailable; the dialog closes as soon as the server answers (the card shows the slow start)', async () => {
+    mocked.startChat.mockResolvedValue(chat());
+    const unavailable: UsageReading = { provider: 'antigravity', status: 'unavailable', readAt: '2026-10-23T11:00:00.000Z', windows: [] };
+    mount(seeded({ connections: [conn('antigravity')], usage: [unavailable] }));
+    act(() => openNewChat({ cwd: '/elsewhere/new' }));
+    expect(dialog().querySelector('.dlg-hint')!.textContent).toBe('Antigravity: Limits unavailable');
     fireEvent.change(promptBox(), { target: { value: 'Go' } });
-    fireEvent.keyDown(promptBox(), { key: 'Enter', ctrlKey: true });
-    expect(document.activeElement).toBe(chip(/^Provider:/));
-    expect(document.querySelector('.dlg-hint')!.textContent).toBe(text);
-    expect(mocked.startChat).not.toHaveBeenCalled();
+    fireEvent.click(start());
+    await flush();
+    expect(screen.queryByText(/couple of minutes/)).toBeNull();
+    expect(dialog().dataset.state).toBe('closed');
+  });
+
+  it('when only Antigravity is connected, a new chat starts on it', async () => {
+    mocked.startChat.mockResolvedValue({ id: 'c9' } as never);
+    mount(seeded({ connections: [conn('antigravity')] }));
+    act(() => openNewChat({ cwd: '/elsewhere/new' }));
+    expect(chip(/^Provider: Antigravity$/)).toBeTruthy();
+    expect(within(dialog()).queryByText(/aren't supported yet/)).toBeNull();
+    fireEvent.change(promptBox(), { target: { value: 'Go' } });
+    fireEvent.click(start());
+    await flush();
+    expect(mocked.startChat).toHaveBeenCalledWith(expect.objectContaining({ provider: 'antigravity', cwd: '/elsewhere/new', prompt: 'Go' }));
   });
 
   it("a known project's missing folder switches to the path field, prefilled, with the error inline and the prompt kept", async () => {
@@ -423,7 +450,7 @@ describe('New chat: fix round 1', () => {
   });
 
   it('pickers focus the selected option; arrows skip disabled rows, Home/End jump; labels are presentation', () => {
-    mount(seeded({ connections: [conn('claude'), conn('codex'), conn('antigravity')] }));
+    mount(seeded({ connections: [conn('claude'), conn('codex'), conn('antigravity', 'signed_out')] }));
     act(() => openNewChat({ cwd: '/elsewhere/new' }));
     fireEvent.click(chip(/^Provider:/));
     const pop = listbox('Provider');
@@ -433,7 +460,7 @@ describe('New chat: fix round 1', () => {
     fireEvent.keyDown(document.activeElement!, { key: 'ArrowDown' });
     expect(document.activeElement).toBe(opt(/Codex/));
     fireEvent.keyDown(document.activeElement!, { key: 'ArrowDown' });
-    expect(document.activeElement).toBe(opt(/Claude Code/)); // Antigravity is skipped; wraps
+    expect(document.activeElement).toBe(opt(/Claude Code/)); // Antigravity (not signed in) is skipped; wraps
     fireEvent.keyDown(document.activeElement!, { key: 'End' });
     expect(document.activeElement).toBe(opt(/Codex/));
     fireEvent.keyDown(document.activeElement!, { key: 'Home' });

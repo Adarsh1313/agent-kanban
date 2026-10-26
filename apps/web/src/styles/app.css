@@ -30,6 +30,11 @@ html, body { overflow: hidden; }
 .col-cards, .card-slot { display: contents; }
 .card[aria-current="true"] { border-color: var(--color-ink); }
 .card-meta .card-proj { display: inline-flex; align-items: center; gap: var(--space-1); min-width: 0; }
+/* The hover actions sit over the end of the title's line: while they show, the title wraps short of them
+   (three 24 px icons, or Resume with text and two icons). */
+.card:hover .card-title, .card:focus-within .card-title { padding-inline-end: calc(var(--space-8) * 2 + var(--space-3)); }
+.card:has(.card-actions .btn:not(.icon-only)):hover .card-title,
+.card:has(.card-actions .btn:not(.icon-only)):focus-within .card-title { padding-inline-end: calc(var(--space-8) * 4 + var(--space-4)); }
 .no-results { flex: 1; display: grid; place-items: center; text-align: center; color: var(--color-text-muted); align-self: stretch; }
 .no-results h3 { margin: var(--space-2) 0 var(--space-1); color: var(--color-text); font-size: var(--text-title); font-weight: var(--weight-semibold); }
 .no-results p { margin: 0 0 var(--space-3); font-size: var(--text-body); }
@@ -76,6 +81,8 @@ html, body { overflow: hidden; }
 .dlg-path-error { margin: 0; font-size: var(--text-caption); color: var(--color-danger); }
 .dlg-pop { width: min(calc(var(--space-8) * 10), calc(100vw - var(--space-4))); z-index: 65; } /* above the dialog, as board.html does */
 .dlg-pop .dlg-scroll { max-height: 40vh; overflow-y: auto; overflow-x: hidden; }
+/* A popover capped to a short window scrolls as a whole (Popover's place()): its list then doesn't scroll as well. */
+.dlg-pop[data-capped] .dlg-scroll { max-height: none; overflow-y: visible; }
 .dlg-pop .grow-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* An empty prompt shakes (NewChatDialog); with reduced motion there is no shake, so it is outlined instead. */
 @media (prefers-reduced-motion: reduce) {
@@ -100,10 +107,15 @@ button.usage-focus { color: inherit; transition: background-color var(--duration
   .meter .fill, .minimeter i::after, .usage-focus .m i::after { transition: none; }
 }
 
-/* Connections (read-only cards; design/connections.js) */
+/* Connections (design/connections.js keeps these inline) */
 .conn-update { color: var(--color-running); }
 .conn-checked { color: var(--color-text-faint); font-size: var(--text-caption); }
 .conn-head .logo { flex: none; }
+.conn .step-text.conn-error { color: var(--color-danger); align-items: flex-start; }
+.conn .step-text.conn-error .icon { flex: none; margin-top: calc(var(--space-1) / 2); }
+.section-title .later-note { color: var(--color-text-faint); font-size: var(--text-caption); }
+.later .later-input, .later .later-input input { width: 100%; }
+@media (prefers-reduced-motion: reduce) { .progress i { transition: none; } }
 
 @media (max-width: 900px) { .sidebar { display: none; } }
 @media (max-width: 640px) { .usage-area .pct, .topbar .new-label, .usage-focus .m span { display: none; } }
@@ -154,3 +166,11 @@ a.prow { color: inherit; text-decoration: none; }
   visibility: hidden;
   transition: opacity var(--duration-exit) var(--ease-out), transform var(--duration-exit) var(--ease-out), visibility 0s linear var(--duration-exit);
 }
+
+/* Onboarding (design/onboarding.js keeps these inline). Toasts (sign-in opened, a failed finish) show above the full-screen layer. */
+body:has(> .onb[data-state="open"]) > .toasts { z-index: 91; }
+.onb .found .onb-show { margin-top: calc(var(--space-1) * 1.5); }
+.onb-k { font-size: var(--text-micro); color: var(--color-text-faint); font-weight: var(--weight-medium); margin-bottom: calc(var(--space-1) * 1.5); }
+.onb .onb-play { height: auto; padding: 0 calc(var(--space-1) / 2); display: inline; }
+.onb .agent .t small + small { color: var(--color-text-faint); }
+.onb h1:focus { outline: none; }

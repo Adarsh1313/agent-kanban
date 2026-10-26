@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { OpenRequest } from '@agent-kanban/shared';
 import { applyEvent, initialState, isChatLoaded, type AppState } from '../src/state/reducer.ts';
-import { createStore, loadAll, loadChat, noteChatFolder, refetchGaps, refreshHistory, syncMissing } from '../src/state/store.ts';
+import { createStore, loadAll, loadChat, noteChatFolder, refetchGaps, refreshHistory, refreshProjects, syncMissing } from '../src/state/store.ts';
 import type { api as realApi } from '../src/api/client.ts';
 import { chat, message } from './helpers.ts';
 
@@ -10,6 +10,7 @@ function fakeApi(over: Partial<Record<keyof Api, unknown>> = {}): Api {
   return {
     listChats: async () => [], history: async () => [], projects: async () => [], connections: async () => [],
     usage: async () => ({ readings: [], suggested: null }), listMessages: async () => [], listRequests: async () => [], listToolCalls: async () => [],
+    connectStates: async () => [], settings: async () => null,
     ...over,
   } as unknown as Api;
 }
@@ -45,6 +46,16 @@ describe('store', () => {
     expect(store.getState().toolCalls.r).toHaveLength(1);
     expect(store.getState().chats.d).toBeDefined();
     expect(store.getState().sync.inflight).toBe(0);
+  });
+
+  it('loadAll loads the connect states and settings', async () => {
+    const on = { claude: true, codex: true, antigravity: true };
+    const settings = { onboarded: true, showChats: { ...on, codex: false }, suggest: on };
+    const st = { provider: 'codex' as const, phase: 'installing' as const, step: 'Downloading Codex…', progress: 0.3, signInUrl: null, message: null, lastOp: null, outcome: null, updatedAt: '2026-10-23T11:00:00.000Z' };
+    const store = createStore(initialState());
+    await loadAll(store, fakeApi({ connectStates: async () => [st], settings: async () => settings }));
+    expect(store.getState().connect.codex).toEqual(st);
+    expect(store.getState().settings).toEqual(settings);
   });
 
   it('loadAll drops a chat the server no longer lists (I3)', async () => {
@@ -224,5 +235,25 @@ describe('stale projects and history (final review)', () => {
     const store = storeWith({ history: [{ provider: 'claude', sessionRef: 'old', title: 't', cwd: '/x', updatedAt: 'x' }] });
     await refreshHistory(store, fakeApi({ history: async () => [] }));
     expect(store.getState().history).toEqual([]);
+  });
+
+  it('refreshHistory / refreshProjects drop an answer that a later refresh overtook', async () => {
+    const store = storeWith({});
+    const h = (ref: string) => [{ provider: 'claude' as const, sessionRef: ref, title: 't', cwd: '/x', updatedAt: 'x' }];
+    let first!: (v: unknown) => void;
+    const calls = [new Promise((r) => { first = r; }), Promise.resolve(h('new'))];
+    const api = fakeApi({ history: () => calls.shift(), projects: () => calls2.shift() });
+    let firstP!: (v: unknown) => void;
+    const calls2 = [new Promise((r) => { firstP = r; }), Promise.resolve([project('C:/new')])];
+    const a = refreshHistory(store, api);
+    const b = refreshHistory(store, api);
+    const c = refreshProjects(store, api);
+    const d = refreshProjects(store, api);
+    await Promise.all([b, d]);
+    first(h('old'));
+    firstP([project('C:/old')]);
+    await Promise.all([a, c]);
+    expect(store.getState().history.map((x) => x.sessionRef)).toEqual(['new']);
+    expect(store.getState().projects.map((x) => x.id)).toEqual(['C:/new']);
   });
 });

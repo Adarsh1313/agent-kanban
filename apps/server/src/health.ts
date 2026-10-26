@@ -3,6 +3,7 @@ import type { ConnectionHealth, ProviderId } from '@agent-kanban/shared';
 import type { AdapterSource } from './adapters/registry.ts';
 import type { PingResult } from './adapters/adapter.ts';
 import { resolveSpawnTarget } from './adapters/spawn-target.ts';
+import { ANTIGRAVITY_RELEASE_VERSION } from './connect/antigravity-release.ts';
 
 const NAMES: Record<ProviderId, string> = { claude: 'Claude Code', codex: 'Codex', antigravity: 'Antigravity' };
 const NPM_PACKAGE: Partial<Record<ProviderId, string>> = { claude: '@anthropic-ai/claude-code', codex: '@openai/codex' };
@@ -24,8 +25,21 @@ export function getVersion(_provider: ProviderId, path: string): Promise<string 
   });
 }
 
-/** The newest published version on npm. Offline, slow or odd responses give null, never an error. */
+/**
+ * Reads the installed version without starting anything. Antigravity has no --version: it is the installed,
+ * hash-pinned version folder (the running agent's agentInfo.version is only logged), so it can't flip while
+ * the agent starts and stops. The others run `<path> --version`.
+ */
+export function makeGetVersion(installedAntigravity: () => string | null): (id: ProviderId, path: string) => Promise<string | null> {
+  return async (id, path) => (id === 'antigravity' ? installedAntigravity() : getVersion(id, path));
+}
+
+/**
+ * The version to compare against: Antigravity's is the release Agent Kanban pins (installed from Google);
+ * the others are the newest published on npm. Offline, slow or odd responses give null, never an error.
+ */
 export async function getLatest(provider: ProviderId): Promise<string | null> {
+  if (provider === 'antigravity') return ANTIGRAVITY_RELEASE_VERSION;
   const pkg = NPM_PACKAGE[provider];
   if (!pkg) return null;
   try {
@@ -182,7 +196,8 @@ export class ConnectionMonitor {
     if (ping?.gaveUp) this.gaveUp.add(id); else this.gaveUp.delete(id);
     await latestPromise;
     const latestVersion = this.latestVersions.get(id) ?? null;
-    const updateAvailable = !!(version && latestVersion && newer(latestVersion, version));
+    // Antigravity is pinned: any other installed version (older or newer) is replaced by the pinned one.
+    const updateAvailable = !!(version && latestVersion && (id === 'antigravity' ? latestVersion !== version : newer(latestVersion, version)));
 
     const common = { ...base, installed: true, path, version, latestVersion, updateAvailable };
     if (!ping?.ok) {
@@ -190,8 +205,9 @@ export class ConnectionMonitor {
     }
     const ok = { ...common, signedIn: ping.signedIn, processOk: true };
     if (ping.signedIn === false) return this.publish({ ...ok, status: 'signed_out', message: `${name} isn't signed in.` });
-    if (updateAvailable) return this.publish({ ...ok, status: 'update_available', message: `${name} ${latestVersion} is available (you have ${version}).` });
-    return this.publish({ ...ok, status: 'connected', message: ping.message ? `Connected. ${ping.message}` : null });
+    // The update itself shows from latestVersion ("Update available: X"), so the message carries only other notes.
+    const message = ping.message ? `Connected. ${ping.message}` : null;
+    return this.publish({ ...ok, status: updateAvailable ? 'update_available' : 'connected', message });
   }
 
   /** Stores the new health and tells the listener only when something other than checkedAt changed. */

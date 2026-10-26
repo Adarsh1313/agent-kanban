@@ -3,6 +3,7 @@ import { useState, type KeyboardEvent } from 'react';
 import { api, type AnswerDecision } from '../../api/client.ts';
 import { useStoreInstance } from '../../state/store.ts';
 import { Icon, StatusIcon, providerName } from '../primitives/index.ts';
+import { permissionText } from '../notify/notifier.ts';
 import { runAction } from './ChatActionsMenu.tsx';
 
 /**
@@ -38,7 +39,7 @@ export function RequestCard({ chatId, provider, request }: { chatId: string; pro
   if (request.kind === 'permission') {
     return (
       <div className="request" role="group" aria-label="Permission request">
-        <div className="request-head"><StatusIcon state="needs" />{providerName(provider)} wants to run a command</div>
+        <div className="request-head"><StatusIcon state="needs" />{providerName(provider)} {permissionText(request.action)}</div>
         <div className="cmd">{request.summary}</div>
         <div className="row">
           <button className="btn primary" type="button" disabled={locked} onClick={() => void answer('allow', 'allow')}>{busy === 'allow' ? 'Allowing…' : 'Allow'}</button>

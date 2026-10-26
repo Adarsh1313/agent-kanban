@@ -68,6 +68,7 @@ test('approval request waits for respondToRequest', async () => {
     assert.ok(req.type === 'request.opened');
     assert.equal(req.kind, 'permission');
     assert.equal(req.summary, 'npm test');
+    assert.equal(req.action, 'command');
     assert.equal(req.requestId, '900');
     assert.ok(!events.some((e) => e.type === 'turn.completed'));
     await adapter.respondToRequest('thr_1', req.requestId, 'allow');
@@ -82,6 +83,7 @@ test('file change approval opens a request and accept completes the turn', async
     const req = await waitFor((e) => e.type === 'request.opened');
     assert.ok(req.type === 'request.opened');
     assert.equal(req.summary, 'Edit a.txt');
+    assert.equal(req.action, 'edit');
     assert.equal(req.requestId, '901');
     await adapter.respondToRequest('thr_1', req.requestId, 'allow');
     await waitFor((e) => e.type === 'turn.completed');
@@ -138,10 +140,15 @@ test('stop before the turn id is known interrupts once it arrives', async () => 
 });
 
 test('initialize timeout rejects, kills the process, and a later call spawns again', async () => {
-  const { adapter, procs } = make((n) => (n === 0 ? 'hanginit' : ''), { initializeTimeoutMs: 300 });
+  // The first process never answers initialize, so a short timeout always fires however loaded the machine is.
+  const { adapter, procs } = make((n) => (n === 0 ? 'hanginit' : ''), { initializeTimeoutMs: 100 });
   try {
-    await assert.rejects(adapter.startChat({ cwd, prompt: 'hi' }));
+    await assert.rejects(adapter.startChat({ cwd, prompt: 'hi' }), /timed out/);
     assert.equal(procs.length, 1);
+    const killed = procs[0]!;
+    await new Promise<void>((r) => killed.onExit(() => r()));
+    // The second process does answer: give its (cold, possibly slow) start the normal budget so load can't fail it.
+    adapter.initializeTimeoutMs = 15_000;
     const r = await adapter.startChat({ cwd, prompt: 'hi' });
     assert.equal(r.sessionRef, 'thr_1');
     assert.equal(procs.length, 2);

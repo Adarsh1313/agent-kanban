@@ -5,9 +5,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AdapterEvent, HistoryChat, ProviderId, ServerEvent } from '@agent-kanban/shared';
 import { Store } from '../src/store.ts';
-import { ChatService, ActiveElsewhereError } from '../src/chats.ts';
+import { ChatService, ActiveElsewhereError, CantContinueError } from '../src/chats.ts';
 import type { ProviderAdapter } from '../src/adapters/adapter.ts';
 import { AdapterRegistry } from '../src/adapters/registry.ts';
+import { ANTIGRAVITY_SIGNED_OUT } from '../src/adapters/antigravity.ts';
 
 class FakeAdapter implements ProviderAdapter {
   id: ProviderId;
@@ -35,6 +36,13 @@ class FakeAdapter implements ProviderAdapter {
   emit(e: AdapterEvent) { for (const l of this.listeners) l(e); }
 }
 
+/** Starts a chat and waits for its provider session (start itself answers as soon as the card exists). */
+async function startOf(svc: ChatService, input: Parameters<ChatService['start']>[0]) {
+  const chat = await svc.start(input);
+  await svc.started(chat.id);
+  return svc.getChat(chat.id);
+}
+
 function setup(provider: ProviderId = 'codex', now?: () => Date, claudeHome = '/nowhere') {
   const store = new Store(':memory:');
   const adapter = new FakeAdapter(provider);
@@ -49,7 +57,7 @@ function setup(provider: ProviderId = 'codex', now?: () => Date, claudeHome = '/
 
 test('start creates a running chat, stores sessionRef, broadcasts', async () => {
   const { store, adapter, events, svc } = setup();
-  const chat = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'hello' });
+  const chat = await startOf(svc, { provider: 'codex', cwd: '/w', prompt: 'hello' });
   assert.deepEqual(adapter.calls, ['startChat']);
   const got = store.getChat(chat.id)!;
   assert.equal(got.column, 'running');
@@ -58,9 +66,18 @@ test('start creates a running chat, stores sessionRef, broadcasts', async () => 
   assert.equal(store.listMessages(chat.id)[0].role, 'user');
 });
 
+test('a permission carries what it is for to the stored request, request.opened and the notification', async () => {
+  const { store, adapter, events, svc } = setup();
+  const chat = await startOf(svc, { provider: 'codex', cwd: '/w', prompt: 'p' });
+  adapter.emit({ type: 'request.opened', sessionRef: 's1', requestId: 'r1', kind: 'permission', summary: 'Edit a.txt', action: 'edit' });
+  assert.equal(store.listOpenRequests(chat.id)[0]!.action, 'edit');
+  assert.ok(events.some((e) => e.type === 'request.opened' && e.action === 'edit'));
+  assert.ok(events.some((e) => e.type === 'notification' && e.kind === 'permission' && e.action === 'edit'));
+});
+
 test('request.opened -> needs_you/permission with notification', async () => {
   const { store, adapter, events, svc } = setup();
-  const chat = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+  const chat = await startOf(svc, { provider: 'codex', cwd: '/w', prompt: 'p' });
   adapter.emit({ type: 'request.opened', sessionRef: 's1', requestId: 'r1', kind: 'permission', summary: 'run ls' });
   const got = store.getChat(chat.id)!;
   assert.deepEqual([got.column, got.needsReason], ['needs_you', 'permission']);
@@ -74,7 +91,7 @@ test('request.opened -> needs_you/permission with notification', async () => {
 
 test('turn.completed -> review, finished notification, usage refreshed once', async () => {
   const { store, adapter, events, refreshed, svc } = setup();
-  const chat = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+  const chat = await startOf(svc, { provider: 'codex', cwd: '/w', prompt: 'p' });
   adapter.emit({ type: 'turn.completed', sessionRef: 's1' });
   assert.equal(store.getChat(chat.id)!.column, 'review');
   assert.ok(events.some((e) => e.type === 'notification' && e.kind === 'finished'));
@@ -88,7 +105,7 @@ test('usage refresh rejection is swallowed (no unhandled rejection)', async () =
   process.on('unhandledRejection', onUnhandled);
   try {
     (svc as any).usage = { refresh: () => Promise.reject(new Error('boom')) };
-    await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+    await startOf(svc, { provider: 'codex', cwd: '/w', prompt: 'p' });
     adapter.emit({ type: 'turn.completed', sessionRef: 's1' });
     await new Promise((r) => setTimeout(r, 20));
     assert.equal(unhandled, 0);
@@ -99,7 +116,7 @@ test('usage refresh rejection is swallowed (no unhandled rejection)', async () =
 
 test('deltas then completed produce one assistant message', async () => {
   const { store, adapter, events, svc } = setup();
-  const chat = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+  const chat = await startOf(svc, { provider: 'codex', cwd: '/w', prompt: 'p' });
   adapter.emit({ type: 'message.delta', sessionRef: 's1', messageId: 'm1', text: 'Hel' });
   adapter.emit({ type: 'message.delta', sessionRef: 's1', messageId: 'm1', text: 'lo' });
   adapter.emit({ type: 'message.completed', sessionRef: 's1', messageId: 'm1', role: 'assistant', text: 'Hello' });
@@ -112,7 +129,7 @@ test('deltas then completed produce one assistant message', async () => {
 
 test('completed without deltas adds the message; tool.call is stored', async () => {
   const { store, adapter, events, svc } = setup();
-  const chat = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+  const chat = await startOf(svc, { provider: 'codex', cwd: '/w', prompt: 'p' });
   adapter.emit({ type: 'message.completed', sessionRef: 's1', messageId: 'm9', role: 'assistant', text: 'whole' });
   adapter.emit({ type: 'tool.call', sessionRef: 's1', toolCallId: 't1', name: 'Bash', summary: 'ls', status: 'running' });
   assert.equal(store.listMessages(chat.id).filter((m) => m.text === 'whole').length, 1);
@@ -121,7 +138,7 @@ test('completed without deltas adds the message; tool.call is stored', async () 
 
 test('stop calls the adapter and parks the chat as stopped', async () => {
   const { store, adapter, svc } = setup();
-  const chat = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+  const chat = await startOf(svc, { provider: 'codex', cwd: '/w', prompt: 'p' });
   await svc.stop(chat.id);
   assert.ok(adapter.calls.includes('stop:s1'));
   const got = store.getChat(chat.id)!;
@@ -131,23 +148,107 @@ test('stop calls the adapter and parks the chat as stopped', async () => {
 test('Review 2: startChat rejection lands in needs_you/error with friendly copy', async () => {
   const { store, adapter, svc } = setup();
   adapter.startError = new Error('not signed in');
-  const chat = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+  const chat = await startOf(svc, { provider: 'codex', cwd: '/w', prompt: 'p' });
   const got = store.getChat(chat.id)!;
   assert.deepEqual([got.column, got.needsReason], ['needs_you', 'error']);
   const last = store.listMessages(chat.id).filter((m) => m.role === 'assistant').pop()!;
   assert.equal(last.text, "Codex isn't signed in. Open Connections to sign in.");
 });
 
+test('start answers as soon as the card exists; the session arrives by chat.updated and a message sent meanwhile waits for it', async () => {
+  const { store, adapter, events, svc } = setup();
+  let open!: (v: { sessionRef: string }) => void;
+  adapter.startChat = () => { adapter.calls.push('startChat'); return new Promise((r) => { open = r; }); };
+  const chat = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+  // Answered while the provider is still opening its session (a cold Antigravity takes a minute or two).
+  assert.equal(chat.column, 'running');
+  assert.equal(chat.sessionRef, null);
+  assert.deepEqual(adapter.calls, ['startChat']);
+  assert.ok(events.some((e) => e.type === 'chat.updated' && e.chat.id === chat.id && e.chat.sessionRef === null));
+  const sent = svc.send(chat.id, 'more');
+  await new Promise((r) => setTimeout(r, 5));
+  assert.deepEqual(adapter.calls, ['startChat'], 'the message waits for the session');
+  open({ sessionRef: 's1' });
+  await sent;
+  assert.equal(store.getChat(chat.id)!.sessionRef, 's1');
+  assert.ok(events.some((e) => e.type === 'chat.updated' && e.chat.id === chat.id && e.chat.sessionRef === 's1'));
+  assert.deepEqual(adapter.calls, ['startChat', 'send:s1:more']);
+});
+
+test('stop during a slow start answers at once (card stopped); the first turn is stopped once the session arrives', async () => {
+  const { store, adapter, svc } = setup();
+  let open!: (v: { sessionRef: string }) => void;
+  adapter.startChat = () => { adapter.calls.push('startChat'); return new Promise((r) => { open = r; }); };
+  const chat = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+  let stopped = false;
+  const stopping = svc.stop(chat.id).then(() => { stopped = true; });
+  await new Promise((r) => setTimeout(r, 5));
+  assert.equal(stopped, true, 'stop does not wait for the session');
+  await stopping;
+  assert.deepEqual([store.getChat(chat.id)!.column, store.getChat(chat.id)!.needsReason], ['needs_you', 'stopped']);
+  assert.deepEqual(adapter.calls, ['startChat']);
+  open({ sessionRef: 's1' });
+  await svc.started(chat.id);
+  assert.deepEqual(adapter.calls, ['startChat', 'stop:s1']);
+  assert.equal(store.getChat(chat.id)!.sessionRef, 's1');
+  assert.deepEqual([store.getChat(chat.id)!.column, store.getChat(chat.id)!.needsReason], ['needs_you', 'stopped']);
+  // The next start of this chat is not stopped by the old request.
+  await svc.send(chat.id, 'go on');
+  assert.equal(adapter.calls.at(-1), 'send:s1:go on');
+  assert.equal(adapter.calls.filter((c) => c.startsWith('stop')).length, 1);
+});
+
+test('mark done during a slow start: the session is stopped when it arrives and the card stays done', async () => {
+  const { store, adapter, svc } = setup();
+  let open!: (v: { sessionRef: string }) => void;
+  adapter.startChat = () => { adapter.calls.push('startChat'); return new Promise((r) => { open = r; }); };
+  const chat = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+  assert.equal(svc.markDone(chat.id).column, 'done');
+  open({ sessionRef: 's1' });
+  await svc.started(chat.id);
+  assert.deepEqual(adapter.calls, ['startChat', 'stop:s1']);
+  assert.equal(store.getChat(chat.id)!.column, 'done');
+});
+
+test('a start that fails after start answered moves the card to Needs you with the error (no unhandled rejection)', async () => {
+  const { store, adapter, events, svc } = setup();
+  let unhandled = 0;
+  const onUnhandled = () => { unhandled++; };
+  process.on('unhandledRejection', onUnhandled);
+  try {
+    let reject!: (e: Error) => void;
+    adapter.startChat = () => new Promise((_, j) => { reject = j; });
+    const chat = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+    assert.equal(chat.column, 'running');
+    reject(new Error('not signed in'));
+    await svc.started(chat.id);
+    const got = store.getChat(chat.id)!;
+    assert.deepEqual([got.column, got.needsReason], ['needs_you', 'error']);
+    assert.ok(events.some((e) => e.type === 'notification' && e.chatId === chat.id && e.kind === 'error'));
+    await new Promise((r) => setTimeout(r, 10));
+    assert.equal(unhandled, 0);
+  } finally { process.off('unhandledRejection', onUnhandled); }
+});
+
+test('a registry that throws while starting moves the card to Needs you instead of rejecting unobserved', async () => {
+  const store = new Store(':memory:');
+  const registry = { onAdapter: () => {}, get: () => undefined, ensure: async () => { throw new Error('spawn EPERM'); } };
+  const svc = new ChatService({ store, adapters: registry as any, usage: { refresh: async () => [] } as any, broadcast: () => {}, claudeHome: '/nowhere' });
+  const chat = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+  await svc.started(chat.id);
+  assert.deepEqual([store.getChat(chat.id)!.column, store.getChat(chat.id)!.needsReason], ['needs_you', 'error']);
+});
+
 test('missing adapter -> not installed copy, no throw', async () => {
   const { store, svc } = setup('codex');
-  const chat = await svc.start({ provider: 'claude', cwd: '/w', prompt: 'p' });
+  const chat = await startOf(svc, { provider: 'claude', cwd: '/w', prompt: 'p' });
   assert.equal(store.getChat(chat.id)!.needsReason, 'error');
   assert.equal(store.listMessages(chat.id).pop()!.text, "Claude Code isn't installed. Open Connections to install it.");
 });
 
 test('Review 3: error event for a running chat', async () => {
   const { store, adapter, events, svc } = setup();
-  const chat = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+  const chat = await startOf(svc, { provider: 'codex', cwd: '/w', prompt: 'p' });
   adapter.emit({ type: 'error', sessionRef: 's1', message: 'Codex stopped unexpectedly.' });
   const got = store.getChat(chat.id)!;
   assert.deepEqual([got.column, got.needsReason], ['needs_you', 'error']);
@@ -157,7 +258,7 @@ test('Review 3: error event for a running chat', async () => {
 
 test('X2: other provider errors show the provider message', async () => {
   const { store, adapter, svc } = setup();
-  const chat = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+  const chat = await startOf(svc, { provider: 'codex', cwd: '/w', prompt: 'p' });
   adapter.emit({ type: 'error', sessionRef: 's1', message: JSON.stringify({ type: 'error', error: { message: "The 'x' model is not supported." } }) });
   assert.equal(store.listMessages(chat.id).pop()!.text, "Codex couldn't continue: The 'x' model is not supported.");
 });
@@ -168,7 +269,7 @@ test('events emitted before startChat resolves are buffered and replayed', async
     adapter.emit({ type: 'message.completed', sessionRef: 's1', messageId: 'm1', role: 'assistant', text: 'early' });
     adapter.emit({ type: 'turn.completed', sessionRef: 's1' });
   };
-  const chat = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+  const chat = await startOf(svc, { provider: 'codex', cwd: '/w', prompt: 'p' });
   assert.equal(store.getChat(chat.id)!.column, 'review');
   assert.ok(store.listMessages(chat.id).some((m) => m.text === 'early'));
 });
@@ -230,7 +331,7 @@ test('Review 1: continueHistory refuses a chat active in Claude Code', async () 
 
 test('markDone / dragOutOfDone / done chats stay done on agent events', async () => {
   const { store, adapter, events, svc } = setup();
-  const chat = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+  const chat = await startOf(svc, { provider: 'codex', cwd: '/w', prompt: 'p' });
   adapter.emit({ type: 'turn.completed', sessionRef: 's1' });
   assert.equal(svc.markDone(chat.id).column, 'done');
   adapter.emit({ type: 'message.completed', sessionRef: 's1', messageId: 'm', role: 'assistant', text: 'x' });
@@ -250,7 +351,7 @@ test('a throwing broadcast does not break state handling', async () => {
     store, adapters: { codex: adapter }, usage: { refresh: async () => [] } as any,
     broadcast: () => { throw new Error('ws down'); }, claudeHome: '/nowhere',
   });
-  const chat = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+  const chat = await startOf(svc, { provider: 'codex', cwd: '/w', prompt: 'p' });
   adapter.emit({ type: 'turn.completed', sessionRef: 's1' });
   assert.equal(store.getChat(chat.id)!.column, 'review');
 });
@@ -258,7 +359,7 @@ test('a throwing broadcast does not break state handling', async () => {
 test('I1: a chat whose start failed recovers on send', async () => {
   const { store, adapter, svc } = setup();
   adapter.startError = new Error('not signed in');
-  const chat = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+  const chat = await startOf(svc, { provider: 'codex', cwd: '/w', prompt: 'p' });
   assert.equal(store.getChat(chat.id)!.needsReason, 'error');
   assert.equal(store.getChat(chat.id)!.sessionRef, null);
   adapter.startError = null;
@@ -291,7 +392,7 @@ test('I3: send during a pending start is delivered after it resolves', async () 
   const { store, adapter, svc } = setup();
   let pendingSend: Promise<void> | undefined;
   adapter.beforeResolve = () => { pendingSend = svc.send(store.listChats()[0].id, 'follow-up'); };
-  const chat = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+  const chat = await startOf(svc, { provider: 'codex', cwd: '/w', prompt: 'p' });
   await pendingSend;
   assert.deepEqual(adapter.calls, ['startChat', 'send:s1:follow-up']);
   adapter.emit({ type: 'turn.completed', sessionRef: 's1' });
@@ -311,7 +412,7 @@ test('M2/M8: send on a not-attached chat resumes once then sends', async () => {
 
 test('M8: card returns to running only after all open requests are answered', async () => {
   const { store, adapter, svc } = setup();
-  const chat = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+  const chat = await startOf(svc, { provider: 'codex', cwd: '/w', prompt: 'p' });
   adapter.emit({ type: 'request.opened', sessionRef: 's1', requestId: 'r1', kind: 'permission', summary: 'a' });
   adapter.emit({ type: 'request.opened', sessionRef: 's1', requestId: 'r2', kind: 'question', summary: 'b' });
   await svc.answer(chat.id, 'r1', 'allow');
@@ -322,7 +423,7 @@ test('M8: card returns to running only after all open requests are answered', as
 
 test('M1: open requests are cleared when the chat stops', async () => {
   const { adapter, svc } = setup();
-  const chat = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+  const chat = await startOf(svc, { provider: 'codex', cwd: '/w', prompt: 'p' });
   adapter.emit({ type: 'request.opened', sessionRef: 's1', requestId: 'r1', kind: 'permission', summary: 'a' });
   adapter.emit({ type: 'stopped', sessionRef: 's1' });
   await assert.rejects(svc.answer(chat.id, 'r1', 'allow'), /no longer open/);
@@ -330,7 +431,7 @@ test('M1: open requests are cleared when the chat stops', async () => {
 
 test('M8: answer rejection moves the chat to needs_you/error', async () => {
   const { store, adapter, svc } = setup();
-  const chat = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+  const chat = await startOf(svc, { provider: 'codex', cwd: '/w', prompt: 'p' });
   adapter.emit({ type: 'request.opened', sessionRef: 's1', requestId: 'r1', kind: 'permission', summary: 'a' });
   adapter.respondError = new Error('pipe closed');
   await svc.answer(chat.id, 'r1', 'allow');
@@ -344,7 +445,7 @@ test('M6: buffered events older than 60 s are dropped (injected clock)', async (
   adapter.emit({ type: 'message.completed', sessionRef: 's1', messageId: 'old', role: 'assistant', text: 'stale' });
   t += 61_000;
   adapter.emit({ type: 'message.completed', sessionRef: 's1', messageId: 'new', role: 'assistant', text: 'fresh' });
-  const chat = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+  const chat = await startOf(svc, { provider: 'codex', cwd: '/w', prompt: 'p' });
   const texts = store.listMessages(chat.id).map((m) => m.text);
   assert.ok(texts.includes('fresh'));
   assert.ok(!texts.includes('stale'));
@@ -352,7 +453,7 @@ test('M6: buffered events older than 60 s are dropped (injected clock)', async (
 
 test('M3: a handler failure is logged and the chat goes to needs_you/error', async () => {
   const { store, adapter, svc } = setup();
-  const chat = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+  const chat = await startOf(svc, { provider: 'codex', cwd: '/w', prompt: 'p' });
   const orig = store.upsertToolCall.bind(store);
   store.upsertToolCall = () => { throw new Error('db locked'); };
   const logged: unknown[][] = [];
@@ -381,7 +482,7 @@ test('Fix2 (a): resume after an in-process failure is allowed (mtime is our own 
   const { home, file } = claudeHomeWith('s1');
   let t = new Date('2026-10-22T12:00:00Z').getTime();
   const x = setup('claude', () => new Date(t), home);
-  const chat = await x.svc.start({ provider: 'claude', cwd: '/w', prompt: 'p' });
+  const chat = await startOf(x.svc, { provider: 'claude', cwd: '/w', prompt: 'p' });
   x.adapter.emit({ type: 'error', sessionRef: 's1', message: 'died' });
   utimesSync(file, new Date(t), new Date(t));
   t += 5000;
@@ -394,7 +495,7 @@ test('Fix2 (b): a write 5 s after our last activity, within 15 s of now, is acti
   const { home, file } = claudeHomeWith('s1');
   let t = new Date('2026-10-22T12:00:00Z').getTime();
   const x = setup('claude', () => new Date(t), home);
-  const chat = await x.svc.start({ provider: 'claude', cwd: '/w', prompt: 'p' });
+  const chat = await startOf(x.svc, { provider: 'claude', cwd: '/w', prompt: 'p' });
   x.adapter.emit({ type: 'error', sessionRef: 's1', message: 'died' });
   utimesSync(file, new Date(t + 5000), new Date(t + 5000));
   t += 10_000;
@@ -431,7 +532,7 @@ test('R1: two chats failing on one shared Error object each get their own error'
 test('R2: two same-tick sends on a failed-start chat start the session once, in order', async () => {
   const { store, adapter, svc } = setup();
   adapter.startError = new Error('not signed in');
-  const chat = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+  const chat = await startOf(svc, { provider: 'codex', cwd: '/w', prompt: 'p' });
   adapter.startError = null;
   await Promise.all([svc.send(chat.id, 'first'), svc.send(chat.id, 'second')]);
   assert.equal(adapter.calls.filter((c) => c === 'startChat').length, 2); // failed start + one retry
@@ -453,7 +554,7 @@ test('R3: concurrent continueHistory calls for one sessionRef create one chat', 
 test('C2: auth detection uses word boundaries', async () => {
   const run = async (message: string) => {
     const { store, adapter, svc } = setup();
-    const chat = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+    const chat = await startOf(svc, { provider: 'codex', cwd: '/w', prompt: 'p' });
     adapter.emit({ type: 'error', sessionRef: 's1', message });
     return store.listMessages(chat.id).pop()!.text;
   };
@@ -475,11 +576,11 @@ test('a provider installed after the server started works without a restart (reg
   const events: ServerEvent[] = [];
   const svc = new ChatService({ store, adapters: registry, usage: { refresh: async () => [] } as any, broadcast: (e) => events.push(e), claudeHome: '/nowhere' });
   assert.equal(await registry.ensure('codex'), undefined);
-  const missing = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'hi' });
+  const missing = await startOf(svc, { provider: 'codex', cwd: '/w', prompt: 'hi' });
   assert.equal(missing.column, 'needs_you');
   assert.equal(created.length, 0);
   binary = 'C:\bin\codex.exe';
-  const chat = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'hi again' });
+  const chat = await startOf(svc, { provider: 'codex', cwd: '/w', prompt: 'hi again' });
   assert.equal(chat.column, 'running');
   assert.equal(created.length, 1);
   assert.deepEqual(created[0]!.calls, ['startChat']);
@@ -490,7 +591,7 @@ test('a provider installed after the server started works without a restart (reg
 
 test('open requests are stored for read-back: answered ones leave the list, the rest close when the turn ends', async () => {
   const { store, adapter, svc } = setup();
-  const chat = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+  const chat = await startOf(svc, { provider: 'codex', cwd: '/w', prompt: 'p' });
   adapter.emit({ type: 'request.opened', sessionRef: 's1', requestId: 'r1', kind: 'permission', summary: 'run ls' });
   adapter.emit({ type: 'request.opened', sessionRef: 's1', requestId: 'r2', kind: 'question', summary: 'Which db?' });
   assert.deepEqual(svc.listOpenRequests(chat.id).map((r) => [r.requestId, r.kind, r.summary]), [['r1', 'permission', 'run ls'], ['r2', 'question', 'Which db?']]);
@@ -508,7 +609,7 @@ test('open requests are stored for read-back: answered ones leave the list, the 
 
 test('open requests close in the store on stop and on error', async () => {
   const { adapter, svc } = setup();
-  const chat = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+  const chat = await startOf(svc, { provider: 'codex', cwd: '/w', prompt: 'p' });
   adapter.emit({ type: 'request.opened', sessionRef: 's1', requestId: 'r1', kind: 'permission', summary: 'run ls' });
   await svc.stop(chat.id);
   assert.deepEqual(svc.listOpenRequests(chat.id), []);
@@ -520,7 +621,7 @@ test('open requests close in the store on stop and on error', async () => {
 
 test('tool calls are read back per chat', async () => {
   const { adapter, svc } = setup();
-  const chat = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+  const chat = await startOf(svc, { provider: 'codex', cwd: '/w', prompt: 'p' });
   adapter.emit({ type: 'tool.call', sessionRef: 's1', toolCallId: 't1', name: 'command', summary: 'Running ls', status: 'running' });
   adapter.emit({ type: 'tool.call', sessionRef: 's1', toolCallId: 't1', name: 'command', summary: 'Running ls', status: 'done' });
   assert.deepEqual(svc.listToolCalls(chat.id).map((t) => [t.id, t.status]), [['t1', 'done']]);
@@ -530,7 +631,7 @@ test('tool calls are read back per chat', async () => {
 
 test('a deliberate Codex recycle reads as a restart, not a failure', async () => {
   const { store, adapter, svc } = setup();
-  const chat = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+  const chat = await startOf(svc, { provider: 'codex', cwd: '/w', prompt: 'p' });
   adapter.emit({ type: 'error', sessionRef: 's1', message: 'Codex stopped responding and was restarted. Resume to continue.' });
   assert.equal(store.listMessages(chat.id).at(-1)!.text, 'Codex stopped responding and was restarted. Resume to continue.');
 });
@@ -544,7 +645,7 @@ test('when the registry swaps a provider adapter, chats on it resume on the new 
     create: (id) => { const a = new FakeAdapter(id); created.push(a); return a as unknown as ProviderAdapter; },
   });
   const svc = new ChatService({ store, adapters: registry, usage: { refresh: async () => [] } as any, broadcast: () => {}, claudeHome: '/nowhere' });
-  const chat = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'hi' });
+  const chat = await startOf(svc, { provider: 'codex', cwd: '/w', prompt: 'hi' });
   created[0]!.emit({ type: 'turn.completed', sessionRef: 's1' });
   binary = 'C:\\new\\codex.exe';
   await registry.ensure('codex', binary);
@@ -555,7 +656,7 @@ test('when the registry swaps a provider adapter, chats on it resume on the new 
 
 test('request.closed is broadcast when a request is answered and when the rest close with the turn', async () => {
   const { adapter, events, svc } = setup();
-  const chat = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+  const chat = await startOf(svc, { provider: 'codex', cwd: '/w', prompt: 'p' });
   adapter.emit({ type: 'request.opened', sessionRef: 's1', requestId: 'r1', kind: 'permission', summary: 'a' });
   adapter.emit({ type: 'request.opened', sessionRef: 's1', requestId: 'r2', kind: 'question', summary: 'b' });
   await svc.answer(chat.id, 'r1', 'allow');
@@ -567,7 +668,7 @@ test('request.closed is broadcast when a request is answered and when the rest c
 
 test('request.closed is broadcast for open requests when the app restarts', async () => {
   const { adapter, events, svc } = setup();
-  await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+  await startOf(svc, { provider: 'codex', cwd: '/w', prompt: 'p' });
   adapter.emit({ type: 'request.opened', sessionRef: 's1', requestId: 'r1', kind: 'permission', summary: 'a' });
   svc.recoverAfterRestart();
   assert.ok(events.some((e) => e.type === 'request.closed' && e.requestId === 'r1'));
@@ -575,7 +676,7 @@ test('request.closed is broadcast for open requests when the app restarts', asyn
 
 test('message.delta carries the stored length before the delta as offset', async () => {
   const { adapter, events, svc } = setup();
-  await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+  await startOf(svc, { provider: 'codex', cwd: '/w', prompt: 'p' });
   for (const text of ['Hel', 'lo', ' wo']) adapter.emit({ type: 'message.delta', sessionRef: 's1', messageId: 'm1', text });
   const deltas = events.filter((e) => e.type === 'message.delta') as Extract<ServerEvent, { type: 'message.delta' }>[];
   assert.deepEqual(deltas.map((d) => [d.text, d.offset]), [['Hel', 0], ['lo', 3], [' wo', 5]]);
@@ -588,7 +689,7 @@ test('a stop, an error or a limit settles a partial assistant message with messa
     { type: 'limit.reached', sessionRef: 's1' },
   ] as const) {
     const { adapter, events, store, svc } = setup();
-    const chat = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+    const chat = await startOf(svc, { provider: 'codex', cwd: '/w', prompt: 'p' });
     adapter.emit({ type: 'message.delta', sessionRef: 's1', messageId: 'm1', text: 'partial' });
     adapter.emit({ ...end });
     const done = events.filter((e) => e.type === 'message.completed' && e.message.text === 'partial');
@@ -599,7 +700,7 @@ test('a stop, an error or a limit settles a partial assistant message with messa
 
 test('a completed message is not announced again when the turn settles', async () => {
   const { adapter, events, svc } = setup();
-  await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+  await startOf(svc, { provider: 'codex', cwd: '/w', prompt: 'p' });
   adapter.emit({ type: 'message.delta', sessionRef: 's1', messageId: 'm1', text: 'Hi' });
   adapter.emit({ type: 'message.completed', sessionRef: 's1', messageId: 'm1', role: 'assistant', text: 'Hi' });
   adapter.emit({ type: 'turn.completed', sessionRef: 's1' });
@@ -608,7 +709,7 @@ test('a completed message is not announced again when the turn settles', async (
 
 test('pin, rename and snooze do not bump updatedAt; an empty patch returns the chat unchanged without a broadcast', async () => {
   const { store, events, svc } = setup();
-  const chat = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+  const chat = await startOf(svc, { provider: 'codex', cwd: '/w', prompt: 'p' });
   const before = store.getChat(chat.id)!.updatedAt;
   await new Promise((r) => setTimeout(r, 5));
   const after = svc.patch(chat.id, { pinned: true, title: 'Renamed', snoozedUntil: '2026-02-01T00:00:00.000Z' });
@@ -623,9 +724,126 @@ test('pin, rename and snooze do not bump updatedAt; an empty patch returns the c
 
 test('archive forgets the chat\'s streaming partials', async () => {
   const { adapter, svc } = setup();
-  const chat = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+  const chat = await startOf(svc, { provider: 'codex', cwd: '/w', prompt: 'p' });
   adapter.emit({ type: 'message.delta', sessionRef: 's1', messageId: 'm1', text: 'Hel' });
   assert.equal((svc as any).partials.has(chat.id), true);
   svc.archive(chat.id);
   assert.equal((svc as any).partials.has(chat.id), false);
+});
+
+test('Antigravity history continue loads the conversation first, then sends (no second load)', async () => {
+  const { store, adapter, svc } = setup('antigravity');
+  const h = { provider: 'antigravity', sessionRef: 'conv1', cwd: '/w', title: 'Old chat', updatedAt: '2026-01-01T00:00:00Z' } as HistoryChat;
+  const chat = await svc.continueHistory(h, 'go on');
+  assert.deepEqual(adapter.calls, ['resume:conv1:/w', 'send:conv1:go on']);
+  assert.equal(store.getChat(chat.id)!.sessionRef, 'conv1');
+});
+
+test('Antigravity history continue that the agent refuses throws CantContinueError and makes no card', async () => {
+  const { store, adapter, svc } = setup('antigravity');
+  adapter.resumeError = Object.assign(new Error('session not found'), { code: -32002 });
+  const h = { provider: 'antigravity', sessionRef: 'conv1', cwd: '/w', title: 'Old chat', updatedAt: '2026-01-01T00:00:00Z' } as HistoryChat;
+  await assert.rejects(svc.continueHistory(h, 'go on'), (e: Error) =>
+    e instanceof CantContinueError && e.message === "This Antigravity chat can't be continued here yet. Start a new chat in the same folder.");
+  assert.equal(store.listChats().length, 0);
+});
+
+test('Antigravity history continue while signed out makes a card that says to sign in', async () => {
+  const { store, adapter, svc } = setup('antigravity');
+  adapter.resumeError = new Error(ANTIGRAVITY_SIGNED_OUT);
+  const h = { provider: 'antigravity', sessionRef: 'conv1', cwd: '/w', title: 'Old chat', updatedAt: '2026-01-01T00:00:00Z' } as HistoryChat;
+  const chat = await svc.continueHistory(h, 'go on');
+  const msgs = store.listMessages(chat.id);
+  assert.equal(msgs.at(-1)!.text, "Antigravity isn't signed in. Open Connections to sign in.");
+});
+
+test('Antigravity crash mid-turn shows "Antigravity stopped unexpectedly. Resume to try again."', async () => {
+  const { store, adapter, svc } = setup('antigravity');
+  const chat = await startOf(svc, { provider: 'antigravity', cwd: '/w', prompt: 'hi' });
+  adapter.emit({ type: 'error', sessionRef: 's1', message: 'Antigravity stopped unexpectedly.' });
+  assert.equal(store.listMessages(chat.id).at(-1)!.text, 'Antigravity stopped unexpectedly. Resume to try again.');
+});
+
+test('Antigravity history continue: a failure that is not the agent answering (spawn failure, timeout) is rethrown, not a 409', async () => {
+  const { store, adapter, svc } = setup('antigravity');
+  adapter.resumeError = new Error('session/load timed out');
+  const h = { provider: 'antigravity', sessionRef: 'conv1', cwd: '/w', title: 'Old chat', updatedAt: '2026-01-01T00:00:00Z' } as HistoryChat;
+  await assert.rejects(svc.continueHistory(h, 'go on'), (e: Error) => !(e instanceof CantContinueError) && /timed out/.test(e.message));
+  assert.equal(store.listChats().length, 0);
+});
+
+test('stop while starting: the first turn\'s turn.started and request.opened are dropped, its stopped/turn.completed ends it quietly', async () => {
+  for (const terminal of ['stopped', 'turn.completed', 'error'] as const) {
+    const { store, adapter, events, svc } = setup();
+    let open!: (v: { sessionRef: string }) => void;
+    adapter.startChat = () => { adapter.calls.push('startChat'); return new Promise((r) => { open = r; }); };
+    const chat = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+    await svc.stop(chat.id);
+    // The adapter's first turn started before the stop reached it: its events arrive around the session.
+    adapter.emit({ type: 'turn.started', sessionRef: 's1' });
+    open({ sessionRef: 's1' });
+    await svc.started(chat.id);
+    adapter.emit({ type: 'turn.started', sessionRef: 's1' });
+    adapter.emit({ type: 'request.opened', sessionRef: 's1', requestId: 'r1', kind: 'permission', summary: 'Edit a', action: 'edit' });
+    const stopped = () => [store.getChat(chat.id)!.column, store.getChat(chat.id)!.needsReason];
+    assert.deepEqual(stopped(), ['needs_you', 'stopped']);
+    assert.equal(store.listOpenRequests(chat.id).length, 0);
+    const before = events.length;
+    adapter.emit(terminal === 'error' ? { type: 'error', sessionRef: 's1', message: 'boom' } : { type: terminal, sessionRef: 's1' });
+    assert.deepEqual(stopped(), ['needs_you', 'stopped'], terminal);
+    assert.ok(!events.slice(before).some((e) => e.type === 'notification'), `${terminal}: no notification`);
+    assert.ok(!events.slice(before).some((e) => e.type === 'chat.updated'), `${terminal}: no card change`);
+    // After the terminal event the chat behaves normally again.
+    adapter.emit({ type: 'turn.started', sessionRef: 's1' });
+    assert.equal(store.getChat(chat.id)!.column, 'running', `${terminal}: later turns move the card`);
+  }
+});
+
+test('stop while starting, then Send: the new turn is not dropped', async () => {
+  const { store, adapter, svc } = setup();
+  let open!: (v: { sessionRef: string }) => void;
+  adapter.startChat = () => { adapter.calls.push('startChat'); return new Promise((r) => { open = r; }); };
+  const chat = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+  await svc.stop(chat.id);
+  open({ sessionRef: 's1' });
+  await svc.started(chat.id);
+  await svc.send(chat.id, 'again');
+  adapter.emit({ type: 'request.opened', sessionRef: 's1', requestId: 'r2', kind: 'permission', summary: 'Edit b' });
+  assert.deepEqual([store.getChat(chat.id)!.column, store.getChat(chat.id)!.needsReason], ['needs_you', 'permission']);
+});
+
+test('a start that fails after the user stopped it keeps the card stopped: the error is stored quietly', async () => {
+  for (const how of ['stop', 'done'] as const) {
+    const { store, adapter, events, svc } = setup();
+    let reject!: (e: Error) => void;
+    adapter.startChat = () => new Promise((_, j) => { reject = j; });
+    const chat = await svc.start({ provider: 'codex', cwd: '/w', prompt: 'p' });
+    if (how === 'stop') await svc.stop(chat.id); else svc.markDone(chat.id);
+    const before = events.length;
+    reject(new Error('it broke'));
+    await svc.started(chat.id);
+    const got = store.getChat(chat.id)!;
+    assert.deepEqual([got.column, got.needsReason], how === 'stop' ? ['needs_you', 'stopped'] : ['done', null]);
+    assert.ok(!events.slice(before).some((e) => e.type === 'notification'), `${how}: no notification`);
+    assert.ok(!events.slice(before).some((e) => e.type === 'chat.updated'), `${how}: no card change`);
+    assert.equal(store.listMessages(chat.id).at(-1)!.text, "Codex couldn't continue: it broke");
+  }
+});
+
+test('stop parks the card at once, before the agent has ended its turn', async () => {
+  const { store, adapter, events, svc } = setup();
+  const chat = await startOf(svc, { provider: 'codex', cwd: '/w', prompt: 'p' });
+  let finish!: () => void;
+  adapter.stop = (ref: string) => { adapter.calls.push(`stop:${ref}`); return new Promise<void>((r) => { finish = r; }); };
+  let resolved = false;
+  const stopping = svc.stop(chat.id).then(() => { resolved = true; });
+  await new Promise((r) => setTimeout(r, 5));
+  assert.equal(resolved, false, 'the agent is still stopping');
+  assert.deepEqual([store.getChat(chat.id)!.column, store.getChat(chat.id)!.needsReason], ['needs_you', 'stopped']);
+  assert.ok(events.some((e) => e.type === 'chat.updated' && e.chat.needsReason === 'stopped'));
+  adapter.emit({ type: 'stopped', sessionRef: 's1' });
+  finish();
+  await stopping;
+  assert.deepEqual([store.getChat(chat.id)!.column, store.getChat(chat.id)!.needsReason], ['needs_you', 'stopped']);
+  assert.ok(adapter.calls.includes('stop:s1'));
 });

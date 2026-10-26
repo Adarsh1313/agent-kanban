@@ -82,3 +82,57 @@ test('a request from the server also counts as a sign of life', async () => {
     assert.equal(p.suspect, false);
   } finally { await p.close(); }
 });
+
+test('stdout lines over 1 MB are dropped unparsed, with one warning', async (t) => {
+  const warn = t.mock.method(console, 'warn', () => {});
+  const script = [
+    'const big = JSON.stringify({ method: "big", params: "x".repeat(1024 * 1024) });',
+    'const nl = String.fromCharCode(10);',
+    'process.stdout.write(big + nl + "y".repeat(1024 * 1024 + 1) + nl + big + nl);',
+    'process.stdout.write(JSON.stringify({ method: "small", params: 1 }) + nl);',
+    'setInterval(() => {}, 1000);',
+  ].join('\n');
+  const p = new JsonRpcProcess(process.execPath, ['-e', script]);
+  const notes: string[] = [];
+  const texts: number[] = [];
+  const small = new Promise<void>((r) => p.onNotification((m) => { notes.push(m); if (m === 'small') r(); }));
+  p.onTextLine((l) => texts.push(l.length));
+  try {
+    await small; // lines are handled in order, so the long ones were seen first
+    assert.deepEqual(notes, ['small']);
+    assert.deepEqual(texts, []);
+    assert.equal(warn.mock.callCount(), 1);
+  } finally { await p.close(); }
+});
+
+test('a throwing notification listener does not break framing or other listeners', async () => {
+  const p = new JsonRpcProcess(process.execPath, ['-e', pokeChild({ method: 'hello', params: {} })]);
+  try {
+    const got: string[] = [];
+    p.onNotification(() => { throw new Error('listener bug'); });
+    const heard = new Promise<void>((r) => p.onNotification((m) => { got.push(m); if (got.length === 2) r(); }));
+    p.notify('poke');
+    p.notify('poke');
+    await heard;
+    assert.deepEqual(got, ['hello', 'hello']);
+  } finally { await p.close(); }
+});
+
+test('group: true (POSIX) — close kills the children of the child too', { skip: process.platform === 'win32' }, async () => {
+  // The child starts a grandchild (no pipes shared), reports its pid, then waits.
+  const script = [
+    'const { spawn } = require("node:child_process");',
+    'const g = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });',
+    'console.log(JSON.stringify({ method: "grandchild", params: g.pid }));',
+    'setInterval(() => {}, 1000);',
+  ].join('\n');
+  const p = new JsonRpcProcess(process.execPath, ['-e', script], { group: true });
+  const gpid = await new Promise<number>((r) => p.onNotification((m, params) => { if (m === 'grandchild') r(params); }));
+  const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  assert.equal(alive(gpid), true);
+  await p.close();
+  for (let i = 0; i < 100 && alive(gpid); i++) await new Promise((r) => setTimeout(r, 20));
+  const left = alive(gpid);
+  if (left) { try { process.kill(gpid, 'SIGKILL'); } catch { /* gone */ } }
+  assert.equal(left, false, 'the grandchild was killed with the group');
+});

@@ -1,10 +1,28 @@
-// Real end-to-end check against the user's installed Claude Code and Codex. Run ONCE: uses real subscriptions.
-// Usage: node apps/server/scripts/e2e-real.ts
+// Real end-to-end check against the user's installed Claude Code, Codex and Antigravity. Run ONCE: uses real subscriptions.
+// Usage: AGENT_KANBAN_HOME=<temp folder> node apps/server/scripts/e2e-real.ts   (E2E_ONLY=f runs only step f)
+// Every chat runs in a NEW temp folder. Set AGENT_KANBAN_HOME to a temp folder so the run gets its own database
+// and Antigravity install instead of the user's ~/.agent-kanban; step f only installs Antigravity there, and it
+// never starts a sign-in (a signed-out Antigravity fails the step with a note instead).
+// Without AGENT_KANBAN_HOME it refuses to run unless E2E_ALLOW_REAL_HOME=1 (then it uses the real ~/.agent-kanban).
+// The temp chat folders it makes are removed at the end, pass or fail.
 import { spawn } from 'node:child_process';
-import { existsSync, mkdtempSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { WebSocket } from 'ws';
+
+const akHome = process.env.AGENT_KANBAN_HOME ? resolve(process.env.AGENT_KANBAN_HOME) : null;
+if (!akHome) {
+  if (process.env.E2E_ALLOW_REAL_HOME !== '1') {
+    console.error('Set AGENT_KANBAN_HOME to a temp folder (or E2E_ALLOW_REAL_HOME=1 to use your real ~/.agent-kanban database).');
+    process.exit(1);
+  }
+  console.warn('E2E_ALLOW_REAL_HOME=1: this run uses your real ~/.agent-kanban database (chats still run in temp folders; step f will not install Antigravity).');
+}
+
+/** Temp chat folders made by this run; removed in the finally below. */
+const tempDirs: string[] = [];
+const tempDir = (prefix: string) => { const d = mkdtempSync(join(tmpdir(), prefix)); tempDirs.push(d); return d; };
 
 type Ev = { type: string; [k: string]: any };
 const log = (s: string) => console.log(s);
@@ -97,76 +115,126 @@ async function step(name: string, fn: () => Promise<string>) {
   log(results[results.length - 1]!);
 }
 
-let codexChat: string | null = null;
-const codexDir = mkdtempSync(join(tmpdir(), 'ak-codex-'));
-await step('a) codex create hello.txt', async () => {
-  const r = await api('POST', '/api/chats', { provider: 'codex', cwd: codexDir, prompt: 'create hello.txt containing hi' });
-  if (r.status !== 201) throw new Error(`POST /api/chats -> ${r.status} ${JSON.stringify(r.json)}`);
-  codexChat = r.json.id;
-  const s = await waitFor(codexChat!, (x) => x.column === 'review' || (x.column === 'needs_you' && x.reason !== 'permission' && x.reason !== 'question'));
-  const exists = existsSync(join(codexDir, 'hello.txt'));
-  if (s.column !== 'review') throw new Error(`ended in ${s.column}/${s.reason}; last message: ${(lastText.get(codexChat!) ?? '').slice(0, 200)}`);
-  if (!exists) throw new Error('reached review but hello.txt is missing');
-  return `review, hello.txt exists, requests answered: ${opened.size}`;
-});
-
-await step('b) codex stop mid-turn then follow-up', async () => {
-  if (!codexChat) throw new Error('no codex chat from step a');
-  const m = await api('POST', `/api/chats/${codexChat}/messages`, { text: 'Run the shell command "ping -n 15 127.0.0.1" and then tell me it finished.' });
-  if (m.status !== 204) throw new Error(`send -> ${m.status} ${JSON.stringify(m.json)}`);
-  await waitFor(codexChat, (x) => x.column === 'running', 60_000);
-  await new Promise((r) => setTimeout(r, 3000));
-  const stopped = await api('POST', `/api/chats/${codexChat}/stop`);
-  log(`stop -> ${stopped.status} ${stopped.json?.column}/${stopped.json?.needsReason}`);
-  const f = await api('POST', `/api/chats/${codexChat}/messages`, { text: 'say done' });
-  if (f.status !== 204) throw new Error(`follow-up send -> ${f.status} ${JSON.stringify(f.json)}`);
-  const s = await waitFor(codexChat, (x) => x.column === 'review' || x.reason === 'error', 180_000);
-  if (s.column !== 'review') throw new Error(`follow-up ended in ${s.column}/${s.reason}; last message: ${(lastText.get(codexChat) ?? '').slice(0, 200)}`);
-  return `stop gave ${stopped.json?.column}/${stopped.json?.needsReason}; follow-up reached review`;
-});
-
-await step('c) claude reply ok', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'ak-claude-'));
-  const r = await api('POST', '/api/chats', { provider: 'claude', cwd: dir, prompt: 'reply with the single word ok' });
-  if (r.status !== 201) throw new Error(`POST /api/chats -> ${r.status} ${JSON.stringify(r.json)}`);
-  const s = await waitFor(r.json.id, (x) => x.column === 'review' || (x.column === 'needs_you' && x.reason !== 'permission' && x.reason !== 'question'));
-  if (s.column !== 'review') throw new Error(`ended in ${s.column}/${s.reason}; last message: ${(lastText.get(r.json.id) ?? '').slice(0, 200)}`);
-  return 'review';
-});
-
-await step('d) usage and history', async () => {
-  const u = await api('POST', '/api/usage/refresh');
-  const parts = (u.json.readings as any[]).map((x) => `${x.provider}:${x.status}[${x.windows.map((w: any) => `${w.kind} ${w.leftPct}% left`).join('; ')}]`);
-  const h = await api('GET', '/api/history');
-  return `usage ${parts.join(' | ')} suggested=${u.json.suggested}; history count=${(h.json as unknown[]).length}`;
-});
-
-await step('e) claude question round-trip', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'ak-claude-q-'));
-  const r = await api('POST', '/api/chats', {
-    provider: 'claude', cwd: dir,
-    prompt: 'Use the AskUserQuestion tool to ask me whether to name the file a.txt or b.txt, then create that file containing the word hi. Do not ask in plain text.',
+// From here on the run makes temp chat folders: the finally removes them, pass or fail.
+try {
+  let codexChat: string | null = null;
+  const codexDir = tempDir('ak-codex-');
+  await step('a) codex create hello.txt', async () => {
+    const r = await api('POST', '/api/chats', { provider: 'codex', cwd: codexDir, prompt: 'create hello.txt containing hi' });
+    if (r.status !== 201) throw new Error(`POST /api/chats -> ${r.status} ${JSON.stringify(r.json)}`);
+    codexChat = r.json.id;
+    const s = await waitFor(codexChat!, (x) => x.column === 'review' || (x.column === 'needs_you' && x.reason !== 'permission' && x.reason !== 'question'));
+    const exists = existsSync(join(codexDir, 'hello.txt'));
+    if (s.column !== 'review') throw new Error(`ended in ${s.column}/${s.reason}; last message: ${(lastText.get(codexChat!) ?? '').slice(0, 200)}`);
+    if (!exists) throw new Error('reached review but hello.txt is missing');
+    return `review, hello.txt exists, requests answered: ${opened.size}`;
   });
-  if (r.status !== 201) throw new Error(`POST /api/chats -> ${r.status} ${JSON.stringify(r.json)}`);
-  const id = r.json.id as string;
-  const s = await waitFor(id, (x) => x.column === 'review' || (x.column === 'needs_you' && x.reason !== 'permission' && x.reason !== 'question'));
-  const q = questions.find((x) => x.chatId === id);
-  const a = existsSync(join(dir, 'a.txt')); const b = existsSync(join(dir, 'b.txt'));
-  const tools = await api('GET', `/api/chats/${id}/tool-calls`);
-  const left = await api('GET', `/api/chats/${id}/requests`);
-  const summary = `question ${q ? `asked ("${q.summary}", open via API ${q.openBeforeAnswer}, answer -> ${q.status})` : 'NOT triggered'}; `
-    + `ended ${s.column}/${s.reason}; a.txt=${a} b.txt=${b}; tool calls ${(tools.json as unknown[]).length}; open requests after ${(left.json as unknown[]).length}; `
-    + `last message: ${(lastText.get(id) ?? '').slice(0, 160).replace(/\s+/g, ' ')}`;
-  if (s.column !== 'review') throw new Error(summary);
-  return summary;
-});
 
-log('\n=== SUMMARY');
-for (const r of results) log(r);
-ws.close();
-const exited = new Promise<number | null>((r) => server.once('exit', (code) => r(code)));
-server.stdin.end();
-const code = await Promise.race([exited, new Promise<'timeout'>((r) => setTimeout(() => r('timeout'), 15_000))]);
-if (code === 'timeout') { log('server did not shut down within 15 s; killing it'); server.kill(); }
-else log(`server shut down gracefully (exit ${code}); lock left behind: ${existsSync(join(homedir(), '.agent-kanban', 'server.lock'))}`);
+  await step('b) codex stop mid-turn then follow-up', async () => {
+    if (!codexChat) throw new Error('no codex chat from step a');
+    const m = await api('POST', `/api/chats/${codexChat}/messages`, { text: 'Run the shell command "ping -n 15 127.0.0.1" and then tell me it finished.' });
+    if (m.status !== 204) throw new Error(`send -> ${m.status} ${JSON.stringify(m.json)}`);
+    await waitFor(codexChat, (x) => x.column === 'running', 60_000);
+    await new Promise((r) => setTimeout(r, 3000));
+    const stopped = await api('POST', `/api/chats/${codexChat}/stop`);
+    log(`stop -> ${stopped.status} ${stopped.json?.column}/${stopped.json?.needsReason}`);
+    const f = await api('POST', `/api/chats/${codexChat}/messages`, { text: 'say done' });
+    if (f.status !== 204) throw new Error(`follow-up send -> ${f.status} ${JSON.stringify(f.json)}`);
+    const s = await waitFor(codexChat, (x) => x.column === 'review' || x.reason === 'error', 180_000);
+    if (s.column !== 'review') throw new Error(`follow-up ended in ${s.column}/${s.reason}; last message: ${(lastText.get(codexChat) ?? '').slice(0, 200)}`);
+    return `stop gave ${stopped.json?.column}/${stopped.json?.needsReason}; follow-up reached review`;
+  });
+
+  await step('c) claude reply ok', async () => {
+    const dir = tempDir('ak-claude-');
+    const r = await api('POST', '/api/chats', { provider: 'claude', cwd: dir, prompt: 'reply with the single word ok' });
+    if (r.status !== 201) throw new Error(`POST /api/chats -> ${r.status} ${JSON.stringify(r.json)}`);
+    const s = await waitFor(r.json.id, (x) => x.column === 'review' || (x.column === 'needs_you' && x.reason !== 'permission' && x.reason !== 'question'));
+    if (s.column !== 'review') throw new Error(`ended in ${s.column}/${s.reason}; last message: ${(lastText.get(r.json.id) ?? '').slice(0, 200)}`);
+    return 'review';
+  });
+
+  await step('d) usage and history', async () => {
+    const u = await api('POST', '/api/usage/refresh');
+    const parts = (u.json.readings as any[]).map((x) => `${x.provider}:${x.status}[${x.windows.map((w: any) => `${w.kind} ${w.leftPct}% left`).join('; ')}]`);
+    const h = await api('GET', '/api/history');
+    return `usage ${parts.join(' | ')} suggested=${u.json.suggested}; history count=${(h.json as unknown[]).length}`;
+  });
+
+  await step('e) claude question round-trip', async () => {
+    const dir = tempDir('ak-claude-q-');
+    const r = await api('POST', '/api/chats', {
+      provider: 'claude', cwd: dir,
+      prompt: 'Use the AskUserQuestion tool to ask me whether to name the file a.txt or b.txt, then create that file containing the word hi. Do not ask in plain text.',
+    });
+    if (r.status !== 201) throw new Error(`POST /api/chats -> ${r.status} ${JSON.stringify(r.json)}`);
+    const id = r.json.id as string;
+    const s = await waitFor(id, (x) => x.column === 'review' || (x.column === 'needs_you' && x.reason !== 'permission' && x.reason !== 'question'));
+    const q = questions.find((x) => x.chatId === id);
+    const a = existsSync(join(dir, 'a.txt')); const b = existsSync(join(dir, 'b.txt'));
+    const tools = await api('GET', `/api/chats/${id}/tool-calls`);
+    const left = await api('GET', `/api/chats/${id}/requests`);
+    const summary = `question ${q ? `asked ("${q.summary}", open via API ${q.openBeforeAnswer}, answer -> ${q.status})` : 'NOT triggered'}; `
+      + `ended ${s.column}/${s.reason}; a.txt=${a} b.txt=${b}; tool calls ${(tools.json as unknown[]).length}; open requests after ${(left.json as unknown[]).length}; `
+      + `last message: ${(lastText.get(id) ?? '').slice(0, 160).replace(/\s+/g, ' ')}`;
+    if (s.column !== 'review') throw new Error(summary);
+    return summary;
+  });
+
+  await step('f) antigravity create hello.txt', async () => {
+    const health = async () => ((await api('GET', '/api/connections')).json as any[]).find((h) => h.provider === 'antigravity');
+    let h = await health();
+    let installNote = 'already installed';
+    if (!h?.installed) {
+      // Only into a temp Agent Kanban home: never download into the user's own ~/.agent-kanban from a test.
+      if (!akHome) throw new Error('Antigravity is not installed and AGENT_KANBAN_HOME is not set; set it to a temp folder to let this step install it.');
+      const started = Date.now();
+      const r = await api('POST', '/api/connect/antigravity/install');
+      if (r.status !== 202) throw new Error(`install -> ${r.status} ${JSON.stringify(r.json)}`);
+      const end = Date.now() + 15 * 60_000;
+      for (;;) {
+        const c = ((await api('GET', '/api/connect')).json as any[]).find((s) => s.provider === 'antigravity');
+        if (c.phase === 'idle' || c.phase === 'error') {
+          if (c.outcome !== 'done') throw new Error(`install ended ${c.phase}/${c.outcome}: ${c.message}`);
+          break;
+        }
+        if (Date.now() > end) throw new Error(`install still ${c.phase} after 15 min (${c.step})`);
+        await new Promise((r2) => setTimeout(r2, 1000));
+      }
+      h = (await api('POST', '/api/connections/check', { provider: 'antigravity' })).json.find((x: any) => x.provider === 'antigravity');
+      installNote = `installed in ${((Date.now() - started) / 1000).toFixed(0)} s`;
+    }
+    if (!h?.installed) throw new Error(`not installed after install: ${JSON.stringify(h)}`);
+    // Never start a sign-in from a test: it would need the user in the browser.
+    if (h.signedIn === false) throw new Error(`Antigravity is signed out (${h.message}); sign in from the app first. ${installNote}`);
+    const dir = tempDir('ak-antigravity-');
+    const started = Date.now();
+    const r = await api('POST', '/api/chats', { provider: 'antigravity', cwd: dir, prompt: 'create hello.txt containing hi' });
+    if (r.status !== 201) throw new Error(`POST /api/chats -> ${r.status} ${JSON.stringify(r.json)}`);
+    const id = r.json.id as string;
+    // A cold start of Google's agent can take ~2 minutes and session/new another ~40 s.
+    const s = await waitFor(id, (x) => x.column === 'review' || (x.column === 'needs_you' && x.reason !== 'permission' && x.reason !== 'question'), 8 * 60_000);
+    const secs = ((Date.now() - started) / 1000).toFixed(0);
+    if (s.column !== 'review') throw new Error(`ended in ${s.column}/${s.reason} after ${secs} s; last message: ${(lastText.get(id) ?? '').slice(0, 200)}`);
+    // The agent must work in the chat's folder (1.3.0 otherwise picks ~/.gemini/antigravity-cli/skills).
+    if (!existsSync(join(dir, 'hello.txt'))) throw new Error(`reached review after ${secs} s but hello.txt is not in ${dir}; last message: ${(lastText.get(id) ?? '').slice(0, 200)}`);
+    return `${installNote}; review after ${secs} s, hello.txt in the chat folder, requests answered so far: ${opened.size}`;
+  });
+
+  log('\n=== SUMMARY');
+  for (const r of results) log(r);
+  ws.close();
+  const exited = new Promise<number | null>((r) => server.once('exit', (code) => r(code)));
+  server.stdin.end();
+  const code = await Promise.race([exited, new Promise<'timeout'>((r) => setTimeout(() => r('timeout'), 15_000))]);
+  if (code === 'timeout') { log('server did not shut down within 15 s; killing it'); server.kill(); }
+  else log(`server shut down gracefully (exit ${code}); lock left behind: ${existsSync(join(akHome ?? homedir(), '.agent-kanban', 'server.lock'))}`);
+} finally {
+  // Pass or fail: stop the server if it is still up, then delete this run's temp chat folders.
+  if (server.exitCode === null && server.signalCode === null) server.kill();
+  for (const d of tempDirs) {
+    try { rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }); }
+    catch (e) { console.warn(`could not remove ${d}: ${(e as Error).message}`); }
+  }
+}
 setTimeout(() => process.exit(0), 1000).unref();

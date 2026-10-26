@@ -34,7 +34,8 @@ export class CodexAdapter implements ProviderAdapter {
   private loaded = new WeakMap<JsonRpcProcess, Set<string>>(); // threads known to each process
   private disposed = false;
   private makeProcess: () => JsonRpcProcess;
-  private initializeTimeoutMs: number;
+  /** How long initialize (and model/list) may take; public so a caller can change it between process starts. */
+  initializeTimeoutMs: number;
   private codexHome: string;
   private fallbackModel = new WeakMap<JsonRpcProcess, string | null>();
   private _modelNote: string | null = null;
@@ -242,7 +243,7 @@ export class CodexAdapter implements ProviderAdapter {
     const summary: string = isCommand ? (params.command ?? params.reason ?? 'Run a command') : (params.reason ?? 'Edit files');
     return new Promise((resolve) => {
       this.approvals.set(requestId, { threadId: params.threadId, resolve: (decision) => resolve({ decision }) });
-      this.emit({ type: 'request.opened', sessionRef: params.threadId, requestId, kind: 'permission', summary });
+      this.emit({ type: 'request.opened', sessionRef: params.threadId, requestId, kind: 'permission', summary, action: isCommand ? 'command' : 'edit' });
     });
   }
 

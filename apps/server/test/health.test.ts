@@ -2,7 +2,7 @@ import { test, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import type { ConnectionHealth, ProviderId } from '@agent-kanban/shared';
-import { ConnectionMonitor, getVersion, parseVersion } from '../src/health.ts';
+import { ConnectionMonitor, getLatest, getVersion, makeGetVersion, parseVersion } from '../src/health.ts';
 
 type Ping = { ok: boolean; signedIn: boolean | null; message?: string; gaveUp?: boolean };
 
@@ -58,12 +58,20 @@ test('installed 0.163.0, latest 0.163.0, ping ok and signed in is connected', as
   });
 });
 
-test('a newer latest version gives update_available with the message', async () => {
+test('a newer latest version gives update_available; the message does not repeat the update (the card shows it from latestVersion)', async () => {
   const s = setup({ latest: async () => '0.164.0' });
   const [h] = await s.monitor.check();
   assert.equal(h!.status, 'update_available');
   assert.equal(h!.updateAvailable, true);
-  assert.equal(h!.message, 'Codex 0.164.0 is available (you have 0.163.0).');
+  assert.equal(h!.latestVersion, '0.164.0');
+  assert.equal(h!.message, null);
+});
+
+test('update_available keeps other adapter notes in the message (e.g. the Codex model note)', async () => {
+  const s = setup({ latest: async () => '0.164.0', ping: async () => ({ ok: true, signedIn: true, message: 'Model list unavailable.' }) });
+  const [h] = await s.monitor.check();
+  assert.equal(h!.status, 'update_available');
+  assert.equal(h!.message, 'Connected. Model list unavailable.');
 });
 
 test('version comparison is numeric, and an older latest is not an update', async () => {
@@ -382,4 +390,20 @@ test('no degraded retries while the adapter has given up, until a manual check',
     mock.timers.tick(5000); await flush();
     assert.equal(s.pings.length, 3, 'retries resume after a manual check');
   } finally { s.monitor.stop(); mock.timers.reset(); }
+});
+
+test('Antigravity: latest is the pinned release, and any other installed version is an update', async () => {
+  assert.equal(await getLatest('antigravity'), '1.3.0');
+  for (const [installed, update] of [['1.3.0', false], ['1.2.0', true], ['1.4.0', true]] as const) {
+    const s = setup({ providers: ['antigravity'], version: installed, latest: () => '1.3.0' });
+    const [h] = await s.monitor.check();
+    assert.equal(h!.updateAvailable, update, installed);
+  }
+});
+
+test('makeGetVersion: Antigravity is always the installed folder version; others run --version', async () => {
+  const get = makeGetVersion(() => '1.3.0');
+  assert.equal(await get('antigravity', 'agy'), '1.3.0');
+  assert.equal(await makeGetVersion(() => null)('antigravity', 'agy'), null);
+  assert.equal(await get('codex', process.execPath), process.versions.node);
 });

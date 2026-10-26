@@ -82,10 +82,10 @@ async function tracked<T>(store: Store, run: (since: number) => Promise<T>): Pro
 }
 
 export async function fetchSnapshot(api: Api): Promise<Snapshot> {
-  const [chats, usage, connections, history, projects] = await Promise.all([
-    api.listChats(), api.usage(), api.connections(), api.history(), api.projects(),
+  const [chats, usage, connections, history, projects, connect, settings] = await Promise.all([
+    api.listChats(), api.usage(), api.connections(), api.history(), api.projects(), api.connectStates(), api.settings(),
   ]);
-  return { chats, usage: usage.readings, suggested: usage.suggested, connections, history, projects };
+  return { chats, usage: usage.readings, suggested: usage.suggested, connections, history, projects, connect, settings };
 }
 
 const apply = (store: Store, chatId: string, part: FetchedThread, since: number) =>
@@ -188,8 +188,26 @@ export function noteChatFolder(store: Store, api: Api, chat: Chat): void {
   refreshProjectsSoon(store, api);
 }
 
+/** Per store and list: the number of the latest refresh asked for, so out-of-order answers never apply a stale list. */
+const refreshGen = new WeakMap<Store, { history: number; projects: number }>();
+function nextGen(store: Store, list: 'history' | 'projects'): number {
+  let g = refreshGen.get(store);
+  if (!g) refreshGen.set(store, (g = { history: 0, projects: 0 }));
+  return ++g[list];
+}
+const isLatest = (store: Store, list: 'history' | 'projects', gen: number) => refreshGen.get(store)?.[list] === gen;
+
+/** Refetches the project list now (e.g. after "Show its chats" changed which chats count). */
+export async function refreshProjects(store: Store, api: Api): Promise<void> {
+  const gen = nextGen(store, 'projects');
+  const projects = await api.projects();
+  // A later refresh was asked for meanwhile: its answer (newer settings) wins, even when this one arrives last.
+  if (isLatest(store, 'projects', gen)) store.setState((s) => ({ ...s, projects }));
+}
+
 /** Refetches the provider-history list (e.g. after a history-only chat was continued and is now on the board). */
 export async function refreshHistory(store: Store, api: Api): Promise<void> {
+  const gen = nextGen(store, 'history');
   const history = await api.history();
-  store.setState((s) => ({ ...s, history }));
+  if (isLatest(store, 'history', gen)) store.setState((s) => ({ ...s, history }));
 }

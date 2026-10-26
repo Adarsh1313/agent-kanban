@@ -1,6 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
-import type { Chat, Message, OpenRequest, ProviderId, ToolCall, UsageReading, UsageWindow } from '@agent-kanban/shared';
+import type { Chat, Message, OpenRequest, ProviderId, RequestAction, ToolCall, UsageReading, UsageWindow } from '@agent-kanban/shared';
 
 type Row = Record<string, any>;
 
@@ -54,12 +54,19 @@ export class Store {
         id INTEGER PRIMARY KEY AUTOINCREMENT, provider TEXT NOT NULL, status TEXT NOT NULL,
         windows TEXT NOT NULL, read_at TEXT NOT NULL, message TEXT
       );
+      CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
       CREATE INDEX IF NOT EXISTS messages_chat ON messages (chat_id);
       CREATE INDEX IF NOT EXISTS tool_calls_chat ON tool_calls (chat_id);
       CREATE INDEX IF NOT EXISTS requests_chat ON requests (chat_id);
       CREATE INDEX IF NOT EXISTS chats_session ON chats (provider, session_ref);
     `);
+    // Added in Plan 3: what a permission request is for. Older databases get the column (NULL = a command).
+    const requestCols = (this.db.prepare('PRAGMA table_info(requests)').all() as { name: string }[]).map((c) => c.name);
+    if (!requestCols.includes('action')) this.db.exec('ALTER TABLE requests ADD COLUMN action TEXT');
   }
+
+  /** Closes the database (tests remove its folder afterwards). */
+  close(): void { this.db.close(); }
 
   /** ISO timestamp, strictly increasing within this process so ordering is stable. */
   private now(): string {
@@ -154,13 +161,13 @@ export class Store {
   }
 
   // Requests are keyed by chat and request id together: Codex numbers its requests per process, so ids repeat.
-  addRequest(chatId: string, r: { requestId: string; kind: 'permission' | 'question'; summary: string }): OpenRequest {
+  addRequest(chatId: string, r: { requestId: string; kind: 'permission' | 'question'; summary: string; action?: RequestAction }): OpenRequest {
     const createdAt = this.now();
     this.db.prepare(
-      `INSERT INTO requests (id, chat_id, kind, summary, status, created_at) VALUES (?, ?, ?, ?, 'open', ?)
-       ON CONFLICT(id) DO UPDATE SET kind = excluded.kind, summary = excluded.summary, status = 'open', created_at = excluded.created_at`,
-    ).run(requestKey(chatId, r.requestId), chatId, r.kind, r.summary, createdAt);
-    return { requestId: r.requestId, kind: r.kind, summary: r.summary, createdAt };
+      `INSERT INTO requests (id, chat_id, kind, summary, status, created_at, action) VALUES (?, ?, ?, ?, 'open', ?, ?)
+       ON CONFLICT(id) DO UPDATE SET kind = excluded.kind, summary = excluded.summary, status = 'open', created_at = excluded.created_at, action = excluded.action`,
+    ).run(requestKey(chatId, r.requestId), chatId, r.kind, r.summary, createdAt, r.action ?? null);
+    return { requestId: r.requestId, kind: r.kind, summary: r.summary, createdAt, ...(r.action ? { action: r.action } : {}) };
   }
 
   setRequestStatus(chatId: string, requestId: string, status: 'answered' | 'closed'): void {
@@ -175,7 +182,7 @@ export class Store {
 
   listOpenRequests(chatId: string): OpenRequest[] {
     return (this.db.prepare(`SELECT * FROM requests WHERE chat_id = ? AND status = 'open' ORDER BY created_at, rowid`).all(chatId) as Row[])
-      .map((r) => ({ requestId: (r.id as string).slice(chatId.length + 1), kind: r.kind, summary: r.summary, createdAt: r.created_at }));
+      .map((r) => ({ requestId: (r.id as string).slice(chatId.length + 1), kind: r.kind, summary: r.summary, createdAt: r.created_at, ...(r.action ? { action: r.action } : {}) }));
   }
 
   saveUsage(reading: UsageReading): void {
@@ -189,5 +196,15 @@ export class Store {
     const out: UsageReading = { provider: r.provider, status: r.status, windows: JSON.parse(r.windows) as UsageWindow[], readAt: r.read_at };
     if (r.message !== null) out.message = r.message;
     return out;
+  }
+
+  /** A stored setting (JSON text), or undefined when it was never set. */
+  getSetting(key: string): string | undefined {
+    const r = this.db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as Row | undefined;
+    return r && typeof r.value === 'string' ? r.value : undefined;
+  }
+
+  setSetting(key: string, value: string): void {
+    this.db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(key, value);
   }
 }

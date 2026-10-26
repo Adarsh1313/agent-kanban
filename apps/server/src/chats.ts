@@ -9,6 +9,7 @@ import type { ProviderAdapter } from './adapters/adapter.ts';
 import { AdapterRegistry } from './adapters/registry.ts';
 import type { AdapterSource } from './adapters/registry.ts';
 import type { UsageService } from './usage/service.ts';
+import { ANTIGRAVITY_SIGNED_OUT } from './adapters/antigravity.ts';
 
 const NAMES: Record<ProviderId, string> = { claude: 'Claude Code', codex: 'Codex', antigravity: 'Antigravity' };
 const ACTIVE_WINDOW_MS = 15_000;
@@ -34,6 +35,16 @@ export class ActiveElsewhereError extends Error {
   }
 }
 
+/** The provider refused to reopen a conversation from its history (the API answers 409). */
+export class CantContinueError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'CantContinueError';
+  }
+}
+
+export const ANTIGRAVITY_CANT_CONTINUE = "This Antigravity chat can't be continued here yet. Start a new chat in the same folder.";
+
 type Decision = 'allow' | 'deny' | { reply: string };
 type LiveRequest = { kind: 'permission' | 'question'; summary: string };
 
@@ -55,6 +66,14 @@ export class ChatService {
   /** Resolves when an in-progress startChat for the chat has settled. */
   private pending = new Map<string, Promise<void>>();
   private resuming = new Map<string, Promise<void>>();
+  /** Chats stopped while their session was still starting: stopped as soon as the session arrives. */
+  private stopAfterStart = new Set<string>();
+  /**
+   * Chats stopped while starting whose first turn may still report: its turn.started / request.opened are dropped and
+   * its terminal event (turn.completed / stopped / error) ends it without moving the card. Cleared by that terminal
+   * event or the user's next message, not when the start settles.
+   */
+  private userStopped = new Set<string>();
   /** Last time this process drove or heard from each chat (ms). Distinguishes our own .jsonl writes from another app's. */
   private lastOwn = new Map<string, number>();
   /** Errors already reported, per chat: one failed resume is shared by concurrent callers of the SAME chat only. */
@@ -92,8 +111,16 @@ export class ChatService {
     });
     this.addMessage(chat.id, 'user', input.prompt);
     this.broadcast({ type: 'chat.updated', chat });
-    await this.begin(chat, input.prompt);
-    return this.store.getChat(chat.id)!;
+    // Answer as soon as the card exists (running, "Getting started…"): a cold Antigravity takes a minute or two to
+    // open a session. The session arrives by chat.updated; a failure moves the card to Needs you with the error.
+    // begin() marks the chat pending synchronously, so a message or answer sent meanwhile waits for it.
+    void this.begin(chat, input.prompt);
+    return chat;
+  }
+
+  /** Resolves once the chat's provider session has started or failed to (at once when nothing is starting). */
+  async started(chatId: string): Promise<void> {
+    while (this.pending.has(chatId)) await this.pending.get(chatId);
   }
 
   async send(chatId: string, text: string): Promise<void> {
@@ -104,6 +131,7 @@ export class ChatService {
       throw new ActiveElsewhereError();
     }
     this.touch(chatId);
+    this.userStopped.delete(chatId); // the user moved on: the new turn's events count
     this.addMessage(chatId, 'user', text);
     this.transition(chatId, { type: 'user.message' });
     if (!chat.sessionRef) await this.begin(chat, text);
@@ -132,16 +160,25 @@ export class ChatService {
 
   async stop(chatId: string): Promise<void> {
     this.mustGet(chatId);
-    while (this.pending.has(chatId)) await this.pending.get(chatId);
+    if (this.pending.has(chatId)) {
+      // Still starting (a cold Antigravity can take minutes): park the card now; begin() stops the turn once the session arrives.
+      this.stopAfterStart.add(chatId);
+      this.userStopped.add(chatId);
+      this.closeRequests(chatId);
+      this.touch(chatId);
+      this.transition(chatId, { type: 'user.stop' });
+      return;
+    }
     const chat = this.mustGet(chatId);
     const adapter = this.adapters.get(chat.provider);
-    if (adapter && chat.sessionRef) {
-      try { await adapter.stop(chat.sessionRef); } catch { /* still park the card as stopped */ }
-    }
+    // Park the card at once; the agent may take a while to end its turn (Antigravity's stop waits up to 10 s).
     this.closeRequests(chatId);
     this.live.delete(chatId);
     this.touch(chatId);
     this.transition(chatId, { type: 'user.stop' });
+    if (adapter && chat.sessionRef) {
+      try { await adapter.stop(chat.sessionRef); } catch { /* the card is already parked as stopped */ }
+    }
   }
 
   markDone(chatId: string): Chat {
@@ -197,7 +234,22 @@ export class ChatService {
       return this.store.getChat(existing.id)!;
     }
     if (h.provider === 'claude' && this.isActiveElsewhere(h.sessionRef)) throw new ActiveElsewhereError();
+    // Antigravity: reopen the conversation (session/load) before making a card, so a refusal leaves nothing behind.
+    let attached: ProviderAdapter | undefined;
+    if (h.provider === 'antigravity') {
+      attached = await this.adapters.ensure('antigravity');
+      if (attached) {
+        try { await attached.resume(h.sessionRef, h.cwd); } catch (err) {
+          // Signed out: make the card anyway, so it says to sign in (the send below fails the same way).
+          if (err instanceof Error && err.message === ANTIGRAVITY_SIGNED_OUT) attached = undefined;
+          // The agent answered with a JSON-RPC error: it refuses this conversation.
+          else if (typeof (err as { code?: unknown } | null)?.code === 'number') throw new CantContinueError(ANTIGRAVITY_CANT_CONTINUE);
+          else throw err; // couldn't start or reach the agent: not a refusal
+        }
+      }
+    }
     const chat = this.store.createChat({ provider: h.provider, cwd: h.cwd, title: h.title, sessionRef: h.sessionRef });
+    if (attached && this.adapters.get('antigravity') === attached) this.live.add(chat.id);
     this.addMessage(chat.id, 'user', text);
     this.broadcast({ type: 'chat.updated', chat });
     this.replayBuffered(h.provider, h.sessionRef, chat.id);
@@ -289,6 +341,14 @@ export class ChatService {
     return this.store.getChat(chatId)!;
   }
 
+  /** A failure the user no longer waits for (they stopped the chat or marked it done): store the copy, move nothing. */
+  private failQuietly(chatId: string, provider: ProviderId, err: unknown | null): void {
+    this.closeRequests(chatId);
+    this.live.delete(chatId);
+    this.userStopped.delete(chatId);
+    this.addMessage(chatId, 'assistant', this.errorCopy(provider, err));
+  }
+
   /** Start a provider session for a chat that has none, and claim its sessionRef. Never throws. */
   // Callers wait with `while (this.pending.has(id)) await ...` inline: no await when idle, so same-tick calls queue correctly.
 
@@ -298,14 +358,22 @@ export class ChatService {
     try {
       const adapter = await this.adapters.ensure(chat.provider);
       if (!adapter) { this.fail(chat.id, chat.provider, null); return; }
-      try {
-        const { sessionRef } = await adapter.startChat({ cwd: chat.cwd, prompt, ...(chat.model ? { model: chat.model } : {}) });
-        this.live.add(chat.id);
-        this.claim(chat.id, chat.provider, sessionRef);
-      } catch (err) {
-        this.fail(chat.id, chat.provider, err);
+      const { sessionRef } = await adapter.startChat({ cwd: chat.cwd, prompt, ...(chat.model ? { model: chat.model } : {}) });
+      this.live.add(chat.id);
+      this.claim(chat.id, chat.provider, sessionRef);
+      // Stopped, or marked done, while the session was starting: its first turn must not keep running.
+      if (this.stopAfterStart.has(chat.id) || this.store.getChat(chat.id)?.column === 'done') {
+        try { await adapter.stop(sessionRef); } catch { /* the card is already parked */ }
       }
+    } catch (err) {
+      // Nobody awaits a start: any failure (also from ensure) belongs on the card, never an unhandled rejection.
+      try {
+        // Stopped, or marked done, while starting: the card stays where the user put it; the error is kept quietly.
+        if (this.stopAfterStart.has(chat.id) || this.store.getChat(chat.id)?.column === 'done') this.failQuietly(chat.id, chat.provider, err);
+        else this.fail(chat.id, chat.provider, err);
+      } catch { /* the chat is gone */ }
     } finally {
+      this.stopAfterStart.delete(chat.id);
       this.pending.delete(chat.id);
       release();
     }
@@ -403,6 +471,16 @@ export class ChatService {
 
   private handle(chatId: string, provider: ProviderId, e: AdapterEvent): void {
     this.touch(chatId);
+    if (this.userStopped.has(chatId)) {
+      // The turn the user stopped while it was starting: it must not reopen the card or ask anything.
+      if (e.type === 'turn.started' || e.type === 'request.opened') return;
+      if (e.type === 'turn.completed' || e.type === 'stopped' || e.type === 'error') {
+        this.userStopped.delete(chatId);
+        if (e.type !== 'turn.completed') this.live.delete(chatId);
+        this.settle(chatId);
+        return;
+      }
+    }
     switch (e.type) {
       case 'message.delta': {
         const ids = this.idsFor(chatId);
@@ -443,10 +521,12 @@ export class ChatService {
         let open = this.requests.get(chatId);
         if (!open) { open = new Map(); this.requests.set(chatId, open); }
         open.set(e.requestId, { kind: e.kind, summary: e.summary });
-        this.store.addRequest(chatId, { requestId: e.requestId, kind: e.kind, summary: e.summary });
+        // A permission says what it is for (edit / command / tool) so the card and notification copy can match.
+        const action = e.kind === 'permission' && e.action ? { action: e.action } : {};
+        this.store.addRequest(chatId, { requestId: e.requestId, kind: e.kind, summary: e.summary, ...action });
         this.transition(chatId, e);
-        this.broadcast({ type: 'request.opened', chatId, requestId: e.requestId, kind: e.kind, summary: e.summary });
-        this.broadcast({ type: 'notification', chatId, kind: e.kind });
+        this.broadcast({ type: 'request.opened', chatId, requestId: e.requestId, kind: e.kind, summary: e.summary, ...action });
+        this.broadcast({ type: 'notification', chatId, kind: e.kind, ...action });
         return;
       }
       case 'turn.completed': {

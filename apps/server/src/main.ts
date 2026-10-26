@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import type { ProviderId, ServerEvent, UsageReading } from '@agent-kanban/shared';
 import { Store } from './store.ts';
@@ -10,18 +10,26 @@ import { UsageService, notInstalledReading } from './usage/service.ts';
 import { readAllHistory } from './history/index.ts';
 import { ClaudeAdapter } from './adapters/claude.ts';
 import { CodexAdapter } from './adapters/codex.ts';
-
+import { AntigravityAdapter } from './adapters/antigravity.ts';
+import { findInstalledAntigravity, installAntigravity } from './connect/antigravity-install.ts';
+import { ConnectService } from './connect/service.ts';
+import { spawnCommand } from './connect/run.ts';
+import { openBrowser } from './connect/open-browser.ts';
+import { SettingsStore } from './settings.ts';
 import { AdapterRegistry } from './adapters/registry.ts';
 import { findBinary } from './binaries.ts';
 import { createApi } from './api.ts';
-import { ConnectionMonitor, getLatest, getVersion } from './health.ts';
+import { ConnectionMonitor, getLatest, makeGetVersion } from './health.ts';
 import { acquireLock, releaseLock } from './lock.ts';
 
 // Last resort: a stray rejection is logged, never allowed to take the server (and every chat) down.
 process.on('unhandledRejection', (e) => console.error('[agent-kanban] unhandled', e));
 
+// Provider homes (~/.claude, ~/.codex, ~/.gemini) are always the real home. Agent Kanban's own data
+// (.agent-kanban: database, lock, the Antigravity install) goes under AGENT_KANBAN_HOME when it is set.
 const home = homedir();
-const dataDir = join(home, '.agent-kanban');
+const akHome = process.env.AGENT_KANBAN_HOME ? resolve(process.env.AGENT_KANBAN_HOME) : home;
+const dataDir = join(akHome, '.agent-kanban');
 mkdirSync(dataDir, { recursive: true });
 const lockPath = join(dataDir, 'server.lock');
 if (!acquireLock(lockPath)) {
@@ -32,17 +40,23 @@ process.on('exit', () => releaseLock(lockPath));
 const store = new Store(join(dataDir, 'agent-kanban.db'));
 const token = randomBytes(24).toString('hex');
 
-const findProvider = (id: ProviderId) => (id === 'claude' || id === 'codex' ? findBinary(id) : Promise.resolve(null));
+const PROVIDERS: ProviderId[] = ['claude', 'codex', 'antigravity'];
+// Antigravity is Google's pinned release, installed by Agent Kanban under ~/.agent-kanban/providers/antigravity.
+const findProvider = (id: ProviderId) =>
+  id === 'antigravity' ? Promise.resolve(findInstalledAntigravity(akHome)?.path ?? null) : findBinary(id);
 // Adapters are created when a provider's binary is first found, so installing one later needs no restart.
 const adapters = new AdapterRegistry({
   findBinary: findProvider,
-  create: (id, path) => (id === 'claude' ? new ClaudeAdapter({ claudePath: path }) : id === 'codex' ? new CodexAdapter({ codexPath: path }) : undefined),
+  create: (id, path) => (id === 'claude' ? new ClaudeAdapter({ claudePath: path })
+    : id === 'codex' ? new CodexAdapter({ codexPath: path })
+      : new AntigravityAdapter({ exePath: path })),
 });
-await Promise.all([adapters.ensure('claude'), adapters.ensure('codex')]);
+// Creating an adapter starts nothing: the Antigravity agent (slow to start) is launched only by a chat or sign-in.
+await Promise.all(PROVIDERS.map((id) => adapters.ensure(id)));
 
 let broadcast: (e: ServerEvent) => void = () => {};
 const readers: Partial<Record<ProviderId, () => Promise<UsageReading>>> = {};
-for (const id of ['claude', 'codex'] as const) {
+for (const id of PROVIDERS) {
   readers[id] = async () => {
     const a = await adapters.ensure(id);
     if (!a) return notInstalledReading(id);
@@ -53,13 +67,40 @@ const usage = new UsageService({
   readers, store, onUpdate: (reading) => broadcast({ type: 'usage.updated', reading }),
 });
 const chats = new ChatService({ store, adapters, usage, broadcast: (e) => broadcast(e), claudeHome: join(home, '.claude') });
+/** Set once ConnectService exists; the monitor's first check runs after that. */
+let connectRef: ConnectService | null = null;
 const connections = new ConnectionMonitor({
-  providers: ['claude', 'codex'],
+  providers: PROVIDERS,
   findBinary: findProvider,
-  getVersion, getLatest, adapters,
-  onUpdate: (health) => broadcast({ type: 'connection.updated', health }),
+  getVersion: makeGetVersion(() => findInstalledAntigravity(akHome)?.version ?? null), getLatest, adapters,
+  onUpdate: (health) => {
+    broadcast({ type: 'connection.updated', health });
+    // A check that shows the last connect failure no longer holds clears it (e.g. signed in from a terminal).
+    connectRef?.noteHealth(health);
+  },
 });
-const api = createApi({ chats, usage, history: () => readAllHistory(home), token, connections, adapters });
+const settings = new SettingsStore(store);
+const connect = new ConnectService({
+  run: spawnCommand,
+  npmPath: () => findBinary('npm'),
+  findBinary: (id) => findBinary(id),
+  antigravity: {
+    install: installAntigravity,
+    adapter: async () => {
+      const a = await adapters.ensure('antigravity');
+      return a instanceof AntigravityAdapter ? a : undefined;
+    },
+  },
+  openBrowser: (url) => openBrowser(url),
+  monitor: connections,
+  registry: adapters,
+  onUpdate: (state) => broadcast({ type: 'connect.updated', state }),
+  // The check after an operation is always sent (newer checkedAt), so the card stops saying Checking… even when nothing changed.
+  onHealth: (health) => broadcast({ type: 'connection.updated', health }),
+  home: akHome,
+});
+connectRef = connect;
+const api = createApi({ chats, usage, history: () => readAllHistory(home), token, connections, adapters, connect, settings });
 broadcast = api.broadcast;
 
 chats.recoverAfterRestart();
@@ -95,10 +136,12 @@ async function shutdown(): Promise<void> {
   stopping = true;
   usage.stop();
   connections.stop();
+  // Installs and sign-ins in progress are cancelled; their process trees are killed before we exit.
+  const connectDone = connect.dispose().catch(() => {});
   api.server.close();
   api.close();
   const dispose = adapters.dispose();
-  await Promise.race([dispose, new Promise((r) => setTimeout(r, 5_000))]);
+  await Promise.race([Promise.all([dispose, connectDone]), new Promise((r) => setTimeout(r, 10_000))]);
   api.server.closeAllConnections();
   process.exit(0);
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { ConnectionHealth, UsageReading } from '@agent-kanban/shared';
-import { applyEvent, applySnapshot, beginSync, endSync, initialState, isChatLoaded, mergeFetched, missingChats } from '../src/state/reducer.ts';
+import type { ConnectionHealth, ConnectState, UsageReading } from '@agent-kanban/shared';
+import { applyEvent, applySettings, applySnapshot, beginSync, endSync, initialState, isChatLoaded, mergeFetched, missingChats } from '../src/state/reducer.ts';
 import { chat, message } from './helpers.ts';
 
 const withChat = (over = {}) => applyEvent(initialState(), { type: 'chat.updated', chat: chat(over) });
@@ -67,6 +67,35 @@ describe('applyEvent', () => {
     expect(s.suggested).toBe('claude');
     s = applyEvent(s, { type: 'usage.updated', reading: { ...rd('claude', 80, 'error'), readAt: '2026-10-23T11:05:00.000Z', message: "Couldn't read" } });
     expect(s.suggested).toBe('codex');
+  });
+
+  it('usage.updated and new settings only suggest providers whose "Suggest it" is on', () => {
+    const rd = (provider: 'claude' | 'codex', leftPct: number): UsageReading => ({
+      provider, status: 'ok', readAt: '2026-10-23T11:00:00.000Z',
+      windows: [{ kind: 'five_hour', label: '5-hour', leftPct, resetsAt: null }, { kind: 'weekly', label: 'Weekly', leftPct, resetsAt: null }],
+    });
+    const on = { claude: true, codex: true, antigravity: true };
+    let s = applySnapshot(initialState(), {
+      chats: [], usage: [rd('codex', 40)], suggested: 'codex', connections: [], history: [], projects: [],
+      settings: { onboarded: true, showChats: on, suggest: { ...on, claude: false } },
+    });
+    s = applyEvent(s, { type: 'usage.updated', reading: rd('claude', 90) });
+    expect(s.suggested).toBe('codex');
+    s = applySettings(s, { onboarded: true, showChats: on, suggest: on });
+    expect(s.suggested).toBe('claude');
+    s = applySettings(s, { onboarded: true, showChats: on, suggest: { ...on, claude: false, codex: false } });
+    expect(s.suggested).toBeNull();
+  });
+
+  it('connect.updated stores the provider state; an older one (a late fetch) does not replace a newer one', () => {
+    const st = (phase: ConnectState['phase'], updatedAt: string): ConnectState =>
+      ({ provider: 'codex', phase, step: null, progress: null, signInUrl: null, message: null, lastOp: null, outcome: null, updatedAt });
+    let s = applyEvent(initialState(), { type: 'connect.updated', state: st('installing', '2026-10-23T11:00:01.000Z') });
+    expect(s.connect.codex!.phase).toBe('installing');
+    s = applySnapshot(s, { chats: [], usage: [], suggested: null, connections: [], history: [], projects: [], connect: [st('idle', '2026-10-23T11:00:00.000Z')] });
+    expect(s.connect.codex!.phase).toBe('installing');
+    s = applyEvent(s, { type: 'connect.updated', state: st('idle', '2026-10-23T11:00:02.000Z') });
+    expect(s.connect.codex!.phase).toBe('idle');
   });
 
   it('notification adds an unread item', () => {
@@ -230,5 +259,22 @@ describe('message.delta by position (fix round 2)', () => {
     s = applyEvent(s, { type: 'message.completed', chatId: 'c1', message: message({ text: 'Hello world' }) });
     expect(s.pendingDeltas.c1).toEqual([]);
     expect(s.refetch.c1).toBeUndefined();
+  });
+});
+
+describe('settings.updated', () => {
+  it('applies settings saved in another tab, recomputing "Most room" like applySettings', () => {
+    const on = { claude: true, codex: true, antigravity: true };
+    const rd = (provider: 'claude' | 'codex', left: number): UsageReading => ({
+      provider, status: 'ok', readAt: '2026-10-23T12:00:00.000Z', windows: [{ kind: 'five_hour', label: '5-hour', leftPct: left, resetsAt: null }],
+    });
+    let s = applySnapshot(initialState(), {
+      chats: [], usage: [rd('claude', 80), rd('codex', 40)], suggested: 'claude', connections: [], history: [], projects: [],
+      settings: { onboarded: true, showChats: on, suggest: on },
+    });
+    const next = { onboarded: true, showChats: { ...on, antigravity: false }, suggest: { ...on, claude: false } };
+    s = applyEvent(s, { type: 'settings.updated', settings: next });
+    expect(s.settings).toEqual(next);
+    expect(s.suggested).toBe('codex');
   });
 });

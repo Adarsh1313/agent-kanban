@@ -138,7 +138,8 @@ describe('Projects list', () => {
     mount(store); // cold: the chat index is built during this mount
     const took = performance.now() - t0;
     expect(rows()).toHaveLength(80);
-    expect(took).toBeLessThan(1000);
+    // ~200 ms locally; the budget leaves room for a loaded CI machine and still catches a quadratic regression.
+    expect(took).toBeLessThan(3000);
     expect(mocked.projectInfo).not.toHaveBeenCalled();
     // An unrelated change (a panel opening, a usage reading) reuses the index instead of regrouping 1 200 chats.
     const before = chatsByFolder(store.getState());
@@ -205,6 +206,17 @@ describe('Project detail', () => {
     expect(newChat).toHaveBeenLastCalledWith({ cwd: '/work/beta', provider: 'codex' });
     fireEvent.click(screen.getByRole('button', { name: 'New chat' }));
     expect(newChat).toHaveBeenLastCalledWith({ cwd: '/work/beta' });
+  });
+
+  it('a project Antigravity worked in offers an enabled "New Antigravity chat"', () => {
+    const newChat = vi.fn();
+    setNewChatHandler(newChat);
+    const GAMMA = project('/work/gamma', ['antigravity'], ago(20));
+    mount(seeded([GAMMA], [], [], '/work/gamma'));
+    const btn = screen.getByRole('button', { name: 'New Antigravity chat' }) as HTMLButtonElement;
+    expect(btn.disabled).toBe(false);
+    fireEvent.click(btn);
+    expect(newChat).toHaveBeenLastCalledWith({ cwd: '/work/gamma', provider: 'antigravity' });
   });
 
   it('"worked with" comes from the live chats; the server list only when the folder has none', () => {

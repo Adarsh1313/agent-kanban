@@ -1,6 +1,7 @@
 import type {
   Chat,
   ConnectionHealth,
+  ConnectState,
   HistoryChat,
   Message,
   ModelOption,
@@ -8,6 +9,7 @@ import type {
   Project,
   ProjectInfo,
   ProviderId,
+  Settings,
   ToolCall,
   UsageReading,
 } from '@agent-kanban/shared';
@@ -95,6 +97,13 @@ const post = <T>(path: string, body?: unknown) => request<T>('POST', path, body)
 export type AnswerDecision = 'allow' | 'deny' | { reply: string };
 export interface ChatPatch { title?: string; pinned?: boolean; snoozedUntil?: string | null }
 export interface UsageResponse { readings: UsageReading[]; suggested: ProviderId | null }
+/** What the Connections page can ask the server to do for a provider (`open` re-opens the sign-in page the server holds). */
+export type ConnectAction = 'install' | 'signin' | 'signout' | 'update' | 'cancel' | 'open';
+export interface SettingsPatch {
+  onboarded?: boolean;
+  showChats?: Partial<Record<ProviderId, boolean>>;
+  suggest?: Partial<Record<ProviderId, boolean>>;
+}
 
 export const api = {
   listChats: () => get<Chat[]>('/api/chats'),
@@ -116,6 +125,11 @@ export const api = {
   refreshUsage: () => post<UsageResponse>('/api/usage/refresh'),
   connections: () => get<ConnectionHealth[]>('/api/connections'),
   checkConnections: (provider?: ProviderId) => post<ConnectionHealth[]>('/api/connections/check', provider ? { provider } : {}),
+  connectStates: () => get<ConnectState[]>('/api/connect'),
+  /** Starts (or cancels) an operation; the answer is the provider's state right after, and progress follows as connect.updated events. */
+  connect: (provider: ProviderId, action: ConnectAction) => post<ConnectState>(`/api/connect/${enc(provider)}/${action}`),
+  settings: () => get<Settings>('/api/settings'),
+  patchSettings: (patch: SettingsPatch) => request<Settings>('PATCH', '/api/settings', patch),
   projects: () => get<Project[]>('/api/projects'),
   projectInfo: (path: string) => get<ProjectInfo>(`/api/projects/info?path=${enc(path)}`),
   /** Every provider's models (an empty list when a provider's CLI could not be asked). */
