@@ -561,6 +561,16 @@ test('spawnCommand: streams output and kill ends the process', async () => {
   assert.equal(missing.errorCode, 'ENOENT');
 });
 
+test('spawnCommand: a character split across output chunks arrives whole (utf8 stream decoding)', async () => {
+  // "é" is two bytes in UTF-8: the child writes them in separate chunks, apart in time.
+  const script = 'process.stdout.write(Buffer.from([0xc3])); setTimeout(() => process.stdout.write(Buffer.from([0xa9, 0x0a])), 100);';
+  const p = spawnCommand(process.execPath, ['-e', script]);
+  let out = '';
+  p.onOutput((t) => { out += t; });
+  await p.exited;
+  assert.equal(out.trim(), 'é');
+});
+
 // ---- fix round 1 ----
 
 test('sign-in link: a foreign https line (release notice) is skipped and the real link is captured', async (t) => {

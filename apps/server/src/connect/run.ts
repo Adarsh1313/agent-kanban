@@ -76,7 +76,10 @@ export const spawnCommand: CommandRunner = (command, args) => {
     finish({ code: null, errorCode: (e as NodeJS.ErrnoException).code ?? 'ESPAWN' });
     return { onOutput: () => {}, exited, kill: () => {} };
   }
-  const emit = (b: Buffer) => { const t = b.toString('utf8'); for (const fn of fns) { try { fn(t); } catch { /* listener bug */ } } };
+  // Decoded as streams, so a character split across chunks arrives whole.
+  child.stdout?.setEncoding('utf8');
+  child.stderr?.setEncoding('utf8');
+  const emit = (t: string) => { for (const fn of fns) { try { fn(t); } catch { /* listener bug */ } } };
   child.stdout?.on('data', emit);
   child.stderr?.on('data', emit);
   child.stdin?.on('error', () => {});
