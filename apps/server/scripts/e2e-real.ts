@@ -1,10 +1,16 @@
-// Real end-to-end check against the user's installed Claude Code and Codex. Run ONCE: uses real subscriptions.
-// Usage: node apps/server/scripts/e2e-real.ts
+// Real end-to-end check against the user's installed Claude Code, Codex and Antigravity. Run ONCE: uses real subscriptions.
+// Usage: AGENT_KANBAN_HOME=<temp folder> node apps/server/scripts/e2e-real.ts   (E2E_ONLY=f runs only step f)
+// Every chat runs in a NEW temp folder. Set AGENT_KANBAN_HOME to a temp folder so the run gets its own database
+// and Antigravity install instead of the user's ~/.agent-kanban; step f only installs Antigravity there, and it
+// never starts a sign-in (a signed-out Antigravity fails the step with a note instead).
 import { spawn } from 'node:child_process';
 import { existsSync, mkdtempSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { WebSocket } from 'ws';
+
+const akHome = process.env.AGENT_KANBAN_HOME ? resolve(process.env.AGENT_KANBAN_HOME) : null;
+if (!akHome) console.warn('AGENT_KANBAN_HOME is not set: this run uses your real ~/.agent-kanban database (chats still run in temp folders; step f will not install Antigravity).');
 
 type Ev = { type: string; [k: string]: any };
 const log = (s: string) => console.log(s);
@@ -161,6 +167,46 @@ await step('e) claude question round-trip', async () => {
   return summary;
 });
 
+await step('f) antigravity create hello.txt', async () => {
+  const health = async () => ((await api('GET', '/api/connections')).json as any[]).find((h) => h.provider === 'antigravity');
+  let h = await health();
+  let installNote = 'already installed';
+  if (!h?.installed) {
+    // Only into a temp Agent Kanban home: never download into the user's own ~/.agent-kanban from a test.
+    if (!akHome) throw new Error('Antigravity is not installed and AGENT_KANBAN_HOME is not set; set it to a temp folder to let this step install it.');
+    const started = Date.now();
+    const r = await api('POST', '/api/connect/antigravity/install');
+    if (r.status !== 202) throw new Error(`install -> ${r.status} ${JSON.stringify(r.json)}`);
+    const end = Date.now() + 15 * 60_000;
+    for (;;) {
+      const c = ((await api('GET', '/api/connect')).json as any[]).find((s) => s.provider === 'antigravity');
+      if (c.phase === 'idle' || c.phase === 'error') {
+        if (c.outcome !== 'done') throw new Error(`install ended ${c.phase}/${c.outcome}: ${c.message}`);
+        break;
+      }
+      if (Date.now() > end) throw new Error(`install still ${c.phase} after 15 min (${c.step})`);
+      await new Promise((r2) => setTimeout(r2, 1000));
+    }
+    h = (await api('POST', '/api/connections/check', { provider: 'antigravity' })).json.find((x: any) => x.provider === 'antigravity');
+    installNote = `installed in ${((Date.now() - started) / 1000).toFixed(0)} s`;
+  }
+  if (!h?.installed) throw new Error(`not installed after install: ${JSON.stringify(h)}`);
+  // Never start a sign-in from a test: it would need the user in the browser.
+  if (h.signedIn === false) throw new Error(`Antigravity is signed out (${h.message}); sign in from the app first. ${installNote}`);
+  const dir = mkdtempSync(join(tmpdir(), 'ak-antigravity-'));
+  const started = Date.now();
+  const r = await api('POST', '/api/chats', { provider: 'antigravity', cwd: dir, prompt: 'create hello.txt containing hi' });
+  if (r.status !== 201) throw new Error(`POST /api/chats -> ${r.status} ${JSON.stringify(r.json)}`);
+  const id = r.json.id as string;
+  // A cold start of Google's agent can take ~2 minutes and session/new another ~40 s.
+  const s = await waitFor(id, (x) => x.column === 'review' || (x.column === 'needs_you' && x.reason !== 'permission' && x.reason !== 'question'), 8 * 60_000);
+  const secs = ((Date.now() - started) / 1000).toFixed(0);
+  if (s.column !== 'review') throw new Error(`ended in ${s.column}/${s.reason} after ${secs} s; last message: ${(lastText.get(id) ?? '').slice(0, 200)}`);
+  // The agent must work in the chat's folder (1.3.0 otherwise picks ~/.gemini/antigravity-cli/skills).
+  if (!existsSync(join(dir, 'hello.txt'))) throw new Error(`reached review after ${secs} s but hello.txt is not in ${dir}; last message: ${(lastText.get(id) ?? '').slice(0, 200)}`);
+  return `${installNote}; review after ${secs} s, hello.txt in the chat folder, requests answered so far: ${opened.size}`;
+});
+
 log('\n=== SUMMARY');
 for (const r of results) log(r);
 ws.close();
@@ -168,5 +214,5 @@ const exited = new Promise<number | null>((r) => server.once('exit', (code) => r
 server.stdin.end();
 const code = await Promise.race([exited, new Promise<'timeout'>((r) => setTimeout(() => r('timeout'), 15_000))]);
 if (code === 'timeout') { log('server did not shut down within 15 s; killing it'); server.kill(); }
-else log(`server shut down gracefully (exit ${code}); lock left behind: ${existsSync(join(homedir(), '.agent-kanban', 'server.lock'))}`);
+else log(`server shut down gracefully (exit ${code}); lock left behind: ${existsSync(join(akHome ?? homedir(), '.agent-kanban', 'server.lock'))}`);
 setTimeout(() => process.exit(0), 1000).unref();
