@@ -122,7 +122,7 @@ for development, using the same data.
   function.
 - **Second launch:** Electron's single-instance lock; the second launch exits and the first shows and
   focuses its window. The server's own data-folder lock stays as the guard against browser mode.
-- **Start at login:** Windows login item, off by default, toggled only from the tray menu (an entry in
+- **Start at login:** Windows login item, off by default, toggled only from the tray menu. Started at sign-in, the app stays in the tray (`--hidden`) until opened (an entry in
   the sidebar Settings menu is an open question in `design/DESIGN.md`).
 - **Notifications:** the web app keeps using its existing notifier. Inside the desktop app it doesn't ask
   for browser permission, and a notification click calls `show` and opens that chat. The app sets its
@@ -205,4 +205,4 @@ for development, using the same data.
 - [x] 7. Notifications: app user model id, click shows the window and opens the chat (seam 4)
 - [x] 8. Open folder: server endpoint + chat actions menu item, both modes (seams 2 and 4)
 - [ ] 9. Icons generated from the SVGs; electron-builder NSIS per-user installer; manual checklist passed on the installed app
-- [ ] 10. Remove the launcher scripts, npm scripts and desktop shortcuts; README and backlog updated; #20 closed, #15 narrowed to Open in app
+- [x] 10. Remove the launcher scripts, npm scripts and desktop shortcuts; README and backlog updated; #20 closed, #15 narrowed to Open in app

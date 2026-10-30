@@ -145,7 +145,7 @@ api.server.on('error', (err) => console.error('Server error:', err));
 const addr = api.server.address() as AddressInfo;
 if (desktop) await tellDesktop({ type: 'ready', port: addr.port, token });
 else console.log(`Agent Kanban server: http://127.0.0.1:${addr.port}/?token=${token}`);
-// The desktop launcher (scripts/desktop/start.mjs) asks for the page to open: the token goes straight to the browser.
+// Browser mode can ask for the page to open (AGENT_KANBAN_OPEN_BROWSER=1): the token goes straight to the browser.
 if (process.env.AGENT_KANBAN_OPEN_BROWSER === '1') {
   try { openLocalApp(`http://127.0.0.1:${addr.port}/?token=${token}`); } catch (e) { console.error("Couldn't open the browser:", (e as Error).message); }
 }

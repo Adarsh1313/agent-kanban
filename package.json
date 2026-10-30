@@ -17,10 +17,7 @@
     "build:web": "npm run build -w apps/web",
     "build": "npm run build:web",
     "start": "node --disable-warning=ExperimentalWarning apps/server/src/main.ts",
-    "desktop": "node scripts/desktop/start.mjs",
-    "desktop:stop": "node scripts/desktop/stop.mjs",
-    "desktop:install": "node scripts/desktop/install-shortcuts.mjs",
-    "desktop:app": "npm run build:web && electron apps/desktop",
+    "desktop": "npm run build:web && electron apps/desktop",
     "desktop:icons": "electron apps/desktop/scripts/make-icons.ts",
     "desktop:dist": "node --disable-warning=ExperimentalWarning apps/desktop/scripts/package.ts"
   },

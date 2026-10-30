@@ -4,25 +4,11 @@ Updated 2026-10-30. GitHub issues carry the details; this file is the order. A f
 
 ## 1. Desktop app (Plan 4): issue #20, now
 
-Flow: grilling, design grill and spec done (2026-10-30). Spec: `docs/specs/desktop-app.md`. Next: new session `/implement docs/specs/desktop-app.md`.
+Built on branch `feat/desktop-app` (2026-10-30), slices 1–8 and 10 of `docs/specs/desktop-app.md`. **Left:** run the manual checklist in the spec (Testing Decisions) on the installed app, then tick slice 9, close #20 and narrow #15 to "Open in app".
 
-Decided in the grilling (why Electron: `docs/adr/0001-electron-desktop-shell.md`; terms: `GLOSSARY.md`):
-- **Shell:** Electron; the server runs on Electron's own Node. **First slice:** prove `node:sqlite` + type stripping work there; fallback is a bundled Node binary for the server.
-- **v1 is Windows only:** per-user NSIS installer (electron-builder), unsigned. Name "Agent Kanban".
-- **Closing the window** hides it to the tray; chats keep running; the first close shows a one-time note. **Quit** (tray menu) asks first if chats are running, then stops the server cleanly.
-- **Second launch** focuses the existing window. **Start at login:** off by default, switch in Settings.
-- **Notification click** brings the window forward and opens that chat. Window size and position are remembered.
-- **Open folder (#15)** is in v1; Open in app is later.
-- **Browser mode** (`npm start`) stays for development, same data, one at a time (`server.lock`). The launcher scripts and the two desktop shortcuts are removed.
-- **No self-update in v1.** When the repo goes public: a "New version → Download" link to GitHub Releases.
-- **Later, before friends get it:** #26 provider installers without npm, then #25 Mac build, then make the repo public after a history scan. #18 closed (not planned).
+Decisions: the spec, `docs/adr/0001-electron-desktop-shell.md` (with the feasibility result), `design/DESIGN.md` (Desktop app), terms in `GLOSSARY.md`. Run it: README "Run it".
 
-What already exists:
-- **Launcher** (`scripts/desktop/`, `npm run desktop`, `desktop:stop`, `desktop:install`): builds the web app, starts the server on 3006 and has the server open its own page (`openLocalApp`, 127.0.0.1 only). The session token is never printed or written to a file.
-- **Stop:** `stop.request` in the data folder stops the server cleanly.
-- **Shortcuts:** "Agent Kanban" / "Stop Agent Kanban" on the Windows desktop, with Node's icon.
-- **Server:** Node 25 with native TypeScript type stripping; serves `apps/web/dist`. Single-instance lock at `~/.agent-kanban/server.lock`. Graceful shutdown on SIGINT/SIGTERM/SIGHUP/SIGBREAK.
-- **Native dialogs:** the server can already show them (`/api/folders/pick`, #24); it already has macOS and Linux branches.
+**Later, before friends get it:** #26 provider installers without npm, then #25 Mac build, then make the repo public after a history scan. #18 closed (not planned).
 
 ## 2. Issues by severity (labels P1 → P3)
 
@@ -51,5 +37,7 @@ What already exists:
 - Branch `fix/chat-layout-and-launcher`: #3 and the launcher.
 - Branch `feat/any-provider-folders`: built on it, adds #22, #23, #24.
 - Branch `fix/p1-issues`: built on that, adds #5 #8 #12 #4 #6 #9 #10 #7, then #13 #16 #19. Merging this one brings in all three.
+
+- Branch `feat/desktop-app`: built on `fix/p1-issues`, adds the desktop app (#20) and Open folder (#15, first half).
 
 Close those issues when they're merged.

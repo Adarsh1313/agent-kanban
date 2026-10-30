@@ -13,20 +13,28 @@ connection is healthy and up to date.
 | Design (`design/`) | Clickable prototype and design system |
 | Web app (`apps/web`) | Built: board, chat panel, New chat, usage, filters, notifications, Projects and Connections pages |
 | Connect and Antigravity | Built: Antigravity chats (Google's official ACP server), install / sign in / sign out / update for all three providers from the app, first-run onboarding |
-| Desktop app | Plan 4 |
+| Desktop app (`apps/desktop`) | Built: Windows app with its own window and tray, per-user installer |
 
 ## Run it
 
 Requires Node 22.18+. Claude Code, Codex and Antigravity can be installed and signed in from the app (Connections page or onboarding).
 
-Everyday use on Windows: run `npm install` once, then `npm run desktop:install` once. That puts two shortcuts on your desktop:
+Everyday use on Windows: install **Agent Kanban** with `apps/desktop/dist/Agent Kanban Setup <version>.exe`
+(no admin rights; Windows may warn that the app is unrecognised because it isn't signed: More info → Run anyway).
+It opens in its own window; closing the window keeps it running in the tray, and **Quit Agent Kanban** in the
+tray menu stops it and every chat. Your chats live in `~/.agent-kanban` and survive reinstalling.
 
-- **Agent Kanban** builds the app, starts it on port 3006 and opens it in your browser. Keep its (minimised) window open while you use it.
-- **Stop Agent Kanban** shuts it down cleanly. Closing the window or pressing Ctrl+C in it does the same.
+Desktop app commands:
 
-`npm run desktop` and `npm run desktop:stop` do the same from a terminal on any OS.
+```bash
+npm run desktop        # build the web app and run the desktop app from source
+npm run desktop:dist   # build the installer into apps/desktop/dist
+npm run desktop:icons  # re-render the app and tray icons from design/assets
+```
 
-Development:
+The desktop app and browser mode (below) share `~/.agent-kanban`; only one runs at a time.
+
+Development (browser mode):
 
 ```bash
 npm install
