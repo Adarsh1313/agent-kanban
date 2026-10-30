@@ -50,6 +50,6 @@ Then open http://localhost:3007/board.html.
 
 - Spec: `docs/specs/2026-10-22-agent-kanban-design.md`
 - Roadmap and plans: `docs/superpowers/plans/`
-- Design brief and tokens: `design/design-brief.md`, `design/tokens.css`
+- Design brief and tokens: `design/DESIGN.md`, `design/tokens.css`
 
 Parts of the provider integration logic are ported from [T3 Code](https://github.com/pingdotgg/t3code) (MIT); see `THIRD_PARTY_LICENSES`.

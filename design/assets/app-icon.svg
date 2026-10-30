@@ -1,0 +1,8 @@
+<!-- Agent Kanban app icon. Colours mirror tokens.css: icon-tile, icon-ink, icon-card. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <rect width="256" height="256" rx="56" fill="#ecebe7"/>
+  <rect x="44" y="52" width="40" height="152" rx="10" fill="#1f1f1e"/>
+  <rect x="108" y="52" width="40" height="96" rx="10" fill="#1f1f1e"/>
+  <rect x="172" y="52" width="40" height="64" rx="10" fill="#1f1f1e"/>
+  <rect x="120" y="150" width="76" height="44" rx="10" fill="#3b6fd8" transform="rotate(-6 158 172)"/>
+</svg>

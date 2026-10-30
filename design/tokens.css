@@ -86,7 +86,7 @@
   --shadow-panel: -12px 0 40px rgba(20, 20, 18, .10), -1px 0 0 var(--color-border);     /* chat side panel */
   --shadow-dialog: 0 24px 64px rgba(20, 20, 18, .20), 0 0 0 1px var(--color-border);
 
-  /* Motion, named by intent (see design-brief.md for when to use each) */
+  /* Motion, named by intent (see DESIGN.md for when to use each) */
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);        /* enters, menus, press: fast start */
   --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);    /* a card travelling between columns */
   --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);     /* chat panel sliding in */
@@ -105,6 +105,18 @@
   --stagger: 40ms;             /* between items entering together */
   --press-scale: 0.97;
   --lift-scale: 1.02;
+
+  /* Desktop app. Electron's main process mirrors these values (window background, title bar,
+     tray); change them here first. Icon and tray colours are fixed: icons don't follow the theme. */
+  --titlebar-height: var(--topbar-height); /* the top bar doubles as the title bar */
+  --titlebar-symbol: var(--color-text-muted); /* Windows caption buttons (minimise, maximise, close) */
+  --icon-tile: #ecebe7;      /* app icon background tile */
+  --icon-ink: #1f1f1e;       /* app icon columns */
+  --icon-card: #3b6fd8;      /* app icon travelling card: running blue, the icon's only colour */
+  --icon-radius: 22%;        /* app icon tile corner, as a share of its size */
+  --tray-on-dark: #ffffff;   /* tray mark on a dark taskbar */
+  --tray-on-light: #1f1f1e;  /* tray mark on a light taskbar */
+  --tray-dot: #e0a43a;       /* tray "needs you" dot: the amber that reads on both taskbars */
 }
 
 /* Dark theme: same roles, re-valued. Follows the OS unless the app forces a theme. */
