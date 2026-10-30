@@ -95,7 +95,12 @@ createInterface({ input: process.stdin }).on('line', (line) => {
       // Only the exact expected params produce an interrupted turn
       if (m.params?.threadId !== T || m.params?.turnId !== 'turn_1') return send({ id: m.id, error: { code: -32602, message: 'bad params' } });
       send({ id: m.id, result: {} });
-      return note('turn/completed', { threadId: T, turn: { id: 'turn_1', status: 'interrupted', error: null } });
+      {
+        // FAKE_INTERRUPT_DELAY_MS: the real app-server answers the interrupt before the turn has actually ended.
+        const end = () => note('turn/completed', { threadId: T, turn: { id: 'turn_1', status: 'interrupted', error: null } });
+        const delay = Number(process.env.FAKE_INTERRUPT_DELAY_MS ?? 0);
+        return delay > 0 ? void setTimeout(end, delay) : end();
+      }
     case 'account/rateLimits/read':
       return scenario === 'limits'
         ? send({ id: m.id, result: limits })
