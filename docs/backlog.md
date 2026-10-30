@@ -8,7 +8,20 @@ Built on branch `feat/desktop-app` (2026-10-30), slices 1–8 and 10 of `docs/sp
 
 Decisions: the spec, `docs/adr/0001-electron-desktop-shell.md` (with the feasibility result), `design/DESIGN.md` (Desktop app), terms in `GLOSSARY.md`. Run it: README "Run it".
 
-**Later, before friends get it:** #26 provider installers without npm, then #25 Mac build, then make the repo public after a history scan. #18 closed (not planned).
+**Later, before friends get it:** #26 provider installers without npm, then #25 Mac build, then #33 make the repo public after a history scan, then #34 version check / auto-update. #18 closed (not planned).
+
+## 3. From the Enjoy competitor review (2026-10-30)
+
+Research: `docs/research/2026-10-23-enjoy-competitor-analysis.md`. Features go through `/grill-with-docs` → `/to-spec` → `/implement` in a new session. Order:
+
+1. #27 (P2): auto-resume a chat when its limit resets, sending messages queued while it waited.
+2. #28 (P2): hand a chat to another provider with its context (the deferred handoff idea).
+3. #32 (P3): positioning copy, "one board for all your agent chats". Small, do directly.
+4. #29 (P3): effort level per chat.
+5. #30 (P3): several accounts per provider. Lifts an MVP out-of-scope item.
+6. #31 (P3): Codex free usage resets. Research T3 Code first.
+
+Left out: routines, project docs, live preview, cloud/remote, more providers, plan advice. Pricing: not now, revisit when the repo goes public.
 
 ## 2. Issues by severity (labels P1 → P3)
 
