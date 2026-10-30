@@ -10,3 +10,5 @@ The desktop app is an Electron shell that runs the existing Node server on Elect
 ## Feasibility (2026-10-30)
 
 Checked on Electron 45.1.0 (Node 24.22.1), run as Node: `node:sqlite`, TypeScript type stripping, the Claude Agent SDK and spawning provider binaries all work, and the real server starts, takes its lock and answers with its token. Electron's main process also loads TypeScript directly, so the desktop app needs no build step; only the sandboxed preload is plain CommonJS. No bundled Node is needed.
+
+Packaging leaves out the Agent SDK's optional bundled Claude binary (~280 MB): the server always passes the user's own `claude` (`pathToClaudeCodeExecutable`), in line with each provider running on its official, user-installed tool. If that ever changes, the installer must include it again.

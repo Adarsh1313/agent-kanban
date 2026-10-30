@@ -84,7 +84,7 @@ function createWindow(): BrowserWindow {
     return { action: 'deny' };
   });
   w.webContents.on('will-navigate', (e, target) => {
-    if (new URL(target).origin === origin) return;
+    if (URL.canParse(target) && new URL(target).origin === origin) return;
     e.preventDefault();
     if (/^https?:/.test(target)) void shell.openExternal(target);
   });
@@ -159,7 +159,9 @@ function showStartFailed(reason: Extract<StartResult, { type: 'failed' }>['reaso
   origin = '';
   status = { needsYou: [], running: 0 };
   updateTray();
-  void (win ?? createWindow()).loadFile(join(here, 'start-failed.html'), { query: { reason } });
+  const w = win ?? createWindow();
+  // Shown even after a start at sign-in (--hidden): a failure must never leave only a tray icon.
+  void w.loadFile(join(here, 'start-failed.html'), { query: { reason } }).then(showWindow);
 }
 
 /** Starts the server and loads the board, or the start-failure page if it can't start. */

@@ -169,7 +169,7 @@ async function shutdown(): Promise<void> {
   process.exit(0);
 }
 for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGBREAK'] as const) process.on(sig, () => void shutdown());
-// The desktop "Stop Agent Kanban" shortcut drops a stop.request file in the data folder.
+// Dropping a stop.request file in the data folder stops the server (handy for scripts in browser mode).
 watchStopRequest(join(dataDir, STOP_REQUEST_FILE), () => void shutdown());
 // The desktop app asks us to stop over the channel (signals kill a child outright on Windows). If the app
 // itself goes away, the channel closes and we stop too, so no server is left running on its own.
