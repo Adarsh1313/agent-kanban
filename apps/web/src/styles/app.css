@@ -193,3 +193,10 @@ body:has(> .onb[data-state="open"]) > .toasts { z-index: 91; }
 .onb .onb-play { height: auto; padding: 0 calc(var(--space-1) / 2); display: inline; }
 .onb .agent-row .t small + small { color: var(--color-text-faint); }
 .onb h1:focus { outline: none; }
+
+/* Desktop app: the window has no system title bar (design/DESIGN.md). A strip across the top of every screen
+   (board, onboarding) drags the window, controls in it stay clickable, and the top bar leaves room at its right
+   end for the caption buttons Windows draws there. */
+.desktop body::before { content: ""; position: fixed; inset: 0 0 auto 0; height: var(--titlebar-height); -webkit-app-region: drag; pointer-events: none; }
+.desktop :is(button, a, input, select, textarea, [role="button"], [tabindex], .popover, .dialog, .panel) { -webkit-app-region: no-drag; }
+.desktop .topbar { padding-right: calc(var(--titlebar-controls-width) + var(--space-2)); }

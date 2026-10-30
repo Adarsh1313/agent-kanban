@@ -2,7 +2,7 @@ import type { Chat, DesktopBridge, DesktopStatus } from '@agent-kanban/shared';
 import { describe, expect, it, vi } from 'vitest';
 import { initialState, type AppState } from '../src/state/reducer.ts';
 import { createStore } from '../src/state/store.ts';
-import { startDesktopSync } from '../src/desktop.ts';
+import { startDesktopSync, startDesktopWindow } from '../src/desktop.ts';
 import { chat } from './helpers.ts';
 
 function fakeBridge() {
@@ -69,5 +69,30 @@ describe('desktop sync', () => {
     pickInTray('a');
     expect(sent).toHaveLength(1);
     expect(store.getState().ui.openChatId).not.toBe('a');
+  });
+});
+
+describe('desktop window', () => {
+  it('marks the page as the desktop app, so the top bar becomes the title bar', () => {
+    const { bridge } = fakeBridge();
+    const stop = startDesktopWindow(bridge);
+    expect(document.documentElement.classList.contains('desktop')).toBe(true);
+    stop();
+    expect(document.documentElement.classList.contains('desktop')).toBe(false);
+  });
+
+  it('tells the app the theme now and whenever it is switched', async () => {
+    delete document.documentElement.dataset.theme;
+    const { bridge } = fakeBridge();
+    const stop = startDesktopWindow(bridge);
+    expect(bridge.theme).toHaveBeenLastCalledWith('light');
+    document.documentElement.dataset.theme = 'dark';
+    await new Promise((r) => setTimeout(r, 0));
+    expect(bridge.theme).toHaveBeenLastCalledWith('dark');
+    stop();
+    document.documentElement.dataset.theme = 'light';
+    await new Promise((r) => setTimeout(r, 0));
+    expect(bridge.theme).toHaveBeenCalledTimes(2);
+    delete document.documentElement.dataset.theme;
   });
 });

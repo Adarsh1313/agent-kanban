@@ -110,6 +110,7 @@
      tray); change them here first. Icon and tray colours are fixed: icons don't follow the theme. */
   --titlebar-height: var(--topbar-height); /* the top bar doubles as the title bar */
   --titlebar-symbol: var(--color-text-muted); /* Windows caption buttons (minimise, maximise, close) */
+  --titlebar-controls-width: 138px;           /* room Windows' three caption buttons take at the top bar's right end */
   --icon-tile: #ecebe7;      /* app icon background tile */
   --icon-ink: #1f1f1e;       /* app icon columns */
   --icon-card: #3b6fd8;      /* app icon travelling card: running blue, the icon's only colour */

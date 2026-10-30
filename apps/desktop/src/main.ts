@@ -22,8 +22,13 @@ const state = loadState(statePath);
 // Started by Windows at sign-in: stay in the tray until the user opens the window.
 const startHidden = process.argv.includes('--hidden');
 
-// Mirrors --color-bg in design/tokens.css, so the window never flashes white before the page paints.
+// Mirror design/tokens.css: --color-bg (the window behind the page, so it never flashes white),
+// --titlebar-symbol (Windows' caption buttons) and --titlebar-height.
 const BG = { light: '#fbfbfa', dark: '#121213' };
+const SYMBOL = { light: '#6e6e6a', dark: '#9a9a96' };
+const TITLEBAR_HEIGHT = 48;
+const overlay = (theme: 'light' | 'dark') => ({ color: BG[theme], symbolColor: SYMBOL[theme], height: TITLEBAR_HEIGHT });
+const systemTheme = () => (nativeTheme.shouldUseDarkColors ? 'dark' : 'light');
 
 let win: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -54,7 +59,10 @@ function createWindow(): BrowserWindow {
     show: false,
     title: 'Agent Kanban',
     icon: join(assets, 'icon.ico'),
-    backgroundColor: nativeTheme.shouldUseDarkColors ? BG.dark : BG.light,
+    backgroundColor: BG[systemTheme()],
+    // The page's top bar is the title bar; Windows still draws its own caption buttons over it.
+    titleBarStyle: 'hidden',
+    titleBarOverlay: overlay(systemTheme()),
     autoHideMenuBar: true,
     webPreferences: {
       preload: join(here, 'preload.cjs'),
@@ -177,6 +185,11 @@ ipcMain.on('desktop:status', (e, next: DesktopStatus) => {
   updateTray();
 });
 ipcMain.on('desktop:show', (e) => { if (fromBoard(e)) showWindow(); });
+ipcMain.on('desktop:theme', (e, theme: unknown) => {
+  if (!fromBoard(e) || (theme !== 'light' && theme !== 'dark') || !win) return;
+  win.setTitleBarOverlay(overlay(theme));
+  win.setBackgroundColor(BG[theme]);
+});
 // Buttons on the start-failure page.
 ipcMain.on('startup:retry', (e) => { if (!server && e.sender === win?.webContents) void launch(); });
 ipcMain.on('startup:quit', () => app.quit());

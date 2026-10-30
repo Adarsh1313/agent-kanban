@@ -8,6 +8,8 @@
 <link rel="stylesheet" href="../../../design/tokens.css">
 <style>
   html, body { height: 100%; margin: 0; }
+  /* The window has no system title bar: this strip drags it (the caption buttons sit on its right). */
+  .drag { position: fixed; inset: 0 0 auto 0; height: var(--titlebar-height); -webkit-app-region: drag; }
   body { background: var(--color-bg); color: var(--color-text); font-family: var(--font-ui); font-size: var(--text-body);
     display: grid; place-items: center; text-align: center; -webkit-font-smoothing: antialiased; }
   main { max-width: 420px; padding: var(--space-6); }
@@ -27,6 +29,7 @@
 </style>
 </head>
 <body>
+<div class="drag"></div>
 <main>
   <h1>Agent Kanban couldn’t start</h1>
   <p id="why"></p>
