@@ -4,27 +4,25 @@ Updated 2026-10-30. GitHub issues carry the details; this file is the order. A f
 
 ## 1. Desktop app (Plan 4): issue #20, now
 
-Flow: `/grill-with-docs` → `/to-spec` (writes `docs/specs/desktop-app.md` with a `## Progress` checklist) → new session `/implement docs/specs/desktop-app.md`.
+Flow: ~~`/grill-with-docs`~~ (done 2026-10-30) → `/design-grill` (app icon, tray icon, tray menu) → `/to-spec` (writes `docs/specs/desktop-app.md` with a `## Progress` checklist) → new session `/implement docs/specs/desktop-app.md`.
+
+Decided in the grilling (why Electron: `docs/adr/0001-electron-desktop-shell.md`; terms: `GLOSSARY.md`):
+- **Shell:** Electron; the server runs on Electron's own Node. **First slice:** prove `node:sqlite` + type stripping work there; fallback is a bundled Node binary for the server.
+- **v1 is Windows only:** per-user NSIS installer (electron-builder), unsigned. Name "Agent Kanban".
+- **Closing the window** hides it to the tray; chats keep running; the first close shows a one-time note. **Quit** (tray menu) asks first if chats are running, then stops the server cleanly.
+- **Second launch** focuses the existing window. **Start at login:** off by default, switch in Settings.
+- **Notification click** brings the window forward and opens that chat. Window size and position are remembered.
+- **Open folder (#15)** is in v1; Open in app is later.
+- **Browser mode** (`npm start`) stays for development, same data, one at a time (`server.lock`). The launcher scripts and the two desktop shortcuts are removed.
+- **No self-update in v1.** When the repo goes public: a "New version → Download" link to GitHub Releases.
+- **Later, before friends get it:** #26 provider installers without npm, then #25 Mac build, then make the repo public after a history scan. #18 closed (not planned).
 
 What already exists:
 - **Launcher** (`scripts/desktop/`, `npm run desktop`, `desktop:stop`, `desktop:install`): builds the web app, starts the server on 3006 and has the server open its own page (`openLocalApp`, 127.0.0.1 only). The session token is never printed or written to a file.
 - **Stop:** `stop.request` in the data folder stops the server cleanly.
 - **Shortcuts:** "Agent Kanban" / "Stop Agent Kanban" on the Windows desktop, with Node's icon.
 - **Server:** Node 25 with native TypeScript type stripping; serves `apps/web/dist`. Single-instance lock at `~/.agent-kanban/server.lock`. Graceful shutdown on SIGINT/SIGTERM/SIGHUP/SIGBREAK.
-- **Native dialogs:** the server can already show them (`/api/folders/pick`, #24).
-
-Questions for the grilling:
-- **Shell:** Electron, Tauri, or the launcher + browser kept with a tray icon?
-- **Node:** bundled Node vs the user's own install.
-- **Windows-first?** And installer vs a portable app.
-- **Autostart and tray:** start at login? What does closing the window do: stop, or keep running in the tray?
-- **Second launch:** what happens when the app is already running (focus the existing window)?
-- **Updating Agent Kanban itself:** git pull vs releases.
-- **App icon and name.**
-- **Open in app / Open folder (#15):** comes with this.
-- **Hosted web idea (#18):** does the desktop app make it unnecessary?
-
-Note: `design/` has `design-brief.md` + `tokens.css` but no `DESIGN.md`. If the desktop app needs new UI (tray menu, window chrome, icon), run `/design-grill` for those gaps.
+- **Native dialogs:** the server can already show them (`/api/folders/pick`, #24); it already has macOS and Linux branches.
 
 ## 2. Issues by severity (labels P1 → P3)
 
@@ -44,7 +42,9 @@ Note: `design/` has `design-brief.md` + `tokens.css` but no `DESIGN.md`. If the 
   - #19 remaining items.
   - #17: the archive animation belongs to the motion skills; the rest works as is.
   - #14: can't happen until the Antigravity pin moves.
-  - #18: decide after the desktop app.
+  - #18: closed (not planned) in the desktop grilling.
+
+**Desktop follow-ups (before friends get the app):** #26 install Claude Code / Codex without npm, then #25 Mac build.
 
 ## Done, waiting to be merged
 
