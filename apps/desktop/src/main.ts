@@ -1,29 +1,36 @@
-// Agent Kanban desktop app: Electron's main process. It owns the window, the server child process and
-// (later) the tray; it holds no chat logic. Spec: docs/specs/desktop-app.md.
-import { app, BrowserWindow, ipcMain, nativeTheme, screen, shell } from 'electron';
+// Agent Kanban desktop app: Electron's main process. It owns the window, the tray and the server child
+// process; it holds no chat logic. Spec: docs/specs/desktop-app.md; look: design/DESIGN.md (Desktop app).
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, Notification, screen, shell, Tray, type IpcMainEvent, type MenuItemConstructorOptions } from 'electron';
 import { mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { DesktopStatus } from '@agent-kanban/shared';
 import { restorePlacement, type Placement } from './placement.ts';
 import { startServer, type ServerProcess, type StartResult } from './server-process.ts';
-import { loadState, saveState } from './state.ts';
+import { loadState, noteFirstClose, saveState } from './state.ts';
+import { quitPrompt, trayIcon, trayMenu, trayTooltip } from './tray.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
+const assets = join(here, '..', 'assets');
 // The same data folder the server uses (browser mode too): one set of chats, one running at a time.
 const akHome = process.env.AGENT_KANBAN_HOME ? resolve(process.env.AGENT_KANBAN_HOME) : homedir();
 const dataDir = join(akHome, '.agent-kanban');
 mkdirSync(dataDir, { recursive: true });
 const statePath = join(dataDir, 'desktop.json');
 const state = loadState(statePath);
+// Started by Windows at sign-in: stay in the tray until the user opens the window.
+const startHidden = process.argv.includes('--hidden');
 
 // Mirrors --color-bg in design/tokens.css, so the window never flashes white before the page paints.
 const BG = { light: '#fbfbfa', dark: '#121213' };
 
 let win: BrowserWindow | null = null;
+let tray: Tray | null = null;
 let server: ServerProcess | null = null;
 let origin = '';
 let quitting = false;
+let status: DesktopStatus = { needsYou: [], running: 0 };
 
 function showWindow(): void {
   if (!win) return;
@@ -41,11 +48,12 @@ function savePlacement(): void {
 
 function createWindow(): BrowserWindow {
   const placement = restorePlacement(state.placement, [screen.getPrimaryDisplay(), ...screen.getAllDisplays()].map((d) => d.workArea));
-  win = new BrowserWindow({
+  const w = new BrowserWindow({
     x: placement.x, y: placement.y, width: placement.width, height: placement.height,
     minWidth: 720, minHeight: 480,
     show: false,
     title: 'Agent Kanban',
+    icon: join(assets, 'icon.ico'),
     backgroundColor: nativeTheme.shouldUseDarkColors ? BG.dark : BG.light,
     autoHideMenuBar: true,
     webPreferences: {
@@ -57,17 +65,17 @@ function createWindow(): BrowserWindow {
       backgroundThrottling: false,
     },
   });
-  const w = win;
+  win = w;
   w.setMenu(null);
-  if (placement.maximized) win.maximize();
-  win.once('ready-to-show', showWindow);
+  if (placement.maximized) w.maximize();
+  w.once('ready-to-show', () => { if (!startHidden) showWindow(); });
 
   // The window only ever shows Agent Kanban; every other link opens in the default browser.
-  win.webContents.setWindowOpenHandler(({ url: target }) => {
+  w.webContents.setWindowOpenHandler(({ url: target }) => {
     if (/^https?:/.test(target)) void shell.openExternal(target);
     return { action: 'deny' };
   });
-  win.webContents.on('will-navigate', (e, target) => {
+  w.webContents.on('will-navigate', (e, target) => {
     if (new URL(target).origin === origin) return;
     e.preventDefault();
     if (/^https?:/.test(target)) void shell.openExternal(target);
@@ -75,15 +83,74 @@ function createWindow(): BrowserWindow {
 
   let saveTimer: NodeJS.Timeout | undefined;
   const queueSave = () => { clearTimeout(saveTimer); saveTimer = setTimeout(savePlacement, 400); };
-  win.on('resize', queueSave);
-  win.on('move', queueSave);
-  win.on('close', savePlacement);
-  win.on('closed', () => { win = null; });
+  w.on('resize', queueSave);
+  w.on('move', queueSave);
+  // Closing hides to the tray: chats keep running. Only Quit (tray menu) ends the app.
+  w.on('close', (e) => {
+    savePlacement();
+    if (quitting) return;
+    e.preventDefault();
+    w.hide();
+    if (noteFirstClose(state)) {
+      saveState(statePath, state);
+      new Notification({ title: 'Agent Kanban is still running', body: 'Quit it from the tray icon.', icon: join(assets, 'icon.png') }).show();
+    }
+  });
+  // Windows is signing out or shutting down: let the window close.
+  w.on('session-end', () => { quitting = true; });
+  w.on('closed', () => { win = null; });
   return w;
 }
 
+/* ───────── Tray ───────── */
+
+const startAtLogin = () => app.getLoginItemSettings(loginItemOptions()).openAtLogin;
+// In development the app is electron.exe plus the app folder; packaged, it is the app's own exe.
+const loginItemOptions = () => ({ path: process.execPath, args: [...(app.isPackaged ? [] : [app.getAppPath()]), '--hidden'] });
+
+function openChatFromTray(chatId: string): void {
+  showWindow();
+  win?.webContents.send('desktop:open-chat', chatId);
+}
+
+function updateTray(): void {
+  if (!tray) return;
+  tray.setImage(nativeImage.createFromPath(join(assets, `${trayIcon(status, nativeTheme.shouldUseDarkColorsForSystemIntegratedUI)}.png`)));
+  tray.setToolTip(trayTooltip(status));
+  const template: MenuItemConstructorOptions[] = trayMenu(status, startAtLogin()).map((item): MenuItemConstructorOptions => {
+    switch (item.kind) {
+      case 'open': return { label: item.label, click: showWindow };
+      case 'heading': return { label: item.label, enabled: false };
+      case 'chat': return { label: item.label, click: () => openChatFromTray(item.id) };
+      case 'more': return { label: item.label, click: showWindow };
+      case 'separator': return { type: 'separator' };
+      case 'login': return { label: item.label, type: 'checkbox', checked: item.checked, click: (m) => {
+        app.setLoginItemSettings({ ...loginItemOptions(), openAtLogin: m.checked });
+        updateTray();
+      } };
+      case 'quit': return { label: item.label, click: () => void requestQuit() };
+    }
+  });
+  tray.setContextMenu(Menu.buildFromTemplate(template));
+}
+
+/** Quit from the tray: asks first while chats are running, then stops the server and every chat. */
+async function requestQuit(): Promise<void> {
+  const prompt = quitPrompt(status.running);
+  if (prompt) {
+    const options = { type: 'question' as const, title: 'Agent Kanban', message: prompt.message, detail: prompt.detail, buttons: prompt.buttons, defaultId: 1, cancelId: 1, noLink: true };
+    const { response } = win && win.isVisible() ? await dialog.showMessageBox(win, options) : await dialog.showMessageBox(options);
+    if (response !== 0) return;
+  }
+  app.quit();
+}
+
+/* ───────── Server ───────── */
+
 function showStartFailed(reason: Extract<StartResult, { type: 'failed' }>['reason']): void {
   origin = '';
+  status = { needsYou: [], running: 0 };
+  updateTray();
   void (win ?? createWindow()).loadFile(join(here, 'start-failed.html'), { query: { reason } });
 }
 
@@ -101,6 +168,15 @@ async function launch(): Promise<void> {
   void (win ?? createWindow()).loadURL(`${origin}/?token=${result.token}`);
 }
 
+/** Only the board in our own window may use the bridge. */
+const fromBoard = (e: IpcMainEvent) => !!win && e.sender === win.webContents && !!origin && e.senderFrame?.origin === origin;
+
+ipcMain.on('desktop:status', (e, next: DesktopStatus) => {
+  if (!fromBoard(e) || !next || !Array.isArray(next.needsYou) || !Number.isInteger(next.running)) return;
+  status = { needsYou: next.needsYou.map((c) => ({ id: String(c.id), title: String(c.title) })), running: next.running };
+  updateTray();
+});
+ipcMain.on('desktop:show', (e) => { if (fromBoard(e)) showWindow(); });
 // Buttons on the start-failure page.
 ipcMain.on('startup:retry', (e) => { if (!server && e.sender === win?.webContents) void launch(); });
 ipcMain.on('startup:quit', () => app.quit());
@@ -111,13 +187,22 @@ if (!app.requestSingleInstanceLock()) {
 } else {
   app.setAppUserModelId('com.agentkanban.desktop');
   app.on('second-instance', showWindow);
-  app.on('window-all-closed', () => app.quit());
+  // The window hides rather than closes; the app lives on in the tray until Quit.
+  app.on('window-all-closed', () => {});
   app.on('before-quit', (e) => {
-    if (quitting || !server) return;
+    quitting = true;
+    if (!server) return;
     // Stop the server (and every chat) cleanly before the app goes.
     e.preventDefault();
-    quitting = true;
-    void server.stop().finally(() => app.quit());
+    const stopping = server;
+    server = null;
+    void stopping.stop().finally(() => app.quit());
   });
-  void app.whenReady().then(launch);
+  void app.whenReady().then(() => {
+    tray = new Tray(nativeImage.createFromPath(join(assets, 'tray-on-dark.png')));
+    tray.on('click', showWindow);
+    nativeTheme.on('updated', updateTray);
+    updateTray();
+    return launch();
+  });
 }

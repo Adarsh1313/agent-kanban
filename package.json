@@ -20,7 +20,8 @@
     "desktop": "node scripts/desktop/start.mjs",
     "desktop:stop": "node scripts/desktop/stop.mjs",
     "desktop:install": "node scripts/desktop/install-shortcuts.mjs",
-    "desktop:app": "npm run build:web && electron apps/desktop"
+    "desktop:app": "npm run build:web && electron apps/desktop",
+    "desktop:icons": "electron apps/desktop/scripts/make-icons.ts"
   },
   "devDependencies": {
     "@types/node": "26.6.5",

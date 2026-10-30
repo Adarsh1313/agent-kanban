@@ -17,6 +17,13 @@ export function loadState(path: string): DesktopState {
   }
 }
 
+/** True the first time the window is ever closed (show the "still running" note), false after that. */
+export function noteFirstClose(state: DesktopState): boolean {
+  if (state.closeNoted) return false;
+  state.closeNoted = true;
+  return true;
+}
+
 export function saveState(path: string, state: DesktopState): void {
   try { writeFileSync(path, JSON.stringify(state)); } catch { /* not worth interrupting anyone over */ }
 }
