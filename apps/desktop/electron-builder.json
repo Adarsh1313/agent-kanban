@@ -1,0 +1,20 @@
+{
+  "appId": "com.agentkanban.desktop",
+  "productName": "Agent Kanban",
+  "asar": false,
+  "npmRebuild": false,
+  "files": ["**/*", "!**/*.map"],
+  "win": {
+    "target": [{ "target": "nsis", "arch": ["x64"] }],
+    "icon": "apps/desktop/assets/icon.ico"
+  },
+  "nsis": {
+    "oneClick": true,
+    "perMachine": false,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
+    "shortcutName": "Agent Kanban",
+    "deleteAppDataOnUninstall": false,
+    "runAfterFinish": true
+  }
+}
