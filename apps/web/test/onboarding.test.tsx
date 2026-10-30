@@ -255,6 +255,26 @@ describe('chats and notifications steps', () => {
   });
 });
 
+describe('notifications step hint (#6)', () => {
+  const toNotifications = () => {
+    fireEvent.click(primary('Get started'));
+    fireEvent.click(primary('Continue'));
+    fireEvent.click(primary('Continue'));
+  };
+  for (const [permission, shown] of [['default', true], ['denied', false], ['granted', false]] as const) {
+    it(`"Windows will ask" shows only before the browser has asked (${permission})`, () => {
+      vi.stubGlobal('Notification', { permission, requestPermission: async () => permission });
+      try {
+        mount(seeded([conn('claude')]));
+        toNotifications();
+        expect(screen.queryByText('Windows will ask to allow notifications.') !== null).toBe(shown);
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+  }
+});
+
 describe('finish', () => {
   const toReady = () => {
     fireEvent.click(primary('Get started'));

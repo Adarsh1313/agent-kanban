@@ -472,7 +472,7 @@ export function Onboarding() {
               }} />
             </div>
           </div>
-          <div className="onb-foot">{backBtn}<span className="grow">Windows will ask to allow notifications.</span>{next()}</div>
+          <div className="onb-foot">{backBtn}<span className="grow">{support === 'default' ? 'Windows will ask to allow notifications.' : ''}</span>{next()}</div>
         </>
       );
       break;
