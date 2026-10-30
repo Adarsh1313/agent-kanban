@@ -93,6 +93,17 @@ describe('Sidebar: pinned and recent', () => {
     expect(screen.queryByText('proj4')).toBeNull();
   });
 
+  it('hovering a chat (board or history-only) shows its title, provider and when it was last active (#23)', () => {
+    const at = (iso: string) => new Date(iso).toISOString();
+    const board = chat({ id: 'b1', provider: 'claude', title: 'Board chat', cwd: '/work/a', updatedAt: at('2026-10-23T09:05:00') });
+    const old: HistoryChat = { provider: 'codex', sessionRef: 'h1', title: 'Old codex chat', cwd: '/work/a', updatedAt: at('2026-10-20T15:30:00') };
+    mount(seeded([board], [old]));
+    const row = (name: string) => [...document.querySelectorAll('.chat-row')].find((r) => r.textContent?.includes(name))!;
+    expect(row('Board chat').getAttribute('title')).toBe('Board chat\nClaude Code · Today, 9:05 am');
+    expect(row('Board chat').getAttribute('aria-description')).toBe('Claude Code · Today, 9:05 am');
+    expect(row('Old codex chat').getAttribute('title')).toBe('Old codex chat\nCodex · Oct 20, 3:30 pm');
+  });
+
   it('"N more" expands inside that project and "Show less" collapses it', () => {
     const chats = Array.from({ length: 5 }, (_, i) => chat({ id: `c${i}`, sessionRef: `r${i}`, title: `Chat ${i}`, updatedAt: new Date(NOW - i * 60_000).toISOString() }));
     mount(seeded(chats));

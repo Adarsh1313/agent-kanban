@@ -511,3 +511,14 @@ describe('Board: fix round 1', () => {
     expect(now().className).toBe('now');
   });
 });
+
+describe('dateTime (#23)', () => {
+  it('says Today for today, the month and day otherwise, and the year only for another year', async () => {
+    const { dateTime } = await import('../src/ui/board/format.ts');
+    const now = new Date('2026-10-30T12:00:00').getTime();
+    expect(dateTime(new Date('2026-10-30T08:15:00').toISOString(), now)).toBe('Today, 8:15 am');
+    expect(dateTime(new Date('2026-10-27T15:01:00').toISOString(), now)).toBe('Oct 27, 3:01 pm');
+    expect(dateTime(new Date('2025-12-31T23:59:00').toISOString(), now)).toBe('Dec 31, 2025, 11:59 pm');
+    expect(dateTime('not a date', now)).toBe('');
+  });
+});

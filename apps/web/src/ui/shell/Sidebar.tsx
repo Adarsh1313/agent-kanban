@@ -9,6 +9,7 @@ import { Icon, Menu, MenuItem, PROVIDER_IDS, ProviderLogo, StatusIcon, Tooltip, 
 import { replayOnboarding } from '../onboarding/Onboarding.tsx';
 import { navigate, hashFor } from './route.ts';
 import { toggleTheme } from './theme.ts';
+import { dateTime } from '../board/format.ts';
 
 const NAV = [
   ['board', 'board', 'Board'],
@@ -40,10 +41,13 @@ function SideSection({ title, children }: { title: string; children: ReactNode }
   );
 }
 
-interface RowChat { key: string; chatId: string | null; provider: ProviderId; sessionRef: string | null; title: string; cwd: string; column: SidebarChat['column'] }
+interface RowChat { key: string; chatId: string | null; provider: ProviderId; sessionRef: string | null; title: string; cwd: string; updatedAt: string; column: SidebarChat['column'] }
 
 function ChatRow({ chat, current }: { chat: RowChat; current: boolean }) {
   const store = useStoreInstance();
+  const now = useStore((s) => s.now);
+  // Hover shows the full title plus where and when it was last active (#23).
+  const when = `${providerName(chat.provider)} · ${dateTime(chat.updatedAt, now)}`;
   const open = () => {
     if (chat.chatId) store.setState((s) => openChatIn(s, chat.chatId!));
     else if (chat.sessionRef) openHistoryChat({ provider: chat.provider, sessionRef: chat.sessionRef, cwd: chat.cwd, title: chat.title });
@@ -56,7 +60,8 @@ function ChatRow({ chat, current }: { chat: RowChat; current: boolean }) {
     );
   };
   return (
-    <div className="chat-row" role="button" tabIndex={0} title={chat.title} aria-current={current ? 'true' : undefined} onClick={open} onKeyDown={onActivate(open)}>
+    <div className="chat-row" role="button" tabIndex={0} title={`${chat.title}
+${when}`} aria-description={when} aria-current={current ? 'true' : undefined} onClick={open} onKeyDown={onActivate(open)}>
       <ProviderLogo id={chat.provider} size="sm" />
       <span className="t">{chat.title}</span>
       {chat.column === 'running' && <StatusIcon state="running" />}
@@ -155,7 +160,7 @@ function Pinned() {
   if (list.length === 0) return null;
   return (
     <SideSection title="Pinned">
-      {list.map((c) => <ChatRow key={c.id} chat={{ key: c.id, chatId: c.id, provider: c.provider, sessionRef: c.sessionRef, title: c.title, cwd: c.cwd, column: c.column }} current={c.id === openChatId} />)}
+      {list.map((c) => <ChatRow key={c.id} chat={{ key: c.id, chatId: c.id, provider: c.provider, sessionRef: c.sessionRef, title: c.title, cwd: c.cwd, updatedAt: c.updatedAt, column: c.column }} current={c.id === openChatId} />)}
     </SideSection>
   );
 }
