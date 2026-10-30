@@ -47,7 +47,9 @@ export class FolderPicker {
     this.open = true;
     try {
       const out = await new Promise<string | null>((resolve, reject) => {
-        execFile(cmd[0], cmd[1], { timeout: this.opts.timeoutMs ?? 10 * 60_000, windowsHide: false, encoding: 'utf8' }, (err, stdout) => {
+        // Inside the desktop app the server has no console, so PowerShell would open a visible one: hide it
+        // (the dialog itself still shows). In browser mode it shares the server's terminal, as before.
+        execFile(cmd[0], cmd[1], { timeout: this.opts.timeoutMs ?? 10 * 60_000, windowsHide: !!process.versions.electron, encoding: 'utf8' }, (err, stdout) => {
           if (!err) return resolve(stdout);
           // osascript and zenity exit with 1 when the user cancels.
           if (typeof err.code === 'number' && err.code === 1) return resolve(null);

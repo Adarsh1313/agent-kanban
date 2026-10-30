@@ -360,6 +360,18 @@ describe('New chat: loading and odd data', () => {
     expect(screen.queryByRole('textbox', { name: 'Folder path' })).toBeNull();
   });
 
+  it('the project picker lists the most recently active projects first', () => {
+    mount(seeded({ projects: [
+      project('/work/old', ['claude'], '2026-09-01T10:00:00.000Z'),
+      project('/work/newest', ['codex'], '2026-10-23T11:00:00.000Z'),
+      project('/work/middle', ['claude'], '2026-10-01T10:00:00.000Z'),
+    ] }));
+    act(() => openNewChat());
+    fireEvent.click(chip(/^Project:/));
+    const names = within(listbox('Project')).getAllByRole('option').flatMap((o) => o.querySelector('.grow-text')?.textContent ?? []);
+    expect(names.slice(0, 3)).toEqual(['newest', 'middle', 'old']);
+  });
+
   it('a project with no folder is never offered or matched by an empty path', () => {
     mount(seeded({ projects: [project('', ['codex'], '2026-10-23T11:59:00.000Z')] }));
     act(() => openNewChat());

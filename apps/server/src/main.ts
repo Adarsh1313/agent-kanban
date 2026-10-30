@@ -31,6 +31,9 @@ process.on('unhandledRejection', (e) => console.error('[agent-kanban] unhandled'
 // Started by the desktop app: it hears from us over the IPC channel, never by reading the console, so the
 // token is never printed. Browser mode (npm start) has no channel and keeps the console URL.
 const desktop = process.env.AGENT_KANBAN_DESKTOP === '1' && typeof process.send === 'function';
+// The app ran us as Node with ELECTRON_RUN_AS_NODE; agents must not inherit it, or an Electron tool they start
+// (VS Code's `code`, …) would run as plain Node instead of opening.
+delete process.env.ELECTRON_RUN_AS_NODE;
 const tellDesktop = (m: ServerToDesktop) => new Promise<void>((done) => {
   if (!desktop) return done();
   process.send!(m, undefined, undefined, () => done());

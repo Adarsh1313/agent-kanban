@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
-import { resolveSpawnTarget } from '../adapters/spawn-target.ts';
+import { resolveSpawnTarget, scriptRunner } from '../adapters/spawn-target.ts';
 import { killTree } from '../adapters/jsonrpc.ts';
 
 export interface CommandExit {
@@ -39,7 +39,7 @@ export function commandTarget(file: string, platform: NodeJS.Platform = process.
   const cli = path.win32.join(dir, 'node_modules', 'npm', 'bin', 'npm-cli.js');
   if (path.win32.basename(file).toLowerCase() === 'npm.cmd' && existsSync(cli)) {
     const node = path.win32.join(dir, 'node.exe');
-    return { command: existsSync(node) ? node : process.execPath, args: [cli] };
+    return { command: existsSync(node) ? node : scriptRunner(), args: [cli] };
   }
   return t;
 }

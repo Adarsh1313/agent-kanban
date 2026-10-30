@@ -199,4 +199,5 @@ body:has(> .onb[data-state="open"]) > .toasts { z-index: 91; }
    end for the caption buttons Windows draws there. */
 .desktop body::before { content: ""; position: fixed; inset: 0 0 auto 0; height: var(--titlebar-height); -webkit-app-region: drag; pointer-events: none; }
 .desktop :is(button, a, input, select, textarea, [role="button"], [tabindex], .popover, .dialog, .panel) { -webkit-app-region: no-drag; }
-.desktop .topbar { padding-right: calc(var(--titlebar-controls-width) + var(--space-2)); }
+/* The chat panel runs to the top edge too: its header keeps its buttons clear of the caption buttons. */
+.desktop :is(.topbar, .panel-head) { padding-right: calc(var(--titlebar-controls-width) + var(--space-2)); }

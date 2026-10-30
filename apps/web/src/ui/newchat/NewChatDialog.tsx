@@ -48,12 +48,13 @@ export const isConnected = (c: ConnectionHealth | undefined) => c?.status === 'c
 export const findProject = (projects: Project[], path: string) =>
   path.trim() ? projects.find((p) => p.id.trim() !== '' && (folderKey(p.id) === folderKey(path) || folderKey(p.path) === folderKey(path))) : undefined;
 
-/** Folders a chat can start in (history can carry chats with no folder). */
-const usable = (projects: Project[]) => projects.filter((p) => p.id.trim() !== '');
+/** Folders a chat can start in (history can carry chats with no folder), most recently active first. */
+const usable = (projects: Project[]) => projects.filter((p) => p.id.trim() !== '')
+  .sort((a, b) => (a.lastActivityAt < b.lastActivityAt ? 1 : a.lastActivityAt > b.lastActivityAt ? -1 : 0));
 
 /** The focused provider's latest project, else the latest project. */
 function latestProject(projects: Project[], focus: ProviderId | null): Project | undefined {
-  const sorted = usable(projects).sort((a, b) => (a.lastActivityAt < b.lastActivityAt ? 1 : a.lastActivityAt > b.lastActivityAt ? -1 : 0));
+  const sorted = usable(projects);
   return (focus && sorted.find((p) => p.providers.some((x) => x.provider === focus))) || sorted[0];
 }
 
