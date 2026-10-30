@@ -105,6 +105,12 @@ export interface SettingsPatch {
   suggest?: Partial<Record<ProviderId, boolean>>;
 }
 
+export interface Transcript {
+  messages: { role: 'user' | 'assistant'; text: string; at: string | null }[];
+  truncated: boolean;
+  unavailable: boolean;
+}
+
 export const api = {
   listChats: () => get<Chat[]>('/api/chats'),
   listMessages: (id: string) => get<Message[]>(`/api/chats/${enc(id)}/messages`),
@@ -123,6 +129,9 @@ export const api = {
   patchChat: (id: string, patch: ChatPatch) => request<Chat>('PATCH', `/api/chats/${enc(id)}`, patch),
   history: () => get<HistoryChat[]>('/api/history'),
   continueHistory: (body: { provider: ProviderId; sessionRef: string; text: string }) => post<Chat>('/api/history/continue', body),
+  /** Past messages of a history-only chat, read-only (#16). */
+  historyMessages: (provider: ProviderId, sessionRef: string) =>
+    get<Transcript>(`/api/history/${provider}/${encodeURIComponent(sessionRef)}/messages`),
   usage: () => get<UsageResponse>('/api/usage'),
   refreshUsage: () => post<UsageResponse>('/api/usage/refresh'),
   connections: () => get<ConnectionHealth[]>('/api/connections'),

@@ -10,6 +10,7 @@ import type { ConnectionHealth, HistoryChat, ModelOption, ProviderId, ServerEven
 import { ActiveElsewhereError, CantContinueError } from './chats.ts';
 import { ConnectBusyError, ConnectStateError } from './connect/service.ts';
 import { PickerBusyError } from './folder-picker.ts';
+import type { Transcript } from './history/transcript.ts';
 import type { ConnectService } from './connect/service.ts';
 import { SettingsError } from './settings.ts';
 import type { SettingsStore } from './settings.ts';
@@ -96,6 +97,8 @@ export function createApi(opts: {
   adapters?: { get(id: ProviderId): ProviderAdapter | undefined };
   connect?: Pick<ConnectService, 'states' | 'install' | 'signIn' | 'signOut' | 'update' | 'cancel' | 'openSignInPage'>;
   settings?: SettingsStore;
+  /** Past messages of a chat that is only in the provider's history (#16). */
+  transcript?: (provider: ProviderId, sessionRef: string) => Promise<Transcript>;
   /** New chat's "Browse…": shows the native folder picker (#24). */
   folderPicker?: { pick(): Promise<string | null> };
   /** Folder holding the built web app (default apps/web/dist). */
@@ -230,6 +233,12 @@ export function createApi(opts: {
     if ((m = match('POST', '/api/chats/:id/done'))) return { status: 200, body: chats.markDone(m[0]!) };
     if ((m = match('POST', '/api/chats/:id/undone'))) return { status: 200, body: chats.dragOutOfDone(m[0]!) };
     if ((m = match('POST', '/api/chats/:id/archive'))) return { status: 200, body: chats.archive(m[0]!) };
+    if ((m = match('GET', '/api/history/:provider/:ref/messages'))) {
+      const id = m[0] as ProviderId;
+      if (!PROVIDERS.includes(id)) throw new HttpError(400, 'Unknown provider. Use claude, codex or antigravity.');
+      if (!opts.transcript) throw new HttpError(404, 'Not found.');
+      return { status: 200, body: await opts.transcript(id, m[1]!) };
+    }
     if (match('GET', '/api/history')) return { status: 200, body: await visibleHistory() };
     if (match('POST', '/api/history/continue')) {
       const b = await readJson(req);

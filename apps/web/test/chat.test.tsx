@@ -13,12 +13,12 @@ import { Toasts } from '../src/ui/primitives/toast.tsx';
 import { Dialog } from '../src/ui/primitives/Dialog.tsx';
 import { chat, message } from './helpers.ts';
 
-const FNS = ['listMessages', 'listRequests', 'listToolCalls', 'send', 'answer', 'stop', 'done', 'archive', 'patchChat', 'continueHistory'] as const;
+const FNS = ['listMessages', 'listRequests', 'listToolCalls', 'send', 'answer', 'stop', 'done', 'archive', 'patchChat', 'continueHistory', 'historyMessages'] as const;
 type Fn = (typeof FNS)[number];
 
 vi.mock('../src/api/client.ts', async (orig) => {
   const m = await orig<typeof import('../src/api/client.ts')>();
-  const fns = Object.fromEntries(['listMessages', 'listRequests', 'listToolCalls', 'send', 'answer', 'stop', 'done', 'archive', 'patchChat', 'continueHistory'].map((k) => [k, vi.fn()]));
+  const fns = Object.fromEntries(['listMessages', 'listRequests', 'listToolCalls', 'send', 'answer', 'stop', 'done', 'archive', 'patchChat', 'continueHistory', 'historyMessages'].map((k) => [k, vi.fn()]));
   return { ...m, api: { ...m.api, ...fns } };
 });
 
@@ -49,6 +49,7 @@ function thread(messages: Message[] = [], requests: OpenRequest[] = [], calls: T
 
 beforeEach(() => {
   for (const k of FNS) mocked[k].mockReset();
+  mocked.historyMessages.mockResolvedValue({ messages: [], truncated: false, unavailable: true });
   thread();
 });
 afterEach(() => {
@@ -453,6 +454,33 @@ describe('Chat panel: actions menu', () => {
 
 describe('Chat panel: history-only chats', () => {
   const ref = { provider: 'claude' as const, sessionRef: 'hist-1', cwd: '/work/beta', title: 'Old idea' };
+
+  it("shows the chat's past messages read-only: user text plain, replies as markdown (#16)", async () => {
+    mocked.historyMessages.mockResolvedValue({ truncated: true, unavailable: false, messages: [
+      { role: 'user', text: 'Fix **the** bug', at: '2026-10-23T09:00:00.000Z' },
+      { role: 'assistant', text: 'Fixed in `login.ts`.', at: '2026-10-23T09:01:00.000Z' },
+    ] });
+    mount(seeded([]));
+    act(() => openHistoryChat(ref));
+    expect(within(panel()).getByText('Loading earlier messages…')).toBeTruthy();
+    await waitFor(() => expect(within(panel()).getByText('Fix **the** bug')).toBeTruthy());
+    expect(mocked.historyMessages).toHaveBeenCalledWith('claude', 'hist-1');
+    expect(panel().querySelector('.msg.agent code')?.textContent).toBe('login.ts');
+    expect(within(panel()).getByText('Showing the last 2 messages. The rest are in Claude Code.')).toBeTruthy();
+    expect(within(panel()).getByPlaceholderText('Continue this Claude Code chat')).toBeTruthy();
+  });
+
+  it("when the history can't be read (Antigravity, or an error) it says the messages are in the app", async () => {
+    mocked.historyMessages.mockResolvedValueOnce({ truncated: false, unavailable: true, messages: [] });
+    mount(seeded([]));
+    act(() => openHistoryChat({ ...ref, provider: 'antigravity' }));
+    await waitFor(() => expect(within(panel()).getByText('Earlier messages are in Antigravity. Send a message to carry on here.')).toBeTruthy());
+    cleanup();
+    mocked.historyMessages.mockRejectedValueOnce(new Error('boom'));
+    mount(seeded([]));
+    act(() => openHistoryChat({ ...ref, sessionRef: 'hist-2' }));
+    await waitFor(() => expect(within(panel()).getByText('Earlier messages are in Claude Code. Send a message to carry on here.')).toBeTruthy());
+  });
 
   it('opens with "Continue this Claude Code chat"; a 409 shows the server text and keeps the text', async () => {
     mocked.continueHistory.mockRejectedValue(new ApiError('This chat is active in Claude Code. Close it there first.', 409));

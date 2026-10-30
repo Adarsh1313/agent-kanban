@@ -17,6 +17,13 @@ async function indexRollouts(dir: string, map: Map<string, string>): Promise<voi
   }
 }
 
+/** The rollout file of one Codex thread, or null. */
+export async function findRollout(codexHome: string, id: string): Promise<string | null> {
+  const map = new Map<string, string>();
+  await indexRollouts(join(codexHome, 'sessions'), map);
+  return map.get(id) ?? null;
+}
+
 async function rolloutCwd(path: string): Promise<string> {
   try {
     const text = zstdDecompressSync(await readFile(path)).toString('utf8');

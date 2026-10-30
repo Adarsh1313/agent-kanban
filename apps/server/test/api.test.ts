@@ -383,3 +383,19 @@ test('POST /api/folders/pick returns the chosen folder (null when cancelled); a 
   const none = await setup();
   try { assert.equal((await none.f('/api/folders/pick', { method: 'POST' })).status, 404); } finally { none.close(); }
 });
+
+test('GET /api/history/:provider/:ref/messages returns the transcript; unknown provider 400; none wired 404 (#16)', async () => {
+  const asked: string[] = [];
+  const s = await setup({}, undefined, { transcript: async (p: string, ref: string) => { asked.push(`${p}:${ref}`); return { messages: [{ role: 'user', text: 'hi', at: null }], truncated: false, unavailable: false }; } });
+  try {
+    const r = await s.f('/api/history/claude/abc-123/messages');
+    assert.equal(r.status, 200);
+    assert.deepEqual((await r.json()).messages, [{ role: 'user', text: 'hi', at: null }]);
+    assert.equal((await s.f('/api/history/gemini/abc/messages')).status, 400);
+    assert.equal((await s.f('/api/history/claude/abc/messages', {}, null)).status, 401);
+    await s.f('/api/history/codex/..%2F..%2Fx/messages');
+    assert.deepEqual(asked, ['claude:abc-123', 'codex:../../x']); // the reader refuses path-like refs (transcript.test.ts)
+  } finally { s.close(); }
+  const none = await setup();
+  try { assert.equal((await none.f('/api/history/claude/abc/messages')).status, 404); } finally { none.close(); }
+});

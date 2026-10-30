@@ -7,7 +7,7 @@ import type { ProviderId, ServerEvent, UsageReading } from '@agent-kanban/shared
 import { Store } from './store.ts';
 import { ChatService } from './chats.ts';
 import { UsageService, notInstalledReading } from './usage/service.ts';
-import { readAllHistory } from './history/index.ts';
+import { readAllHistory, readTranscript } from './history/index.ts';
 import { ClaudeAdapter } from './adapters/claude.ts';
 import { CodexAdapter } from './adapters/codex.ts';
 import { AntigravityAdapter } from './adapters/antigravity.ts';
@@ -102,7 +102,8 @@ const connect = new ConnectService({
   home: akHome,
 });
 connectRef = connect;
-const api = createApi({ chats, usage, history: () => readAllHistory(home), token, connections, adapters, connect, settings, folderPicker: new FolderPicker() });
+const api = createApi({ chats, usage, history: () => readAllHistory(home), token, connections, adapters, connect, settings, folderPicker: new FolderPicker(),
+  transcript: (provider, sessionRef) => readTranscript(home, provider, sessionRef) });
 broadcast = api.broadcast;
 
 chats.recoverAfterRestart();
