@@ -1,7 +1,7 @@
 # Projects and chats redesign: decisions (input for the prototype and spec)
 
-Grilled 2026-10-30. Not a spec yet: next is `/prototype` (two sidebar + All chats variants), then `/to-spec` from this
-file into `docs/specs/projects-chats-redesign.md`. Terms are in `GLOSSARY.md`. Closes #11 when built.
+Grilled and prototyped 2026-10-30. Not a spec yet: next is `/to-spec` from this file into
+`docs/specs/projects-chats-redesign.md`. Terms are in `GLOSSARY.md`. Closes #11 when built.
 
 ## Why
 
@@ -36,8 +36,18 @@ recency-ordered list, projects as labels or groups, noise collapsed or hidden ra
 9. **Folder missing:** a project whose folder no longer exists stays on the Projects page with a "Folder missing" note,
    its chats readable; it is left out of the New chat picker.
 
-## Open for the prototype
+## Prototype verdict (2026-10-30): variant A, "Compact"
 
-- Row density and what the project label looks like in Recent chats.
-- All chats: list vs table, where the project/provider filters sit (reuse the Linear-style filter menu?).
-- How "Older" reads in the picker.
+Prototype: branch `prototype/projects-chats-redesign` (commit `d4b6a34`), file
+`design/prototype-projects-chats.html?v=a|b|c`; variants B and C rejected.
+
+10. **Recent chats rows:** one line, 30px: provider logo, title, running/needs mark, then the project name muted and
+    right-aligned (max ~40% of the row, truncated). On hover the project name is replaced by the date.
+11. **All chats:** a plain list (not a table): status, provider logo, title, project glyph + name, date. Search box
+    with a **Filter** button beside it that opens the existing Linear-style filter menu (Project, Provider); active
+    filters show as chips below. Search matches title and project and highlights the hit.
+12. **Older in the New chat picker:** projects by recency, then a single **Older (n)** row at the end that unfolds in
+    place, older projects dimmed. Typing in the search opens it. The Project filter menu lists older projects under an
+    "Older · no activity in 30 days" label.
+
+Watch at narrow widths: the sidebar title gets short once the project name takes its share.
