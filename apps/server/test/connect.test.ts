@@ -7,7 +7,7 @@ import type { AddressInfo } from 'node:net';
 import type { ConnectionHealth, ConnectState, ProviderId } from '@agent-kanban/shared';
 import {
   ConnectService, ConnectBusyError, SIGN_IN_TIMEOUT_MS, POLL_MS, SIGN_IN_DIDNT_FINISH, NETWORK_FAILED,
-  ANTIGRAVITY_SIGN_OUT_IN_APP, findHttpsUrl, STEP_SIGN_IN, STEP_STARTING_ANTIGRAVITY, ANTIGRAVITY_DIDNT_START, ANTIGRAVITY_START_TIMEOUT_MS, SIGN_IN_HOSTS, NPM_TIMEOUT_MS, RECYCLE_RETRY_MS, npmFailureMessage,
+  ANTIGRAVITY_SIGN_OUT_IN_APP, findHttpsUrl, STEP_SIGN_IN, STEP_STARTING_ANTIGRAVITY, STEP_OPENING_BROWSER, ANTIGRAVITY_DIDNT_START, ANTIGRAVITY_START_TIMEOUT_MS, SIGN_IN_HOSTS, NPM_TIMEOUT_MS, RECYCLE_RETRY_MS, npmFailureMessage,
 } from '../src/connect/service.ts';
 import type { AntigravityAuth, UpdatableAdapter } from '../src/connect/service.ts';
 import type { CommandExit, CommandRunner, RunningCommand } from '../src/connect/run.ts';
@@ -348,7 +348,7 @@ test('sign out: `claude auth logout` / `codex logout`', async () => {
 
 // ---- Antigravity ----
 
-function fakeAdapter(o: { url?: string; signedOut?: boolean; hang?: boolean; slowStart?: Promise<void> } = {}) {
+function fakeAdapter(o: { url?: string; signedOut?: boolean; hang?: boolean; slowStart?: Promise<void>; linkLater?: Promise<void> } = {}) {
   const calls = { signIn: 0, signOut: 0, aborted: false };
   const adapter: AntigravityAuth = {
     signIn: (onUrl, signal, onStarted) => {
@@ -358,7 +358,7 @@ function fakeAdapter(o: { url?: string; signedOut?: boolean; hang?: boolean; slo
         void (o.slowStart ?? Promise.resolve()).then(() => {
           if (signal.aborted) return;
           onStarted?.();
-          if (o.url) onUrl(o.url);
+          if (o.url) void (o.linkLater ?? Promise.resolve()).then(() => { if (!signal.aborted) onUrl(o.url!); });
           if (!o.hang) resolve();
         });
       });
@@ -943,4 +943,20 @@ test('the check after an operation is always published, even when only checkedAt
   assert.equal(published[0]!.checkedAt, '2026-10-22T10:05:00.000Z');
   assert.ok(Date.parse(published[0]!.checkedAt) > Date.parse(svc.get('codex').updatedAt), 'newer than the operation');
   assert.equal(svc.get('codex').outcome, 'done');
+});
+
+test('Antigravity sign-in: after the agent starts it says "Opening your browser…" until the link is printed (#13)', async () => {
+  let link!: () => void;
+  const { adapter } = fakeAdapter({ url: GOOGLE, hang: true, linkLater: new Promise<void>((r) => { link = r; }) });
+  const c = make({ script: () => ({}), adapter });
+  c.svc.signIn('antigravity');
+  await flush();
+  assert.equal(c.last('antigravity').step, STEP_OPENING_BROWSER);
+  assert.equal(c.last('antigravity').signInUrl, null);
+  link();
+  await flush();
+  assert.equal(c.last('antigravity').step, STEP_SIGN_IN);
+  assert.equal(c.last('antigravity').signInUrl, GOOGLE);
+  c.svc.cancel('antigravity');
+  await flush();
 });

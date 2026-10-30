@@ -28,6 +28,8 @@ export const NETWORK_FAILED = "Couldn't reach the download server. Check your co
 export const ANTIGRAVITY_SIGN_OUT_IN_APP = 'Sign out of Antigravity in the Antigravity app.';
 export const STEP_SIGN_IN = 'Finish signing in in your browser';
 export const STEP_STARTING_ANTIGRAVITY = 'Starting Antigravity…';
+/** Antigravity has started and is about to open the browser; its link is not printed yet (#13). */
+export const STEP_OPENING_BROWSER = 'Opening your browser…';
 export const ANTIGRAVITY_DIDNT_START = "Antigravity didn't start. Try again.";
 // A cold Antigravity start was measured at up to 111 s before it answers; give it 180 s before giving up.
 export const ANTIGRAVITY_START_TIMEOUT_MS = 180_000;
@@ -474,10 +476,14 @@ export class ConnectService {
     this.set(id, { step: STEP_STARTING_ANTIGRAVITY });
     const startLimit = setTimeout(() => op.ac.abort(new StartTimedOut('Antigravity did not start.')), ANTIGRAVITY_START_TIMEOUT_MS);
     let deadline: NodeJS.Timeout | undefined;
-    const signingIn = () => {
-      if (deadline || signal.aborted || this.ops.get(id) !== op) return;
+    let linked = false;
+    const signingIn = (hasLink: boolean) => {
+      if (signal.aborted || this.ops.get(id) !== op) return;
+      // Started but no link yet: "Opening your browser…"; once the link is printed, the browser is open: "Finish signing in".
+      if (hasLink && !linked) { linked = true; this.set(id, { step: STEP_SIGN_IN }); }
+      if (deadline) return;
       clearTimeout(startLimit);
-      this.set(id, { step: STEP_SIGN_IN });
+      if (!linked) this.set(id, { step: STEP_OPENING_BROWSER });
       // The agent's own authenticate waits up to a day; Agent Kanban gives up 5 minutes after the sign-in began (abort stops the agent).
       deadline = setTimeout(() => op.ac.abort(new TimedOut('Sign-in timed out.')), SIGN_IN_TIMEOUT_MS);
     };
@@ -488,10 +494,10 @@ export class ConnectService {
     try {
       // The agent opens the browser itself; the link is kept only for "Open the browser again".
       await adapter.signIn((url) => {
-        signingIn();
+        signingIn(true);
         const href = findHttpsUrl(url, SIGN_IN_HOSTS.antigravity);
         if (href && !signal.aborted && this.ops.get(id) === op) this.set(id, { signInUrl: href });
-      }, signal, signingIn);
+      }, signal, () => signingIn(false));
       if (signal.aborted) return aborted();
       this.finish(id, op, { phase: 'idle' });
     } catch (e) {

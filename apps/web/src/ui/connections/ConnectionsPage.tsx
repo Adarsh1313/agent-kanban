@@ -392,7 +392,7 @@ function ConnectionCard({ id }: { id: ProviderId }) {
       body = antigravityStarting(id, connect) ? (
         <>
           <span className="step-text"><StatusIcon state="running" />{connect?.step ?? 'Starting Antigravity…'}</span>
-          <span>{ANTIGRAVITY_SLOW}</span>
+          {(connect?.step ?? 'Starting Antigravity…') === 'Starting Antigravity…' && <span>{ANTIGRAVITY_SLOW}</span>}
         </>
       ) : (
         <>
