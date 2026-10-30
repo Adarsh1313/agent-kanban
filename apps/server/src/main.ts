@@ -14,7 +14,8 @@ import { AntigravityAdapter } from './adapters/antigravity.ts';
 import { findInstalledAntigravity, installAntigravity } from './connect/antigravity-install.ts';
 import { ConnectService } from './connect/service.ts';
 import { spawnCommand } from './connect/run.ts';
-import { openBrowser } from './connect/open-browser.ts';
+import { openBrowser, openLocalApp } from './connect/open-browser.ts';
+import { STOP_REQUEST_FILE, watchStopRequest } from './stop-request.ts';
 import { SettingsStore } from './settings.ts';
 import { AdapterRegistry } from './adapters/registry.ts';
 import { findBinary } from './binaries.ts';
@@ -127,6 +128,10 @@ try {
 api.server.on('error', (err) => console.error('Server error:', err));
 const addr = api.server.address() as AddressInfo;
 console.log(`Agent Kanban server: http://127.0.0.1:${addr.port}/?token=${token}`);
+// The desktop launcher (scripts/desktop/start.mjs) asks for the page to open: the token goes straight to the browser.
+if (process.env.AGENT_KANBAN_OPEN_BROWSER === '1') {
+  try { openLocalApp(`http://127.0.0.1:${addr.port}/?token=${token}`); } catch (e) { console.error("Couldn't open the browser:", (e as Error).message); }
+}
 usage.start();
 connections.start();
 
@@ -143,9 +148,12 @@ async function shutdown(): Promise<void> {
   const dispose = adapters.dispose();
   await Promise.race([Promise.all([dispose, connectDone]), new Promise((r) => setTimeout(r, 10_000))]);
   api.server.closeAllConnections();
+  console.log('Agent Kanban stopped.');
   process.exit(0);
 }
 for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGBREAK'] as const) process.on(sig, () => void shutdown());
+// The desktop "Stop Agent Kanban" shortcut drops a stop.request file in the data folder.
+watchStopRequest(join(dataDir, STOP_REQUEST_FILE), () => void shutdown());
 // Test harnesses (scripts/e2e-real.ts) stop the server by closing its stdin: a graceful shutdown on every platform.
 if (process.env.AGENT_KANBAN_E2E === '1') {
   process.stdin.on('end', () => void shutdown());

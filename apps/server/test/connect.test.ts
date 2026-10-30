@@ -15,7 +15,7 @@ import { commandTarget, spawnCommand } from '../src/connect/run.ts';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { openBrowser, ONLY_HTTPS } from '../src/connect/open-browser.ts';
+import { openBrowser, openLocalApp, ONLY_HTTPS, ONLY_LOCAL_APP } from '../src/connect/open-browser.ts';
 import { DOWNLOAD_FAILED } from '../src/connect/antigravity-install.ts';
 import type { InstallOptions } from '../src/connect/antigravity-install.ts';
 import { createApi } from '../src/api.ts';
@@ -497,6 +497,18 @@ test('openBrowser: https only, never through a shell, the link is one argument',
     const s = spyOn();
     assert.throws(() => openBrowser(bad, { platform: 'win32', spawn: s.spawn }), new RegExp(ONLY_HTTPS));
     assert.equal(s.calls.length, 0);
+  }
+});
+
+test('openLocalApp: only http://127.0.0.1:<port>, never through a shell', () => {
+  const url = 'http://127.0.0.1:3006/?token=abc123';
+  const s = spyOn();
+  openLocalApp(url, { platform: 'win32', spawn: s.spawn });
+  assert.deepEqual(s.calls.map((c) => [c.cmd, c.args, c.opts.shell]), [['rundll32.exe', ['url.dll,FileProtocolHandler', url], false]]);
+  for (const bad of ['https://127.0.0.1:3006/', 'http://localhost:3006/', 'http://127.0.0.1/', 'http://evil.com:3006/', 'http://u:p@127.0.0.1:3006/', 'nope']) {
+    const b = spyOn();
+    assert.throws(() => openLocalApp(bad, { platform: 'win32', spawn: b.spawn }), new RegExp(ONLY_LOCAL_APP));
+    assert.equal(b.calls.length, 0);
   }
 });
 

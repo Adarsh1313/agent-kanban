@@ -19,6 +19,15 @@ connection is healthy and up to date.
 
 Requires Node 22.18+. Claude Code, Codex and Antigravity can be installed and signed in from the app (Connections page or onboarding).
 
+Everyday use on Windows: run `npm install` once, then `npm run desktop:install` once. That puts two shortcuts on your desktop:
+
+- **Agent Kanban** builds the app, starts it on port 3006 and opens it in your browser. Keep its (minimised) window open while you use it.
+- **Stop Agent Kanban** shuts it down cleanly. Closing the window or pressing Ctrl+C in it does the same.
+
+`npm run desktop` and `npm run desktop:stop` do the same from a terminal on any OS.
+
+Development:
+
 ```bash
 npm install
 npm test

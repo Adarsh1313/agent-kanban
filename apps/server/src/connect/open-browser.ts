@@ -16,6 +16,27 @@ export function openBrowser(
   if (u.protocol !== 'https:' || u.username || u.password || !u.hostname) throw new Error(ONLY_HTTPS);
   const href = u.href;
   if (!/^[!-~]+$/.test(href)) throw new Error(ONLY_HTTPS);
+  launch(href, opts);
+}
+
+export const ONLY_LOCAL_APP = 'Only Agent Kanban’s own local page can be opened.';
+
+/**
+ * Opens Agent Kanban's own page (http://127.0.0.1:<port>/…) in the default browser, the same shell-free way.
+ * Used by the desktop launcher, so the session token goes straight to the browser and is never written to a file.
+ */
+export function openLocalApp(
+  url: string,
+  opts: { platform?: NodeJS.Platform; spawn?: typeof nodeSpawn } = {},
+): void {
+  let u: URL;
+  try { u = new URL(url); } catch { throw new Error(ONLY_LOCAL_APP); }
+  if (u.protocol !== 'http:' || u.hostname !== '127.0.0.1' || !u.port || u.username || u.password) throw new Error(ONLY_LOCAL_APP);
+  if (!/^[!-~]+$/.test(u.href)) throw new Error(ONLY_LOCAL_APP);
+  launch(u.href, opts);
+}
+
+function launch(href: string, opts: { platform?: NodeJS.Platform; spawn?: typeof nodeSpawn }): void {
   const platform = opts.platform ?? process.platform;
   const [command, args] = platform === 'win32'
     ? ['rundll32.exe', ['url.dll,FileProtocolHandler', href]]
