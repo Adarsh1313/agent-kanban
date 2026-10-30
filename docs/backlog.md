@@ -34,18 +34,22 @@ Note: `design/` has `design-brief.md` + `tokens.css` but no `DESIGN.md`. If the 
 - #21: update failure. Need the message the app showed; both updates worked when run directly.
 - #11: temp test folders as projects. Hide by default, or clean up?
 
-**Next, P3:**
-- #13: Antigravity sign-in polish
-- #14: Antigravity update while busy / old versions
-- #16: past messages for imported chats
-- #17: notifications id, burst cap, archive animation
-- #19: small edge cases
-- #18: hosted web (decide after the desktop app)
+**P3 (2026-10-30, branch `fix/p1-issues`):**
+- **Done:**
+  - #13: "Opening your browser…" step; start-failure copy in the design.
+  - #16: past messages for Claude and Codex history chats.
+  - #19: lock path in the "already running" message; NaN guard.
+- **Left:**
+  - #16 paging: only the last 200 messages are shown; Antigravity history isn't readable.
+  - #19 remaining items.
+  - #17: the archive animation belongs to the motion skills; the rest works as is.
+  - #14: can't happen until the Antigravity pin moves.
+  - #18: decide after the desktop app.
 
 ## Done, waiting to be merged
 
 - Branch `fix/chat-layout-and-launcher`: #3 and the launcher.
 - Branch `feat/any-provider-folders`: built on it, adds #22, #23, #24.
-- Branch `fix/p1-issues`: built on that, adds #5 #8 #12 #4 #6 #9 #10 #7. Merging this one brings in all three.
+- Branch `fix/p1-issues`: built on that, adds #5 #8 #12 #4 #6 #9 #10 #7, then #13 #16 #19. Merging this one brings in all three.
 
 Close those issues when they're merged.
