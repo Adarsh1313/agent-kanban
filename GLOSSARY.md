@@ -18,6 +18,26 @@ _Avoid_: Session, thread, task
 A folder on the user's computer that chats run in.
 _Avoid_: Repo, workspace
 
+**Recent chats**:
+The sidebar's list of the most recently active chats, newest first, each labelled with its project.
+_Avoid_: History, threads
+
+**All chats**:
+The view listing every chat, on the board or only in a provider's history, searchable and filterable.
+_Avoid_: Chat list, archive
+
+**Hidden project**:
+A project kept out of the sidebar, the board and New chat; one of the user's choosing or a folder in the computer's temp folder.
+_Avoid_: Archived project, filtered project
+
+**Claude scratch chats**:
+The quick chats the Claude app starts without a folder, shown together as one project.
+_Avoid_: Scratch workspaces, temp chats
+
+**Folder missing**:
+A project whose folder was moved or deleted: its chats can be read but no new chat can start there.
+_Avoid_: Broken project, stale project
+
 ### Running the app
 
 **Desktop app**:

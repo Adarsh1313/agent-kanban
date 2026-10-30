@@ -23,6 +23,10 @@ Research: `docs/research/2026-10-23-enjoy-competitor-analysis.md`. Features go t
 
 Left out: routines, project docs, live preview, cloud/remote, more providers, plan advice. Pricing: not now, revisit when the repo goes public.
 
+## 1b. Projects and chats redesign (closes #11)
+
+Grilled 2026-10-30: `docs/specs/projects-chats-redesign-decisions.md`. Next, in a new session: `/prototype` the sidebar + All chats view, then `/to-spec`.
+
 ## 2. Issues by severity (labels P1 → P3)
 
 **Fixed on branch `fix/p1-issues` (2026-10-30):** #5, #8, #12, #4 (all of P1), #6, #9, #10, #7.
