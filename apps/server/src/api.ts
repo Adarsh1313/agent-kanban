@@ -1,9 +1,10 @@
 import http from 'node:http';
 import { statusPageHtml } from './status-page.ts';
 import { DEFAULT_DIST, readStatic, shellFile, staticFile } from './static.ts';
-import { buildProjects, projectInfo } from './projects.ts';
+import { buildProjects, projectInfo, type ProjectRules } from './projects.ts';
 import type { ProviderAdapter } from './adapters/adapter.ts';
-import { statSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { timingSafeEqual } from 'node:crypto';
 import { WebSocketServer, WebSocket } from 'ws';
 import type { ConnectionHealth, HistoryChat, ModelOption, ProviderId, ServerEvent } from '@agent-kanban/shared';
@@ -141,6 +142,8 @@ export function createApi(opts: {
     return settings ? settings.filterHistory(all) : all;
   };
 
+  const projectRules = (): ProjectRules => ({ tempDir: tmpdir(), hidden: settings?.get().hiddenProjects ?? [], exists: existsSync });
+
   // A provider's model list rarely changes: a non-empty answer is reused for 5 minutes (an empty one is asked again).
   const modelCache = new Map<ProviderId, { at: number; models: ModelOption[] }>();
   async function models(): Promise<Record<ProviderId, ModelOption[]>> {
@@ -195,11 +198,11 @@ export function createApi(opts: {
       }
       return { status: 200, body: chats.patch(m[0]!, patch) };
     }
-    if (match('GET', '/api/projects')) return { status: 200, body: buildProjects(chats.listChats(), await visibleHistory()) };
+    if (match('GET', '/api/projects')) return { status: 200, body: buildProjects(chats.listChats(), await visibleHistory(), projectRules()) };
     if (match('GET', '/api/projects/info')) {
       const path = url.searchParams.get('path');
       const key = path ? folderKey(path) : '';
-      const known = key ? buildProjects(chats.listChats(), await visibleHistory()).find((p) => folderKey(p.id) === key) : undefined;
+      const known = key ? buildProjects(chats.listChats(), await visibleHistory(), projectRules()).find((p) => folderKey(p.id) === key) : undefined;
       if (!known) throw new HttpError(404, 'Not found.');
       return { status: 200, body: await projectInfo(known.path) };
     }
@@ -270,7 +273,7 @@ export function createApi(opts: {
       const path = typeof b?.path === 'string' ? b.path : '';
       if (!path) throw new HttpError(400, 'Say which folder to open.');
       // Only folders the board already knows: the page can't make us open anything else.
-      const known = buildProjects(chats.listChats(), await visibleHistory()).find((p) => folderKey(p.path) === folderKey(path));
+      const known = buildProjects(chats.listChats(), await visibleHistory(), projectRules()).find((p) => folderKey(p.path) === folderKey(path));
       if (!known) throw new HttpError(403, "That folder isn't one of your projects.");
       let isDir = false;
       try { isDir = statSync(known.path).isDirectory(); } catch { /* moved or deleted */ }

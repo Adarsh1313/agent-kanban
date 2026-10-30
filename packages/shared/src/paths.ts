@@ -9,3 +9,18 @@ export function folderKey(path: string): string {
   const t = raw.replace(/[\\/]+$/, '') || raw;
   return /^[a-z]:/i.test(t) || t.startsWith('\\\\') ? t.replace(/\//g, '\\').toLowerCase() : t;
 }
+
+/** The one project the Claude app's folder-less chats are grouped into. */
+export const CLAUDE_SCRATCH_NAME = 'Claude scratch chats';
+
+/**
+ * The Claude app's `scratch-workspaces` folder when `path` is one of its scratch chat folders
+ * (`…/Claude/scratch-workspaces/<id>/scratch-*`), else null.
+ */
+export function claudeScratchRoot(path: string): string | null {
+  const m = /^(.*[\\/]claude[\\/]scratch-workspaces)[\\/]/i.exec(path.trim());
+  return m ? m[1]! : null;
+}
+
+/** The folder of the project a chat belongs to: its own folder, or the scratch root for Claude scratch chats. */
+export const projectFolder = (cwd: string): string => claudeScratchRoot(cwd) ?? cwd;

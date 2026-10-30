@@ -22,7 +22,7 @@ const ago = (min: number) => new Date(NOW - min * 60_000).toISOString();
 const project = (id: string, providers: ProviderId[], lastActivityAt = ago(60)): Project => ({
   id, name: id.split(/[\\/]/).pop()!, path: id,
   providers: providers.map((provider) => ({ provider, chats: 1, lastUsedAt: lastActivityAt, lastModel: null })),
-  columns: { running: 0, needs_you: 0, review: 0, done: 0 }, historyOnly: 0, lastActivityAt,
+  columns: { running: 0, needs_you: 0, review: 0, done: 0 }, historyOnly: 0, lastActivityAt, hidden: null, folderMissing: false,
 });
 const hist = (over: Partial<HistoryChat> = {}): HistoryChat => ({ provider: 'codex', sessionRef: 'h1', title: 'Old idea', cwd: '/work/beta', updatedAt: ago(3000), ...over });
 

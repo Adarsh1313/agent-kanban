@@ -30,7 +30,7 @@ const hist = (provider: ProviderId, n: number): HistoryChat[] =>
   Array.from({ length: n }, (_, i) => ({ provider, sessionRef: `${provider}-${i}`, title: 't', cwd: '/w', updatedAt: ago(100) }));
 
 const ON = { claude: true, codex: true, antigravity: true };
-const SETTINGS: Settings = { onboarded: true, showChats: ON, suggest: ON };
+const SETTINGS: Settings = { onboarded: true, showChats: ON, suggest: ON, hiddenProjects: [] };
 const cs = (provider: ProviderId, over: Partial<ConnectState> = {}): ConnectState => ({
   provider, phase: 'idle', step: null, progress: null, signInUrl: null, message: null, lastOp: null, outcome: null, updatedAt: ago(0), ...over,
 });

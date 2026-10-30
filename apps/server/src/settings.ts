@@ -14,7 +14,7 @@ export class SettingsError extends Error {}
 const allOn = (): Record<ProviderId, boolean> => ({ claude: true, codex: true, antigravity: true });
 
 export function defaultSettings(): Settings {
-  return { onboarded: false, showChats: allOn(), suggest: allOn() };
+  return { onboarded: false, showChats: allOn(), suggest: allOn(), hiddenProjects: [] };
 }
 
 function readJson(backend: SettingsBackend, key: string): unknown {
@@ -35,7 +35,12 @@ function readFlags(v: unknown): Record<ProviderId, boolean> {
   return out;
 }
 
-/** Agent Kanban's own preferences (onboarding done, which providers' chats to show and suggest), kept in the store. */
+/** Stored folder list: anything that isn't a non-empty string is dropped. */
+function readPaths(v: unknown): string[] {
+  return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && x.trim() !== '') : [];
+}
+
+/** Agent Kanban's own preferences (onboarding done, which providers' chats to show and suggest, hidden projects), kept in the store. */
 export class SettingsStore {
   private backend: SettingsBackend;
 
@@ -47,6 +52,7 @@ export class SettingsStore {
       onboarded: typeof onboarded === 'boolean' ? onboarded : false,
       showChats: readFlags(readJson(this.backend, 'showChats')),
       suggest: readFlags(readJson(this.backend, 'suggest')),
+      hiddenProjects: readPaths(readJson(this.backend, 'hiddenProjects')),
     };
   }
 
@@ -67,6 +73,9 @@ export class SettingsStore {
           if (typeof flag !== 'boolean') throw new SettingsError(`"${key}.${id}" must be true or false.`);
           next[key][id as ProviderId] = flag;
         }
+      } else if (key === 'hiddenProjects') {
+        if (!Array.isArray(value) || !value.every((x) => typeof x === 'string' && x.trim() !== '')) throw new SettingsError('"hiddenProjects" must be a list of folders.');
+        next.hiddenProjects = value as string[];
       } else {
         throw new SettingsError(`You can't change "${key}".`);
       }
@@ -74,6 +83,7 @@ export class SettingsStore {
     this.backend.setSetting('onboarded', JSON.stringify(next.onboarded));
     this.backend.setSetting('showChats', JSON.stringify(next.showChats));
     this.backend.setSetting('suggest', JSON.stringify(next.suggest));
+    this.backend.setSetting('hiddenProjects', JSON.stringify(next.hiddenProjects));
     return next;
   }
 

@@ -227,6 +227,7 @@ function fromChats(chats: ProjectChat[]): Project | undefined {
   return {
     id: first.cwd, name: baseName(first.cwd), path: first.cwd, providers: [],
     columns: { running: 0, needs_you: 0, review: 0, done: 0 }, historyOnly: 0, lastActivityAt: chats.reduce((a, c) => (c.updatedAt > a ? c.updatedAt : a), ''),
+    hidden: null, folderMissing: false,
   };
 }
 

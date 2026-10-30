@@ -197,7 +197,7 @@ describe('refetchGaps (fix round 2)', () => {
 });
 
 describe('stale projects and history (final review)', () => {
-  const project = (id: string) => ({ id, name: id, path: id, providers: [], columns: { running: 0, needs_you: 0, review: 0, done: 0 }, historyOnly: 0, lastActivityAt: '' });
+  const project = (id: string) => ({ id, name: id, path: id, providers: [], columns: { running: 0, needs_you: 0, review: 0, done: 0 }, historyOnly: 0, lastActivityAt: '', hidden: null, folderMissing: false });
 
   it('a chat in a folder the store has no project for refetches projects once (debounced, one in flight)', async () => {
     vi.useFakeTimers();

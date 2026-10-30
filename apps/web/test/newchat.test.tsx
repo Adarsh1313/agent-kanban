@@ -25,7 +25,7 @@ const conn = (provider: ProviderId, status: ConnectionHealth['status'] = 'connec
 const project = (id: string, providers: ProviderId[], lastActivityAt = '2026-10-23T10:00:00.000Z'): Project => ({
   id, name: id.split('/').pop()!, path: id,
   providers: providers.map((provider) => ({ provider, chats: 1, lastUsedAt: lastActivityAt, lastModel: null })),
-  columns: { running: 0, needs_you: 0, review: 0, done: 0 }, historyOnly: 0, lastActivityAt,
+  columns: { running: 0, needs_you: 0, review: 0, done: 0 }, historyOnly: 0, lastActivityAt, hidden: null, folderMissing: false,
 });
 const reading = (provider: ProviderId, five: number, week: number): UsageReading => ({
   provider, status: 'ok', readAt: '2026-10-23T11:00:00.000Z',

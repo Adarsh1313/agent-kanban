@@ -2,21 +2,45 @@ import { execFile } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Chat, Column, HistoryChat, Project, ProjectInfo, ProviderId } from '@agent-kanban/shared';
-import { folderKey } from '@agent-kanban/shared';
+import { CLAUDE_SCRATCH_NAME, claudeScratchRoot, folderKey } from '@agent-kanban/shared';
 
 const COLUMNS: Column[] = ['running', 'needs_you', 'review', 'done'];
 
 /** Last folder name of a path written with either separator (history can hold Windows paths on any OS). */
 const folderName = (p: string) => p.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || p;
 
+/** True when `path` is `folder` or inside it, however either is spelled. */
+function isInside(path: string, folder: string): boolean {
+  const k = folderKey(path), f = folderKey(folder);
+  if (!f) return false;
+  return k === f || k.startsWith(f + (f.includes('\\') ? '\\' : '/'));
+}
+
+/** What decides a project's visibility; the API passes the real ones, tests may leave them out. */
+export interface ProjectRules {
+  /** The computer's temp folder: projects inside it (our test runs, scratchpads) are hidden automatically. */
+  tempDir?: string;
+  /** Folders the user hid by hand. */
+  hidden?: string[];
+  /** Whether a folder is still on disk (left out: every folder counts as there). */
+  exists?: (path: string) => boolean;
+}
+
 /** Group chats on the board and history-only chats by folder. Newest activity first. */
-export function buildProjects(chats: Chat[], history: HistoryChat[]): Project[] {
+export function buildProjects(chats: Chat[], history: HistoryChat[], rules: ProjectRules = {}): Project[] {
   const map = new Map<string, Project & { models: Map<ProviderId, { at: string; model: string }> }>();
-  const get = (cwd: string) => {
+  const manual = new Set((rules.hidden ?? []).map(folderKey));
+  const hiddenFor = (cwd: string): Project['hidden'] =>
+    rules.tempDir && isInside(cwd, rules.tempDir) ? 'auto' : manual.has(folderKey(cwd)) ? 'manual' : null;
+  const get = (chatCwd: string) => {
+    // The Claude app's scratch chats each have their own folder; they are one project, named for what they are.
+    const scratch = claudeScratchRoot(chatCwd);
+    const cwd = scratch ?? chatCwd;
     const k = folderKey(cwd);
     let p = map.get(k);
     if (!p) {
-      p = { id: cwd, name: folderName(cwd), path: cwd, providers: [], columns: { running: 0, needs_you: 0, review: 0, done: 0 }, historyOnly: 0, lastActivityAt: '', models: new Map() };
+      const folderMissing = !scratch && rules.exists ? !rules.exists(cwd) : false;
+      p = { id: cwd, name: scratch ? CLAUDE_SCRATCH_NAME : folderName(cwd), path: cwd, providers: [], columns: { running: 0, needs_you: 0, review: 0, done: 0 }, historyOnly: 0, lastActivityAt: '', hidden: hiddenFor(cwd), folderMissing, models: new Map() };
       map.set(k, p);
     }
     return p;

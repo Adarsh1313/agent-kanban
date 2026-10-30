@@ -291,7 +291,7 @@ describe('Shell: routes', () => {
   it('#/projects/<path>: the top bar says just "Projects"; the page\'s own breadcrumb and title name the project', async () => {
     const path = 'C:\\Users\\me\\open-project';
     const base = seeded().getState();
-    const store = createStore({ ...base, projects: [{ id: path, name: 'open-project', path, providers: [], columns: { running: 0, needs_you: 0, review: 0, done: 0 }, historyOnly: 0, lastActivityAt: '' }] });
+    const store = createStore({ ...base, projects: [{ id: path, name: 'open-project', path, providers: [], columns: { running: 0, needs_you: 0, review: 0, done: 0 }, historyOnly: 0, lastActivityAt: '', hidden: null, folderMissing: false }] });
     mount(store, <Shell />);
     act(() => { location.hash = `#/projects/${encodeURIComponent(path)}`; });
     await waitFor(() => expect(screen.getByRole('heading', { level: 2, name: 'open-project' }).textContent).toContain('open-project'));

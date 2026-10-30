@@ -122,6 +122,8 @@ export interface Settings {
   showChats: Record<ProviderId, boolean>;
   /** Consider this provider for the "Most room" suggestion. */
   suggest: Record<ProviderId, boolean>;
+  /** Folders the user hid with "Hide project" (projects under the temp folder are hidden without being listed). */
+  hiddenProjects: string[];
 }
 
 export interface Project {
@@ -133,6 +135,10 @@ export interface Project {
   columns: Record<Column, number>;
   historyOnly: number;
   lastActivityAt: string;
+  /** Kept out of the sidebar, board and New chat: 'auto' for a folder under the temp folder, 'manual' when the user hid it. */
+  hidden: 'auto' | 'manual' | null;
+  /** The folder was moved or deleted: its chats can be read, but no new chat can start there. */
+  folderMissing: boolean;
 }
 
 export interface ProjectInfo {
@@ -145,5 +151,5 @@ export interface ProjectInfo {
 export interface ModelOption { id: string; label: string; isDefault: boolean }
 
 export { suggest } from './usage.ts';
-export { folderKey } from './paths.ts';
+export { folderKey, claudeScratchRoot, projectFolder, CLAUDE_SCRATCH_NAME } from './paths.ts';
 export type { ServerToDesktop, DesktopToServer, DesktopStatus, DesktopBridge } from './desktop.ts';
