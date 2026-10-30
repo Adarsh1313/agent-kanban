@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process';
 
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 const runs = [
-  [process.execPath, ['--test', '--disable-warning=ExperimentalWarning', 'apps/server/test/**/*.test.ts']],
+  [process.execPath, ['--test', '--disable-warning=ExperimentalWarning', 'apps/server/test/**/*.test.ts', 'apps/desktop/test/**/*.test.ts']],
   [npm, ['test', '-w', 'apps/web']],
 ];
 
