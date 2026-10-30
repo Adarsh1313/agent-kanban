@@ -119,6 +119,8 @@ export const api = {
   startChat: (body: { provider: ProviderId; cwd: string; prompt: string; model?: string }) => post<Chat>('/api/chats', body),
   /** Shows the computer's own folder picker; null when it was cancelled (#24). */
   pickFolder: () => post<{ path: string | null }>('/api/folders/pick'),
+  /** Shows a project folder in the computer's file manager (#15). */
+  openFolder: (path: string) => post<void>('/api/folders/open', { path }),
   send: (id: string, text: string) => post<void>(`/api/chats/${enc(id)}/messages`, { text }),
   answer: (id: string, requestId: string, decision: AnswerDecision) =>
     post<void>(`/api/chats/${enc(id)}/requests/${enc(requestId)}`, { decision }),

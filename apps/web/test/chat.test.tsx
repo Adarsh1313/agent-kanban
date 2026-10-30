@@ -13,12 +13,12 @@ import { Toasts } from '../src/ui/primitives/toast.tsx';
 import { Dialog } from '../src/ui/primitives/Dialog.tsx';
 import { chat, message } from './helpers.ts';
 
-const FNS = ['listMessages', 'listRequests', 'listToolCalls', 'send', 'answer', 'stop', 'done', 'archive', 'patchChat', 'continueHistory', 'historyMessages'] as const;
+const FNS = ['listMessages', 'listRequests', 'listToolCalls', 'send', 'answer', 'stop', 'done', 'archive', 'patchChat', 'continueHistory', 'historyMessages', 'openFolder'] as const;
 type Fn = (typeof FNS)[number];
 
 vi.mock('../src/api/client.ts', async (orig) => {
   const m = await orig<typeof import('../src/api/client.ts')>();
-  const fns = Object.fromEntries(['listMessages', 'listRequests', 'listToolCalls', 'send', 'answer', 'stop', 'done', 'archive', 'patchChat', 'continueHistory', 'historyMessages'].map((k) => [k, vi.fn()]));
+  const fns = Object.fromEntries(['listMessages', 'listRequests', 'listToolCalls', 'send', 'answer', 'stop', 'done', 'archive', 'patchChat', 'continueHistory', 'historyMessages', 'openFolder'].map((k) => [k, vi.fn()]));
   return { ...m, api: { ...m.api, ...fns } };
 });
 
@@ -417,6 +417,17 @@ describe('Chat panel: actions menu', () => {
     expect(resumeCommand('antigravity', 'x')).toBeNull();
   });
 
+  it('Open folder shows the project in the file manager; a failure says why', async () => {
+    mocked.openFolder.mockResolvedValueOnce(undefined).mockRejectedValueOnce(new ApiError('That folder isn’t there any more. It may have been moved or deleted.', 404));
+    mount(seeded([chat({ title: 'Files', column: 'review', cwd: '/work/alpha' })]));
+    act(() => openRowMenu({ chatId: 'c1', history: null }, within(card('Files')).getByRole('button', { name: 'More actions' })));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Open folder' }));
+    expect(mocked.openFolder).toHaveBeenCalledWith('/work/alpha');
+    act(() => openRowMenu({ chatId: 'c1', history: null }, within(card('Files')).getByRole('button', { name: 'More actions' })));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Open folder' }));
+    await waitFor(() => expect(screen.getByText('That folder isn’t there any more. It may have been moved or deleted.')).toBeTruthy());
+  });
+
   it('Mark done is offered for board chats not in Done', () => {
     mocked.done.mockResolvedValue(chat({ column: 'done' }));
     mount(seeded([chat({ title: 'Finish', column: 'review' }), chat({ id: 'd', sessionRef: 's9', title: 'Finished', column: 'done' })]));
@@ -533,7 +544,7 @@ describe('Chat panel: history-only chats', () => {
     const anchor = document.body.appendChild(document.createElement('button'));
     act(() => openRowMenu({ chatId: null, history: ref }, anchor));
     const items = screen.getAllByRole('menuitem').map((m) => m.textContent);
-    expect(items).toEqual(['Continue here', 'Copy project path', 'Copy resume command']);
+    expect(items).toEqual(['Continue here', 'Open folder', 'Copy project path', 'Copy resume command']);
     fireEvent.click(screen.getByRole('menuitem', { name: 'Continue here' }));
     expect(store.getState().ui.openHistory).toEqual(ref);
   });

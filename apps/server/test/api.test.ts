@@ -384,6 +384,31 @@ test('POST /api/folders/pick returns the chosen folder (null when cancelled); a 
   try { assert.equal((await none.f('/api/folders/pick', { method: 'POST' })).status, 404); } finally { none.close(); }
 });
 
+test('POST /api/folders/open opens a known project folder; unknown or missing folders are refused (#15)', async () => {
+  const opened: string[] = [];
+  const gone = join(dir, 'moved-away');
+  const s = await setup(
+    { listChats: () => [{ ...chat('c1'), cwd: dir }, { ...chat('c2'), cwd: gone }] },
+    undefined, { history: async () => [], folderOpener: { open: async (p: string) => { opened.push(p); } } });
+  const post = (body: unknown, token: string | null = 'tok') =>
+    s.f('/api/folders/open', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }, token);
+  try {
+    assert.equal((await post({ path: dir })).status, 204);
+    assert.deepEqual(opened, [dir]);
+    const unknown = await post({ path: tmpdir() });
+    assert.equal(unknown.status, 403);
+    assert.match((await unknown.json()).error, /isn.t one of your projects/);
+    const missing = await post({ path: gone });
+    assert.equal(missing.status, 404);
+    assert.match((await missing.json()).error, /isn.t there any more/);
+    assert.equal((await post({})).status, 400);
+    assert.equal((await post({ path: dir }, null)).status, 401);
+    assert.deepEqual(opened, [dir]);
+  } finally { s.close(); }
+  const none = await setup();
+  try { assert.equal((await none.f('/api/folders/open', { method: 'POST', body: JSON.stringify({ path: dir }) })).status, 404); } finally { none.close(); }
+});
+
 test('GET /api/history/:provider/:ref/messages returns the transcript; unknown provider 400; none wired 404 (#16)', async () => {
   const asked: string[] = [];
   const s = await setup({}, undefined, { transcript: async (p: string, ref: string) => { asked.push(`${p}:${ref}`); return { messages: [{ role: 'user', text: 'hi', at: null }], truncated: false, unavailable: false }; } });

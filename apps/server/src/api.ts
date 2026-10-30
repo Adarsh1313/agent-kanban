@@ -101,6 +101,8 @@ export function createApi(opts: {
   transcript?: (provider: ProviderId, sessionRef: string) => Promise<Transcript>;
   /** New chat's "Browse…": shows the native folder picker (#24). */
   folderPicker?: { pick(): Promise<string | null> };
+  /** A chat's "Open folder": shows a project folder in the file manager (#15). */
+  folderOpener?: { open(path: string): Promise<void> };
   /** Folder holding the built web app (default apps/web/dist). */
   webDist?: string;
   token: string;
@@ -261,6 +263,20 @@ export function createApi(opts: {
     if (match('POST', '/api/folders/pick')) {
       if (!opts.folderPicker) throw new HttpError(404, 'Not found.');
       return { status: 200, body: { path: await opts.folderPicker.pick() } };
+    }
+    if (match('POST', '/api/folders/open')) {
+      if (!opts.folderOpener) throw new HttpError(404, 'Not found.');
+      const b = await readJson(req);
+      const path = typeof b?.path === 'string' ? b.path : '';
+      if (!path) throw new HttpError(400, 'Say which folder to open.');
+      // Only folders the board already knows: the page can't make us open anything else.
+      const known = buildProjects(chats.listChats(), await visibleHistory()).find((p) => folderKey(p.path) === folderKey(path));
+      if (!known) throw new HttpError(403, "That folder isn't one of your projects.");
+      let isDir = false;
+      try { isDir = statSync(known.path).isDirectory(); } catch { /* moved or deleted */ }
+      if (!isDir) throw new HttpError(404, "That folder isn't there any more. It may have been moved or deleted.");
+      await opts.folderOpener.open(known.path);
+      return { status: 204 };
     }
     if (match('GET', '/api/connect')) return { status: 200, body: opts.connect?.states() ?? [] };
     if ((m = match('POST', '/api/connect/:provider/:action'))) {
