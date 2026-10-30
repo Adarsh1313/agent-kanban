@@ -263,6 +263,21 @@ describe('Shell: routes', () => {
     expect(screen.getByRole('button', { name: 'Filter' })).toBeTruthy();
   });
 
+  it('switching pages closes an open chat panel; a project change within Projects keeps it (#8)', async () => {
+    const store = seeded([chat({ id: 'c1' })]);
+    mount(store, <Shell />);
+    act(() => store.setState((s) => ({ ...s, ui: { ...s.ui, openChatId: 'c1' } })));
+    act(() => { location.hash = '#/connections'; });
+    await waitFor(() => expect(store.getState().ui.view).toBe('connections'));
+    expect(store.getState().ui.openChatId).toBeNull();
+    act(() => { location.hash = '#/projects'; });
+    await waitFor(() => expect(store.getState().ui.view).toBe('projects'));
+    act(() => store.setState((s) => ({ ...s, ui: { ...s.ui, openChatId: 'c1' } })));
+    act(() => { location.hash = '#/projects/' + encodeURIComponent('/work/a'); });
+    await waitFor(() => expect(store.getState().ui.projectId).toBe('/work/a'));
+    expect(store.getState().ui.openChatId).toBe('c1');
+  });
+
   it('#/projects shows Projects, hides Filter, and the store follows', async () => {
     const store = seeded();
     mount(store, <Shell />);

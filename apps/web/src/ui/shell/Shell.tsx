@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef } from 'react';
 import type { AppState } from '../../state/reducer.ts';
 import { useStore, useStoreInstance, type Store } from '../../state/store.ts';
+import { closePanelIn } from '../../state/reducer.ts';
 import { openFilter, openNewChat } from '../actions.ts';
 import { Board } from '../board/Board.tsx';
 import { ConnectionsPage } from '../connections/ConnectionsPage.tsx';
@@ -35,7 +36,12 @@ function useHashRoute(store: Store) {
   useLayoutEffect(() => {
     const sync = () => {
       const r = parseHash(location.hash);
-      store.setState((s) => (s.ui.view === r.view && s.ui.projectId === r.projectId ? s : { ...s, ui: { ...s.ui, view: r.view, projectId: r.projectId } }));
+      store.setState((s) => {
+        if (s.ui.view === r.view && s.ui.projectId === r.projectId) return s;
+        // Switching pages closes an open chat panel, so it never covers Connections or Projects (#8).
+        const base = s.ui.view !== r.view ? closePanelIn(s) : s;
+        return { ...base, ui: { ...base.ui, view: r.view, projectId: r.projectId } };
+      });
     };
     sync();
     window.addEventListener('hashchange', sync);
