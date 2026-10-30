@@ -477,6 +477,17 @@ describe('two tabs', () => {
     expect(Number.isFinite(got[0]!.until)).toBe(true);
   });
 
+  it('opening one notification also relays a finite cut-off when its time is unreadable (#19)', () => {
+    const n = note({ id: 'n1', at: 'not a date' });
+    const store = seeded({ notifications: [n] });
+    start(store);
+    const got: Array<{ until: number }> = [];
+    otherTab().onmessage = (e) => got.push(e.data as { until: number });
+    act(() => openNotification(store, n));
+    expect(got).toHaveLength(1);
+    expect(Number.isFinite(got[0]!.until)).toBe(true);
+  });
+
   it('works without BroadcastChannel', () => {
     vi.stubGlobal('BroadcastChannel', undefined);
     const store = seeded({ notifications: [note({ id: 'n1' })] });

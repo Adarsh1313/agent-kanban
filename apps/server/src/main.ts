@@ -35,7 +35,8 @@ const dataDir = join(akHome, '.agent-kanban');
 mkdirSync(dataDir, { recursive: true });
 const lockPath = join(dataDir, 'server.lock');
 if (!acquireLock(lockPath)) {
-  console.error('Agent Kanban is already running.');
+  // A crashed server's pid can be reused by another program: say which file to delete if it really isn't running (#19).
+  console.error(`Agent Kanban is already running. If it isn't, delete ${lockPath} and start it again.`);
   process.exit(1);
 }
 process.on('exit', () => releaseLock(lockPath));

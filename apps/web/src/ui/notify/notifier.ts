@@ -31,7 +31,9 @@ export function notificationText(s: AppState, n: AppNotification): string {
 /** Opens the notification's chat in the side panel and marks it read (here and in other tabs). */
 export function openNotification(store: Store, n: AppNotification): void {
   store.setState((s) => markNotificationRead(openChatIn(s, n.chatId), n.id));
-  relay(store, { type: 'read', chatId: n.chatId, until: Date.parse(n.at) + RELAY_SLACK_MS });
+  // An unreadable time must not relay a NaN cut-off (#19): fall back to now.
+  const at = Date.parse(n.at);
+  relay(store, { type: 'read', chatId: n.chatId, until: (Number.isFinite(at) ? at : Date.now()) + RELAY_SLACK_MS });
 }
 
 /** Marks every notification read (here and in other tabs). */
