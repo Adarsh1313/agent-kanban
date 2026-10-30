@@ -260,11 +260,11 @@ conversation. Don't resume a session that is active in the provider's app at the
 for recent writes / a lock first). Chats only in the provider's history are not on the board; sending
 a message puts them there.
 
-### Projects decide which providers can be used
+### Projects suggest a provider
 
-A project lists the providers that have chats in it. New chat picks a project first, then offers only
-those providers (others shown disabled: "Hasn't worked on <project> yet"). A brand-new folder works with
-any provider.
+A project lists the providers that have chats in it. New chat picks a project first and defaults to the
+provider that already knows it, but any connected provider can start a chat in any folder (changed
+2026-10-30, issue #22: the user works on the same local projects across Claude, Codex and Antigravity).
 
 ### Notifications replace the Needs you page
 

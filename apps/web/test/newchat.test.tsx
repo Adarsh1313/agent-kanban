@@ -5,7 +5,7 @@ import { ApiError, api } from '../src/api/client.ts';
 import { applySnapshot, initialState, type AppState } from '../src/state/reducer.ts';
 import { createStore, StoreProvider, type Store } from '../src/state/store.ts';
 import { openNewChat } from '../src/ui/actions.ts';
-import { allowedProviders, findProject, NewChatDialog, resetModelsCache } from '../src/ui/newchat/NewChatDialog.tsx';
+import { allowedProviders, findProject, knownProviders, NewChatDialog, resetModelsCache } from '../src/ui/newchat/NewChatDialog.tsx';
 import { Toasts } from '../src/ui/primitives/toast.tsx';
 import { Shell } from '../src/ui/shell/Shell.tsx';
 import { chat } from './helpers.ts';
@@ -62,14 +62,15 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 describe('allowedProviders', () => {
-  it('a known project allows the connected providers that worked in it', () => {
-    const s = seeded().getState();
-    expect(allowedProviders(s, PROJECTS[0])).toEqual(['claude']);
-    expect(allowedProviders(s, PROJECTS[1])).toEqual(['claude', 'codex']);
-  });
-  it('a new folder allows any connected provider, Antigravity included; update_available counts as connected', () => {
+  it('any connected provider can start in any folder, Antigravity included; update_available counts as connected (#22)', () => {
     const s = seeded({ connections: [conn('claude', 'update_available'), conn('codex', 'degraded'), conn('antigravity')] }).getState();
-    expect(allowedProviders(s, undefined)).toEqual(['claude', 'antigravity']);
+    expect(allowedProviders(s)).toEqual(['claude', 'antigravity']);
+  });
+  it('knownProviders: the allowed providers that already worked in the project (none for a new folder)', () => {
+    const allowed = ['claude', 'codex', 'antigravity'] as const;
+    expect(knownProviders([...allowed], PROJECTS[0])).toEqual(['claude']);
+    expect(knownProviders([...allowed], PROJECTS[1])).toEqual(['claude', 'codex']);
+    expect(knownProviders([...allowed], undefined)).toEqual([]);
   });
 });
 
@@ -84,7 +85,7 @@ describe('findProject', () => {
 });
 
 describe('New chat dialog', () => {
-  it('opens on the latest project; the provider picker disables providers that have not worked there or are not connected', async () => {
+  it('opens on the latest project; its own provider is the default, other connected providers can be picked, unconnected ones cannot', async () => {
     mount(seeded());
     act(() => openNewChat());
     expect(dialog().dataset.state).toBe('open');
@@ -95,14 +96,15 @@ describe('New chat dialog', () => {
     expect(row('Claude Code').getAttribute('aria-disabled')).toBeNull();
     expect(row('Claude Code').getAttribute('aria-selected')).toBe('true');
     expect(within(row('Claude Code')).getByText('82% of 5-hour · 64% of weekly left')).toBeTruthy();
-    expect(row('Codex').getAttribute('aria-disabled')).toBe('true');
-    expect(within(row('Codex')).getByText('Hasn’t worked on alpha yet')).toBeTruthy();
+    expect(row('Codex').getAttribute('aria-disabled')).toBeNull();
     expect(row('Antigravity').getAttribute('aria-disabled')).toBe('true');
     expect(within(row('Antigravity')).getByText('Not signed in')).toBeTruthy();
-    // A disabled row does nothing.
-    fireEvent.click(row('Codex'));
+    expect(within(dialog()).getByText('alpha has been worked on with Claude Code, so that’s picked first. Any connected provider can work here.')).toBeTruthy();
+    // A disabled row does nothing; another connected provider can be picked for this project.
+    fireEvent.click(row('Antigravity'));
     expect(chip(/^Provider: Claude Code$/)).toBeTruthy();
-    expect(within(dialog()).getByText(/alpha has been worked on with Claude Code/)).toBeTruthy();
+    fireEvent.click(row('Codex'));
+    expect(chip(/^Provider: Codex$/)).toBeTruthy();
   });
 
   it('openNewChat({ cwd }) preselects that folder and allows its providers; usage with no reading shows —', () => {
@@ -133,9 +135,9 @@ describe('New chat dialog', () => {
     expect(chip(/^Project: beta$/)).toBeTruthy();
     expect(chip(/^Provider: Codex$/)).toBeTruthy();
     fireEvent.click(within(dialog()).getByRole('button', { name: 'Cancel' }));
-    // Codex hasn't worked in alpha, and Antigravity isn't connected: the usual pick stands.
+    // Codex hasn't worked in alpha but is connected, so it may start there (#22); Antigravity isn't connected.
     act(() => openNewChat({ cwd: '/work/alpha', provider: 'codex' }));
-    expect(chip(/^Provider: Claude Code/)).toBeTruthy();
+    expect(chip(/^Provider: Codex$/)).toBeTruthy();
     act(() => openNewChat({ cwd: '/work/beta', provider: 'antigravity' }));
     expect(chip(/^Provider: Claude Code/)).toBeTruthy();
   });
@@ -147,7 +149,7 @@ describe('New chat dialog', () => {
     expect((screen.getByRole('textbox', { name: 'Folder path' }) as HTMLInputElement).value).toBe('');
   });
 
-  it('switching project keeps an allowed provider and drops one that is not', () => {
+  it('switching project keeps the picked provider: every connected one may start anywhere (#22)', () => {
     mount(seeded());
     act(() => openNewChat({ cwd: '/work/beta' }));
     fireEvent.click(chip(/^Provider:/));
@@ -156,7 +158,7 @@ describe('New chat dialog', () => {
     fireEvent.click(chip(/^Project:/));
     fireEvent.click(within(listbox('Project')).getByRole('option', { name: /alpha/ }));
     expect(chip(/^Project: alpha$/)).toBeTruthy();
-    expect(chip(/^Provider: Claude Code$/)).toBeTruthy();
+    expect(chip(/^Provider: Codex$/)).toBeTruthy();
   });
 
   it('start sends { provider, cwd, prompt } with Default omitted, and closes on success', async () => {
@@ -305,7 +307,7 @@ describe('New chat dialog', () => {
     mount(seeded({ connections: [conn('claude', 'signed_out')] }));
     act(() => openNewChat());
     expect((start() as HTMLButtonElement).disabled).toBe(true);
-    expect(within(dialog()).getByText(/None of your connected providers has worked on alpha yet/)).toBeTruthy();
+    expect(within(dialog()).getByText('No provider is connected yet. Connect one on the Connections page.')).toBeTruthy();
   });
 });
 

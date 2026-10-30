@@ -64,15 +64,16 @@ function defaultHint(list: ModelOption[], provider: ProviderId | null): string {
   return d ? `Uses ${d.label}` : `Uses ${provider ? providerName(provider) : 'the provider'}'s own default`;
 }
 
-/**
- * Providers New chat can start on for a folder: connected ones that have worked in it (any connected one for a
- * new folder).
- */
-export function allowedProviders(s: Pick<AppState, 'connections'>, project: Project | undefined): ProviderId[] {
-  const connected = PROVIDER_IDS.filter((id) => isConnected(s.connections[id]));
-  if (!project) return connected;
+/** Providers New chat can start on: every connected one, in any folder (#22). */
+export function allowedProviders(s: Pick<AppState, 'connections'>): ProviderId[] {
+  return PROVIDER_IDS.filter((id) => isConnected(s.connections[id]));
+}
+
+/** The allowed providers that already have chats in this project: the default comes from these when there are any. */
+export function knownProviders(allowed: ProviderId[], project: Project | undefined): ProviderId[] {
+  if (!project) return [];
   const worked = new Set(project.providers.map((p) => p.provider));
-  return connected.filter((id) => worked.has(id));
+  return allowed.filter((id) => worked.has(id));
 }
 
 const levelOf = (left: number) => (left < 5 ? 'out' : left < 25 ? 'low' : 'ok');
@@ -182,7 +183,7 @@ export function NewChatDialog() {
         setPath(opts?.cwd ?? '');
       }
       // A provider asked for (a project's "New Codex chat") wins over the focused one, when it may start there.
-      const ok = allowedProviders({ connections }, target);
+      const ok = allowedProviders({ connections });
       const preset = [opts?.provider, focus].find((p): p is ProviderId => !!p && ok.includes(p)) ?? null;
       setChosen(preset);
       setModel(null);
@@ -204,8 +205,10 @@ export function NewChatDialog() {
   }, [open]);
 
   const project = where.kind === 'project' ? st.projects.find((p) => p.id === where.id) : findProject(st.projects, path);
-  const allowed = allowedProviders(st, project);
-  const suggestion = suggestFor(st, allowed);
+  const allowed = allowedProviders(st);
+  const known = knownProviders(allowed, project);
+  // A project's own provider is the default; the others can still be picked.
+  const suggestion = suggestFor(st, known.length > 0 ? known : allowed);
   const provider: ProviderId | null = chosen && allowed.includes(chosen) ? chosen : suggestion?.provider ?? null;
   const modelId = model && model.provider === provider ? model.id : null;
   // Any provider change (picked, or forced by a project switch) goes back to Default for good.
@@ -304,15 +307,9 @@ export function NewChatDialog() {
 
   let note: string | null = null;
   if (!st.loaded) note = null; // connections and projects are still loading
-  else if (allowed.length === 0) {
-    note = project
-      ? `None of your connected providers has worked on ${projectName} yet. Choose another folder to start fresh.`
-      : 'No provider is connected yet. Connect one on the Connections page.';
-  } else if (project && allowed.length < PROVIDER_IDS.length) {
-    const worked = PROVIDER_IDS.filter((id) => project.providers.some((p) => p.provider === id));
-    if (worked.length < PROVIDER_IDS.length) {
-      note = `${projectName} has been worked on with ${joinNames(worked)}, so ${worked.length > 1 ? 'those are the providers that know' : 'that’s the provider that knows'} it.`;
-    }
+  else if (allowed.length === 0) note = 'No provider is connected yet. Connect one on the Connections page.';
+  else if (known.length > 0 && known.length < allowed.length) {
+    note = `${projectName} has been worked on with ${joinNames(known)}, so that’s picked first. Any connected provider can work here.`;
   }
 
   // The server answers as soon as the card exists, so the dialog closes at once for every provider; the card says
@@ -420,7 +417,7 @@ export function NewChatDialog() {
           {PROVIDER_IDS.map((id) => {
             const conn = st.connections[id];
             const ok = allowed.includes(id);
-            const reason = !isConnected(conn) ? (conn ? STATUS_TEXT[conn.status] : 'Not connected') : `Hasn’t worked on ${projectName} yet`;
+            const reason = conn ? STATUS_TEXT[conn.status] : 'Not connected';
             return (
               <button key={id} className="pick-row" type="button" role="option" aria-selected={provider === id} aria-disabled={ok ? undefined : true}
                 onClick={() => { if (!ok) return; setChosen(id); setPicker(null); promptRef.current?.focus(); }}>
