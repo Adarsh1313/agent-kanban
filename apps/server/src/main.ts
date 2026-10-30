@@ -16,6 +16,7 @@ import { ConnectService } from './connect/service.ts';
 import { spawnCommand } from './connect/run.ts';
 import { openBrowser, openLocalApp } from './connect/open-browser.ts';
 import { STOP_REQUEST_FILE, watchStopRequest } from './stop-request.ts';
+import { FolderPicker } from './folder-picker.ts';
 import { SettingsStore } from './settings.ts';
 import { AdapterRegistry } from './adapters/registry.ts';
 import { findBinary } from './binaries.ts';
@@ -101,7 +102,7 @@ const connect = new ConnectService({
   home: akHome,
 });
 connectRef = connect;
-const api = createApi({ chats, usage, history: () => readAllHistory(home), token, connections, adapters, connect, settings });
+const api = createApi({ chats, usage, history: () => readAllHistory(home), token, connections, adapters, connect, settings, folderPicker: new FolderPicker() });
 broadcast = api.broadcast;
 
 chats.recoverAfterRestart();

@@ -134,6 +134,8 @@ export function NewChatDialog() {
   /** Ctrl+Enter with no provider: the footer says why (the same reason the note gives). */
   const [noProviderHint, setNoProviderHint] = useState(false);
   const [busy, setBusy] = useState(false);
+  /** The native folder picker is open (Browse…). */
+  const [browsing, setBrowsing] = useState(false);
   const busyRef = useRef(false);
   /** Bumped on every opening, so a late response from an earlier opening never closes or clears a newer one. */
   const session = useRef(0);
@@ -228,6 +230,25 @@ export function NewChatDialog() {
   const modelLabel = modelId ? allModels.find((m) => m.id === modelId)?.label ?? modelId : 'Default';
   const projectName = where.kind === 'project' ? project?.name ?? baseName(where.id) : project?.name ?? (path.trim() ? baseName(path.trim()) : 'Another folder');
   const showSuggested = (id: ProviderId) => suggestion?.suggested === true && suggestion.provider === id && allowed.length > 1;
+
+  /** Asks the local server to show the native folder picker and puts the chosen folder in the path field. */
+  const browse = async () => {
+    if (browsing) return;
+    setBrowsing(true);
+    const opening = session.current;
+    try {
+      const { path: chosen } = await api.pickFolder();
+      if (!chosen || opening !== session.current) return;
+      autoPick.current = false;
+      setPath(chosen);
+      setPathError(null);
+      focusNext.current = 'prompt';
+    } catch (e) {
+      toast(e instanceof Error && e.message ? e.message : "Couldn't open the folder picker. Type the folder path instead.");
+    } finally {
+      setBrowsing(false);
+    }
+  };
 
   const openRef = useRef(open);
   openRef.current = open;
@@ -360,6 +381,9 @@ export function NewChatDialog() {
               onChange={(e) => { autoPick.current = false; setPath(e.target.value); setPathError(null); }}
               onKeyDown={onKey}
             />
+            <button className="btn" type="button" disabled={browsing} aria-busy={browsing || undefined} onClick={() => void browse()}>
+              <Icon name="folder" size="sm" />{browsing ? 'Choosing…' : 'Browse…'}
+            </button>
             {pathError && <p className="dlg-path-error" id="dlg-path-error" role="alert">{pathError}</p>}
           </div>
         )}
@@ -405,6 +429,8 @@ export function NewChatDialog() {
               setWhere({ kind: 'path' });
               setPicker(null);
               focusNext.current = 'path';
+              // Straight to the computer's own folder picker; cancelling it leaves the typed path field (#24).
+              void browse();
             }}>
             <Icon name="folder" />Choose another folder…
           </button>

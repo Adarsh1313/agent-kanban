@@ -73,7 +73,8 @@ html, body { overflow: hidden; }
 .dlg-note .icon { flex: none; }
 .dlg-hint { color: var(--color-text-faint); font-size: var(--text-caption); font-variant-numeric: tabular-nums; }
 .dlg-hint.warn { color: var(--color-needs-text); }
-.dlg-path { display: flex; flex-direction: column; gap: var(--space-1); }
+.dlg-path { display: grid; grid-template-columns: 1fr auto; gap: var(--space-1) var(--space-2); align-items: center; }
+.dlg-path .dlg-path-error { grid-column: 1 / -1; }
 .dlg-path-input { width: 100%; height: calc(var(--space-6) + var(--space-2)); padding: 0 var(--space-2); font: inherit; font-family: var(--font-mono); font-size: var(--text-caption);
   color: var(--color-text); background: var(--color-surface); border: 1px solid var(--color-border-strong); border-radius: var(--radius-control); outline: 0; }
 .dlg-path-input:focus-visible { box-shadow: 0 0 0 calc(var(--space-1) * .75) color-mix(in srgb, var(--color-focus) 15%, transparent); }

@@ -9,6 +9,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import type { ConnectionHealth, HistoryChat, ModelOption, ProviderId, ServerEvent } from '@agent-kanban/shared';
 import { ActiveElsewhereError, CantContinueError } from './chats.ts';
 import { ConnectBusyError, ConnectStateError } from './connect/service.ts';
+import { PickerBusyError } from './folder-picker.ts';
 import type { ConnectService } from './connect/service.ts';
 import { SettingsError } from './settings.ts';
 import type { SettingsStore } from './settings.ts';
@@ -95,6 +96,8 @@ export function createApi(opts: {
   adapters?: { get(id: ProviderId): ProviderAdapter | undefined };
   connect?: Pick<ConnectService, 'states' | 'install' | 'signIn' | 'signOut' | 'update' | 'cancel' | 'openSignInPage'>;
   settings?: SettingsStore;
+  /** New chat's "Browse…": shows the native folder picker (#24). */
+  folderPicker?: { pick(): Promise<string | null> };
   /** Folder holding the built web app (default apps/web/dist). */
   webDist?: string;
   token: string;
@@ -246,6 +249,10 @@ export function createApi(opts: {
       const only = b.provider === undefined ? undefined : provider(b);
       return { status: 200, body: (await opts.connections?.check(only)) ?? [] };
     }
+    if (match('POST', '/api/folders/pick')) {
+      if (!opts.folderPicker) throw new HttpError(404, 'Not found.');
+      return { status: 200, body: { path: await opts.folderPicker.pick() } };
+    }
     if (match('GET', '/api/connect')) return { status: 200, body: opts.connect?.states() ?? [] };
     if ((m = match('POST', '/api/connect/:provider/:action'))) {
       const id = m[0] as ProviderId;
@@ -350,7 +357,7 @@ export function createApi(opts: {
           return send(err.status, { error: err.message });
         }
         const msg = err instanceof Error ? err.message : '';
-        if (err instanceof ActiveElsewhereError || err instanceof CantContinueError || err instanceof ConnectBusyError || err instanceof ConnectStateError) return send(409, { error: msg });
+        if (err instanceof ActiveElsewhereError || err instanceof CantContinueError || err instanceof ConnectBusyError || err instanceof ConnectStateError || err instanceof PickerBusyError) return send(409, { error: msg });
         if (msg === 'That request is no longer open.') return send(409, { error: msg });
         if (msg === 'Chat not found.') return send(404, { error: msg });
         console.error(err);

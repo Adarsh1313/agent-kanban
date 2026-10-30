@@ -1,3 +1,4 @@
+import { PickerBusyError } from '../src/folder-picker.ts';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { AddressInfo } from 'node:net';
@@ -363,4 +364,22 @@ test('PATCH /api/chats/:id trims the title before checking it, normalises snooze
     assert.equal(bad.status, 400);
     assert.equal(((await bad.json()) as { error: string }).error, 'Snooze time must be a date.');
   } finally { s.close(); }
+});
+
+test('POST /api/folders/pick returns the chosen folder (null when cancelled); a second picker is 409; none wired is 404 (#24)', async () => {
+  const answers: (string | null)[] = ['C:\Work\my-app', null];
+  const s = await setup({}, undefined, { folderPicker: { pick: async () => answers.shift() ?? null } });
+  try {
+    assert.deepEqual(await (await s.f('/api/folders/pick', { method: 'POST' })).json(), { path: 'C:\Work\my-app' });
+    assert.deepEqual(await (await s.f('/api/folders/pick', { method: 'POST' })).json(), { path: null });
+    assert.equal((await s.f('/api/folders/pick', { method: 'POST' }, null)).status, 401);
+  } finally { s.close(); }
+  const busy = await setup({}, undefined, { folderPicker: { pick: async () => { throw new PickerBusyError(); } } });
+  try {
+    const r = await busy.f('/api/folders/pick', { method: 'POST' });
+    assert.equal(r.status, 409);
+    assert.match((await r.json()).error, /already open/);
+  } finally { busy.close(); }
+  const none = await setup();
+  try { assert.equal((await none.f('/api/folders/pick', { method: 'POST' })).status, 404); } finally { none.close(); }
 });

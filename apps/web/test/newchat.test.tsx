@@ -12,10 +12,10 @@ import { chat } from './helpers.ts';
 
 vi.mock('../src/api/client.ts', async (orig) => {
   const m = await orig<typeof import('../src/api/client.ts')>();
-  return { ...m, api: { ...m.api, startChat: vi.fn(), models: vi.fn() } };
+  return { ...m, api: { ...m.api, startChat: vi.fn(), models: vi.fn(), pickFolder: vi.fn() } };
 });
 
-const mocked = api as unknown as { startChat: ReturnType<typeof vi.fn>; models: ReturnType<typeof vi.fn> };
+const mocked = api as unknown as { startChat: ReturnType<typeof vi.fn>; models: ReturnType<typeof vi.fn>; pickFolder: ReturnType<typeof vi.fn> };
 const NOW = Date.parse('2026-10-23T12:00:00.000Z');
 
 const conn = (provider: ProviderId, status: ConnectionHealth['status'] = 'connected'): ConnectionHealth => ({
@@ -56,6 +56,8 @@ const flush = () => act(async () => { await Promise.resolve(); await Promise.res
 beforeEach(() => {
   mocked.startChat.mockReset();
   mocked.models.mockReset();
+  mocked.pickFolder.mockReset();
+  mocked.pickFolder.mockResolvedValue({ path: null });
   mocked.models.mockResolvedValue({ claude: [{ id: 'opus', label: 'Opus', isDefault: true }, { id: 'sonnet', label: 'Sonnet', isDefault: false }], codex: [{ id: 'gpt-5', label: 'GPT-5', isDefault: true }], antigravity: [] });
   resetModelsCache();
 });
@@ -254,6 +256,23 @@ describe('New chat dialog', () => {
     expect(mocked.startChat).toHaveBeenCalledTimes(1);
     await act(async () => { resolve(chat()); });
     expect(dialog().dataset.state).toBe('closed');
+  });
+
+  it('Choose another folder… opens the system folder picker and fills the chosen folder; cancelling keeps the typed field (#24)', async () => {
+    mocked.pickFolder.mockResolvedValueOnce({ path: String.raw`C:\Work\my-app` });
+    mount(seeded());
+    act(() => openNewChat());
+    fireEvent.click(chip(/^Project:/));
+    fireEvent.click(within(listbox('Project')).getByRole('option', { name: /Choose another folder/ }));
+    expect(mocked.pickFolder).toHaveBeenCalledTimes(1);
+    await flush();
+    const field = screen.getByRole('textbox', { name: 'Folder path' }) as HTMLInputElement;
+    expect(field.value).toBe(String.raw`C:\Work\my-app`);
+    // Browse… again, cancelled: the field keeps its value.
+    fireEvent.click(within(dialog()).getByRole('button', { name: /Browse/ }));
+    await flush();
+    expect(mocked.pickFolder).toHaveBeenCalledTimes(2);
+    expect(field.value).toBe(String.raw`C:\Work\my-app`);
   });
 
   it("Choose another folder…: the server's 400 shows inline under the path field and nothing else changes", async () => {
