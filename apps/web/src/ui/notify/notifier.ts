@@ -1,4 +1,5 @@
 import { markAllNotificationsRead, markChatNotificationsRead, markNotificationRead, openChatIn, type AppNotification, type AppState } from '../../state/reducer.ts';
+import { desktopBridge } from '../../desktop.ts';
 import type { RequestAction } from '@agent-kanban/shared';
 import type { Store } from '../../state/store.ts';
 import { providerName } from '../primitives/ProviderLogo.tsx';
@@ -212,7 +213,9 @@ export const RING_GAP_MS = 600;
 
 function showDesktop(store: Store, s: AppState, n: AppNotification, shown: Map<string, Notification>): void {
   if (!getPrefs().desktop || typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
-  if (document.visibilityState !== 'hidden') return;
+  // In the desktop app a window hidden to the tray still reports "visible": there, away means not focused.
+  const desktop = desktopBridge();
+  if (desktop ? document.hasFocus() : document.visibilityState !== 'hidden') return;
   try {
     const note = new Notification(notificationTitle(s, n), { body: notificationText(s, n), tag: n.chatId });
     // The same tag replaces the chat's previous notification: forget that one.
@@ -223,7 +226,8 @@ function showDesktop(store: Store, s: AppState, n: AppNotification, shown: Map<s
     };
     note.onclick = () => {
       try {
-        window.focus();
+        if (desktop) desktop.show();
+        else window.focus();
       } catch {
         // Focus is best effort.
       }

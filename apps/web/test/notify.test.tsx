@@ -277,6 +277,47 @@ describe('notifier', () => {
   });
 });
 
+describe('inside the desktop app', () => {
+  // A window hidden to the tray still reports "visible"; what counts there is whether it has focus.
+  let focused = true;
+  const show = vi.fn();
+  beforeEach(() => {
+    focused = true;
+    show.mockClear();
+    vi.spyOn(document, 'hasFocus').mockImplementation(() => focused);
+    (window as { agentKanbanDesktop?: unknown }).agentKanbanDesktop = { status: () => {}, show, theme: () => {}, onOpenChat: () => () => {} };
+    FakeNotification.permission = 'granted';
+    localStorage.setItem('agent-kanban.notify', JSON.stringify({ desktop: true, sound: false }));
+    reloadPrefs();
+  });
+  afterEach(() => { delete (window as { agentKanbanDesktop?: unknown }).agentKanbanDesktop; vi.restoreAllMocks(); });
+
+  it('shows a notification when the window is not focused, even though it reports visible', () => {
+    focused = false;
+    const store = seeded();
+    start(store);
+    send(store, 'permission');
+    expect(FakeNotification.instances).toHaveLength(1);
+  });
+
+  it('shows none while the window is focused', () => {
+    const store = seeded();
+    start(store);
+    send(store, 'permission');
+    expect(FakeNotification.instances).toHaveLength(0);
+  });
+
+  it('clicking it brings the window back (from the tray too) and opens the chat', () => {
+    focused = false;
+    const store = seeded();
+    start(store);
+    send(store, 'question');
+    act(() => FakeNotification.instances[0]!.onclick!());
+    expect(show).toHaveBeenCalled();
+    expect(store.getState().ui.openChatId).toBe('c1');
+  });
+});
+
 /* ───────── Popover ───────── */
 
 describe('permission copy says what it is for', () => {

@@ -202,7 +202,7 @@ for development, using the same data.
 - [x] 4. Startup failure page with Try again / Quit, `locked` and `other` reasons
 - [x] 5. Desktop bridge + web status reporting; tray icon with needs-you dot and tray menu; close to tray with first-close note; Quit confirmation and clean stop; Start at login (seams 3 and 4)
 - [x] 6. Title bar overlay: top bar as drag region, caption buttons, theme sync (seam 4)
-- [ ] 7. Notifications: app user model id, click shows the window and opens the chat (seam 4)
+- [x] 7. Notifications: app user model id, click shows the window and opens the chat (seam 4)
 - [ ] 8. Open folder: server endpoint + chat actions menu item, both modes (seams 2 and 4)
 - [ ] 9. Icons generated from the SVGs; electron-builder NSIS per-user installer; manual checklist passed on the installed app
 - [ ] 10. Remove the launcher scripts, npm scripts and desktop shortcuts; README and backlog updated; #20 closed, #15 narrowed to Open in app
