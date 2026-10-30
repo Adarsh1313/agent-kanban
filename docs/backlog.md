@@ -4,7 +4,7 @@ Updated 2026-10-30. GitHub issues carry the details; this file is the order. A f
 
 ## 1. Desktop app (Plan 4): issue #20, now
 
-Flow: ~~`/grill-with-docs`~~ (done 2026-10-30) → `/design-grill` (app icon, tray icon, tray menu) → `/to-spec` (writes `docs/specs/desktop-app.md` with a `## Progress` checklist) → new session `/implement docs/specs/desktop-app.md`.
+Flow: grilling, design grill and spec done (2026-10-30). Spec: `docs/specs/desktop-app.md`. Next: new session `/implement docs/specs/desktop-app.md`.
 
 Decided in the grilling (why Electron: `docs/adr/0001-electron-desktop-shell.md`; terms: `GLOSSARY.md`):
 - **Shell:** Electron; the server runs on Electron's own Node. **First slice:** prove `node:sqlite` + type stripping work there; fallback is a bundled Node binary for the server.
