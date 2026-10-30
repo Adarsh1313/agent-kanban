@@ -2,7 +2,7 @@ import type { Chat, Message, OpenRequest, ToolCall } from '@agent-kanban/shared'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { AppState } from '../../state/reducer.ts';
 import { useStore } from '../../state/store.ts';
-import { clockTime, toolIcon } from '../board/format.ts';
+import { clockTime, inFolder, toolIcon } from '../board/format.ts';
 import { Markdown } from './Markdown.tsx';
 import { Icon, ProviderLogo, StatusIcon, providerName } from '../primitives/index.ts';
 import { RequestCard } from './RequestCard.tsx';
@@ -52,7 +52,7 @@ export function buildTurns(messages: Message[], calls: ToolCall[], streaming: Re
   return turns;
 }
 
-function WorkGroup({ calls, working }: { calls: ToolCall[]; working: boolean }) {
+function WorkGroup({ calls, working, cwd }: { calls: ToolCall[]; working: boolean; cwd: string }) {
   const [open, setOpen] = useState<boolean | null>(null);
   const isOpen = open ?? working;
   const current = working ? [...calls].reverse().find((c) => c.status === 'running') ?? null : null;
@@ -74,7 +74,7 @@ function WorkGroup({ calls, working }: { calls: ToolCall[]; working: boolean }) 
               return (
                 <li key={c.id} className={cls}>
                   <Icon name={cls === 'current' ? toolIcon(c.name) : cls === 'failed' ? 'x' : 'check'} size="sm" />
-                  <span title={c.summary}>{c.summary || c.name}</span>
+                  <span title={c.summary}>{inFolder(c.summary, cwd) || c.name}</span>
                 </li>
               );
             })}
@@ -175,7 +175,7 @@ export function Thread({ chat }: { chat: Chat }) {
                   <ProviderLogo id={chat.provider} size="sm" />{app}
                   {t.replies[0]?.createdAt && <time className="msg-time" dateTime={t.replies[0].createdAt}>{clockTime(t.replies[0].createdAt, now)}</time>}
                 </div>
-                {t.calls.length > 0 && <WorkGroup calls={t.calls} working={working} />}
+                {t.calls.length > 0 && <WorkGroup calls={t.calls} working={working} cwd={chat.cwd} />}
                 {working && t.calls.length === 0 && t.replies.length === 0 && <div className="thread-note"><StatusIcon state="running" />Working…</div>}
                 {t.replies.map((r) => <div className="msg-text md" key={r.id}><Markdown text={r.text} /></div>)}
               </div>
@@ -183,7 +183,7 @@ export function Thread({ chat }: { chat: Chat }) {
           </div>
         );
       })}
-      {chat.column === 'needs_you' && requests.map((r) => <RequestCard key={r.requestId} chatId={chat.id} provider={chat.provider} request={r} />)}
+      {chat.column === 'needs_you' && requests.map((r) => <RequestCard key={r.requestId} chatId={chat.id} provider={chat.provider} cwd={chat.cwd} request={r} />)}
       {chat.column === 'needs_you' && chat.needsReason === 'stopped' && (
         <div className="thread-note"><Icon name="stop" size="sm" />You stopped the agent. Resume to let it carry on, or send a new instruction.</div>
       )}

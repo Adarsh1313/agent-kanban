@@ -5,12 +5,13 @@ import { useStoreInstance } from '../../state/store.ts';
 import { Icon, StatusIcon, providerName } from '../primitives/index.ts';
 import { permissionText } from '../notify/notifier.ts';
 import { runAction } from './ChatActionsMenu.tsx';
+import { inFolder } from '../board/format.ts';
 
 /**
  * Something the agent is waiting on. A permission gets Allow / Deny; a question gets a reply box.
  * The card stays (with its buttons disabled) until the server says the request is closed.
  */
-export function RequestCard({ chatId, provider, request }: { chatId: string; provider: ProviderId; request: OpenRequest }) {
+export function RequestCard({ chatId, provider, cwd = '', request }: { chatId: string; provider: ProviderId; cwd?: string; request: OpenRequest }) {
   const store = useStoreInstance();
   const [busy, setBusy] = useState<null | 'allow' | 'deny' | 'reply'>(null);
   const [answered, setAnswered] = useState(false);
@@ -40,7 +41,7 @@ export function RequestCard({ chatId, provider, request }: { chatId: string; pro
     return (
       <div className="request" role="group" aria-label="Permission request">
         <div className="request-head"><StatusIcon state="needs" />{providerName(provider)} {permissionText(request.action)}</div>
-        <div className="cmd">{request.summary}</div>
+        <div className="cmd" title={request.summary}>{inFolder(request.summary, cwd)}</div>
         <div className="row">
           <button className="btn primary" type="button" disabled={locked} onClick={() => void answer('allow', 'allow')}>{busy === 'allow' ? 'Allowing…' : 'Allow'}</button>
           <button className="btn" type="button" disabled={locked} onClick={() => void answer('deny', 'deny')}>{busy === 'deny' ? 'Denying…' : 'Deny'}</button>

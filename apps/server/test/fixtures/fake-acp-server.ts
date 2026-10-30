@@ -53,7 +53,7 @@ function onPrompt(id: unknown, sessionId: string) {
     update(sessionId, { sessionUpdate: 'tool_call', toolCallId: 'call_a', title: 'create_file', kind: 'other', status: 'pending' });
     send({ id: PERM_ID, method: 'session/request_permission', params: {
       sessionId,
-      toolCall: { toolCallId: 'call_a', title: 'Run create_file?' },
+      toolCall: { toolCallId: 'call_a', title: 'Run create_file?', locations: [{ path: '/work/demo/hello.txt' }] },
       options: [{ optionId: 'allow_once', name: 'Allow', kind: 'allow_once' }, { optionId: 'reject_once', name: 'Reject', kind: 'reject_once' }],
     } });
     return;

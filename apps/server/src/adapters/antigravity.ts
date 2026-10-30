@@ -267,7 +267,7 @@ export class AntigravityAdapter implements ProviderAdapter {
       case 'tool_call_update': {
         if (typeof u.toolCallId !== 'string') return;
         const known = this.toolInfo.get(u.toolCallId);
-        const title = typeof u.title === 'string' && u.title ? u.title : known?.title ?? 'Using a tool';
+        const title = typeof u.title === 'string' && u.title ? friendlyTitle(u.title, u) : known?.title ?? 'Using a tool';
         const kind = typeof u.kind === 'string' && u.kind ? u.kind : known?.kind ?? 'tool';
         this.toolInfo.set(u.toolCallId, { title, kind });
         const status = toolStatus(u.status);
@@ -305,8 +305,9 @@ export class AntigravityAdapter implements ProviderAdapter {
     const requestId = `perm_${++this.permCounter}`;
     const tc = req.toolCall;
     const known = typeof tc?.toolCallId === 'string' ? this.toolInfo.get(tc.toolCallId) : undefined;
-    const summary = typeof tc?.title === 'string' && tc.title ? tc.title : known?.title ?? 'Use a tool';
-    const action = acpAction(typeof tc?.kind === 'string' && tc.kind ? tc.kind : known?.kind, summary);
+    const rawTitle = typeof tc?.title === 'string' && tc.title ? tc.title : null;
+    const summary = rawTitle ? friendlyTitle(rawTitle, tc) : known?.title ?? 'Use a tool';
+    const action = acpAction(typeof tc?.kind === 'string' && tc.kind ? tc.kind : known?.kind, rawTitle ?? '');
     return new Promise((resolve) => {
       this.perms.set(requestId, { sessionId, toolCallId: typeof tc?.toolCallId === 'string' ? tc.toolCallId : null, options: req.options, resolve });
       this.emit({ type: 'request.opened', sessionRef: sessionId, requestId, kind: 'permission', summary, action });
@@ -630,6 +631,40 @@ export function acpAction(kind: string | undefined, title = ''): RequestAction {
   // The whole title must be the tool ("Run create_file?"), so a command that merely mentions edit_file is not an edit.
   if (/^(?:Run\s+)?(?:create|edit|write|delete|move|replace)_file\??$/i.test(title.trim())) return 'edit';
   return 'tool';
+}
+
+const TOOL_VERBS: Record<string, string> = {
+  create_file: 'Creating', write_file: 'Writing', write_to_file: 'Writing', edit_file: 'Editing', replace_file: 'Editing',
+  replace_file_content: 'Editing', delete_file: 'Deleting', move_file: 'Moving', read_file: 'Reading', view_file: 'Reading',
+  list_dir: 'Listing', list_directory: 'Listing',
+};
+
+/**
+ * Antigravity 1.3.0 titles its tool calls with the raw tool name ("Run create_file?", "Running edit_file"). Those become
+ * "Creating agy.txt" / "Editing app.ts", naming the file when the call carries a path (ACP `locations`, or a path-like
+ * field in `rawInput`); an unknown tool reads "Using <tool name>". Any other title is kept as it is (#7).
+ */
+export function friendlyTitle(title: string, call: any): string {
+  const m = /^(?:Run(?:ning)?\s+)?([a-z][a-z0-9]*(?:_[a-z0-9]+)+)\??$/i.exec(title.trim());
+  if (!m) return title;
+  const tool = m[1]!.toLowerCase();
+  const path = toolPath(call);
+  const file = path ? path.replace(/[\\/]+$/, '').split(/[\\/]/).pop() : '';
+  const verb = TOOL_VERBS[tool];
+  if (verb) return file ? `${verb} ${file}` : `${verb} a ${tool.includes('dir') ? 'folder' : 'file'}`;
+  return `Using ${tool.replace(/_/g, ' ')}`;
+}
+
+function toolPath(call: any): string | null {
+  const loc = Array.isArray(call?.locations) ? call.locations.find((l: any) => typeof l?.path === 'string' && l.path) : null;
+  if (loc) return loc.path;
+  const input = call?.rawInput;
+  if (input && typeof input === 'object') {
+    for (const key of ['path', 'file_path', 'filePath', 'TargetFile', 'targetFile', 'AbsolutePath', 'absolutePath', 'file']) {
+      if (typeof input[key] === 'string' && input[key]) return input[key];
+    }
+  }
+  return null;
 }
 
 /** Antigravity's "Tool call was approved but never executed" (in rawOutput or the call's content). */

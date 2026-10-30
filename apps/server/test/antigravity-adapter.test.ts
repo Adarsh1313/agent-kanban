@@ -5,7 +5,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AdapterEvent } from '@agent-kanban/shared';
-import { acpAction, AntigravityAdapter, pickOption, withFolder } from '../src/adapters/antigravity.ts';
+import { acpAction, friendlyTitle, AntigravityAdapter, pickOption, withFolder } from '../src/adapters/antigravity.ts';
 import { JsonRpcProcess } from '../src/adapters/jsonrpc.ts';
 import { ConnectionMonitor, makeGetVersion } from '../src/health.ts';
 
@@ -180,7 +180,7 @@ async function runEditPerm(order: string) {
     await adapter.startChat({ cwd, prompt: 'create hello.txt' });
     const req = await waitFor((e) => e.type === 'request.opened');
     assert.ok(req.type === 'request.opened');
-    assert.equal(req.summary, 'Run create_file?');
+    assert.equal(req.summary, 'Creating hello.txt'); // not the raw "Run create_file?" (#7)
     await adapter.respondToRequest('sess_1', req.requestId, 'allow');
     const done = await waitFor((e) => e.type === 'turn.completed');
     return { events, endAt: events.indexOf(done), req };
@@ -582,4 +582,14 @@ test('acpAction maps ACP tool kinds to edit / command / tool', () => {
   assert.equal(acpAction('other', 'Run python fix.py --edit_file a.txt?'), 'tool');
   assert.equal(acpAction('other', 'grep -r edit_file src'), 'tool');
   assert.equal(acpAction('other', 'create_file'), 'edit');
+});
+
+test('friendlyTitle: raw tool names become verbs with the file name; other titles stay (#7)', () => {
+  assert.equal(friendlyTitle('Run create_file?', { locations: [{ path: String.raw`C:\work\agy.txt` }] }), 'Creating agy.txt');
+  assert.equal(friendlyTitle('Running edit_file', { rawInput: { TargetFile: '/home/me/app/src/main.ts' } }), 'Editing main.ts');
+  assert.equal(friendlyTitle('create_file', {}), 'Creating a file');
+  assert.equal(friendlyTitle('list_dir', {}), 'Listing a folder');
+  assert.equal(friendlyTitle('Run grep_search?', {}), 'Using grep search');
+  assert.equal(friendlyTitle('Run npm test', {}), 'Run npm test');
+  assert.equal(friendlyTitle('Reading package.json', {}), 'Reading package.json');
 });
