@@ -30,6 +30,8 @@ export const STEP_SIGN_IN = 'Finish signing in in your browser';
 export const STEP_STARTING_ANTIGRAVITY = 'Starting Antigravity…';
 /** Antigravity has started and is about to open the browser; its link is not printed yet (#13). */
 export const STEP_OPENING_BROWSER = 'Opening your browser…';
+/** If the agent never prints its link, "Finish signing in" shows this long after it started. */
+export const OPENING_BROWSER_MS = 5_000;
 export const ANTIGRAVITY_DIDNT_START = "Antigravity didn't start. Try again.";
 // A cold Antigravity start was measured at up to 111 s before it answers; give it 180 s before giving up.
 export const ANTIGRAVITY_START_TIMEOUT_MS = 180_000;
@@ -477,13 +479,22 @@ export class ConnectService {
     const startLimit = setTimeout(() => op.ac.abort(new StartTimedOut('Antigravity did not start.')), ANTIGRAVITY_START_TIMEOUT_MS);
     let deadline: NodeJS.Timeout | undefined;
     let linked = false;
-    const signingIn = (hasLink: boolean) => {
-      if (signal.aborted || this.ops.get(id) !== op) return;
-      // Started but no link yet: "Opening your browser…"; once the link is printed, the browser is open: "Finish signing in".
-      if (hasLink && !linked) { linked = true; this.set(id, { step: STEP_SIGN_IN }); }
-      if (deadline) return;
+    let noLink: NodeJS.Timeout | undefined;
+    const live = () => !signal.aborted && this.ops.get(id) === op;
+    // The browser is open once the agent prints its link (or a few seconds after it started, if it never prints one).
+    const browserOpen = () => {
+      if (linked || !live()) return;
+      linked = true;
+      clearTimeout(noLink);
+      this.set(id, { step: STEP_SIGN_IN });
+    };
+    const started = () => {
+      if (deadline || !live()) return;
       clearTimeout(startLimit);
-      if (!linked) this.set(id, { step: STEP_OPENING_BROWSER });
+      if (!linked) {
+        this.set(id, { step: STEP_OPENING_BROWSER });
+        noLink = setTimeout(browserOpen, OPENING_BROWSER_MS);
+      }
       // The agent's own authenticate waits up to a day; Agent Kanban gives up 5 minutes after the sign-in began (abort stops the agent).
       deadline = setTimeout(() => op.ac.abort(new TimedOut('Sign-in timed out.')), SIGN_IN_TIMEOUT_MS);
     };
@@ -494,10 +505,11 @@ export class ConnectService {
     try {
       // The agent opens the browser itself; the link is kept only for "Open the browser again".
       await adapter.signIn((url) => {
-        signingIn(true);
+        started();
+        browserOpen();
         const href = findHttpsUrl(url, SIGN_IN_HOSTS.antigravity);
         if (href && !signal.aborted && this.ops.get(id) === op) this.set(id, { signInUrl: href });
-      }, signal, () => signingIn(false));
+      }, signal, started);
       if (signal.aborted) return aborted();
       this.finish(id, op, { phase: 'idle' });
     } catch (e) {
@@ -507,6 +519,7 @@ export class ConnectService {
     } finally {
       clearTimeout(startLimit);
       clearTimeout(deadline);
+      clearTimeout(noLink);
     }
   }
 

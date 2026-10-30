@@ -7,7 +7,7 @@ import type { AddressInfo } from 'node:net';
 import type { ConnectionHealth, ConnectState, ProviderId } from '@agent-kanban/shared';
 import {
   ConnectService, ConnectBusyError, SIGN_IN_TIMEOUT_MS, POLL_MS, SIGN_IN_DIDNT_FINISH, NETWORK_FAILED,
-  ANTIGRAVITY_SIGN_OUT_IN_APP, findHttpsUrl, STEP_SIGN_IN, STEP_STARTING_ANTIGRAVITY, STEP_OPENING_BROWSER, ANTIGRAVITY_DIDNT_START, ANTIGRAVITY_START_TIMEOUT_MS, SIGN_IN_HOSTS, NPM_TIMEOUT_MS, RECYCLE_RETRY_MS, npmFailureMessage,
+  ANTIGRAVITY_SIGN_OUT_IN_APP, findHttpsUrl, STEP_SIGN_IN, STEP_STARTING_ANTIGRAVITY, STEP_OPENING_BROWSER, OPENING_BROWSER_MS, ANTIGRAVITY_DIDNT_START, ANTIGRAVITY_START_TIMEOUT_MS, SIGN_IN_HOSTS, NPM_TIMEOUT_MS, RECYCLE_RETRY_MS, npmFailureMessage,
 } from '../src/connect/service.ts';
 import type { AntigravityAuth, UpdatableAdapter } from '../src/connect/service.ts';
 import type { CommandExit, CommandRunner, RunningCommand } from '../src/connect/run.ts';
@@ -957,6 +957,20 @@ test('Antigravity sign-in: after the agent starts it says "Opening your browserâ
   await flush();
   assert.equal(c.last('antigravity').step, STEP_SIGN_IN);
   assert.equal(c.last('antigravity').signInUrl, GOOGLE);
+  c.svc.cancel('antigravity');
+  await flush();
+});
+
+test('Antigravity sign-in: an agent that never prints its link still moves on to "Finish signing in" after a few seconds (#13 review)', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { adapter } = fakeAdapter({ url: GOOGLE, hang: true, linkLater: new Promise<void>(() => {}) });
+  const c = make({ script: () => ({}), adapter });
+  c.svc.signIn('antigravity');
+  await flush();
+  assert.equal(c.last('antigravity').step, STEP_OPENING_BROWSER);
+  t.mock.timers.tick(OPENING_BROWSER_MS);
+  await flush();
+  assert.equal(c.last('antigravity').step, STEP_SIGN_IN);
   c.svc.cancel('antigravity');
   await flush();
 });

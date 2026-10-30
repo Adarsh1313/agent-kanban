@@ -67,6 +67,8 @@ function connBody(id) {
     case 'missing': return `<span>${APP[id]} isn’t on this computer yet. Installing takes about a minute and uses the official ${id === 'claude' ? 'Anthropic' : id === 'codex' ? 'OpenAI' : 'Google'} installer.</span>`;
     case 'installing': return `<span class="step-text" data-step>${icon('refresh', 'sm')}Downloading ${APP[id]}…</span><div class="progress" role="progressbar" aria-label="Install progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i style="--p:0"></i></div>`;
     case 'signedout': return `<span class="step-text"><span class="done-mark">${icon('check')}</span>Installed. Sign in to finish setting up.</span><span>You’ll sign in on ${id === 'claude' ? 'claude.ai' : id === 'codex' ? 'chatgpt.com' : 'your Google account'} in your browser, then come back here.</span>`;
+    // Antigravity first shows “Starting Antigravity…” (with “This can take a couple of minutes the first time.”), then
+    // “Opening your browser…” once its agent runs, and this step once it has printed its sign-in link (#13).
     case 'signin': return `<span class="step-text">${statusIcon('running')}Finish signing in in your browser</span><span>We opened ${id === 'claude' ? 'claude.ai' : id === 'codex' ? 'chatgpt.com' : 'Google sign-in'}. This page updates on its own when you’re done.</span>`;
     // Antigravity's agent may not start at all (it gets 180 s); the app then shows this copy instead of the sign-in one.
     case 'error': if (id === 'antigravity' && c.startFailed) return `<span class="step-text" style="color:var(--color-danger)">${icon('x', 'sm')}Antigravity didn't start. Try again.</span><span>Its agent took too long to start. Trying again usually works; the first start can take a couple of minutes.</span>`;

@@ -22,6 +22,9 @@ function home(): string {
     { type: 'user', timestamp: '2026-10-27T10:00:08Z', message: { content: [{ type: 'tool_result', content: 'file text' }] } },
     { type: 'assistant', timestamp: '2026-10-27T10:00:09Z', message: { id: 'm1', content: [{ type: 'text', text: 'Found it.' }] } },
     { type: 'assistant', timestamp: '2026-10-27T10:00:10Z', message: { id: 'm2', content: [{ type: 'text', text: 'Fixed **login**.' }] } },
+    { type: 'user', message: { content: [{ type: 'image', source: {} }, { type: 'text', text: 'What is in this screenshot?' }] } },
+    { type: 'user', message: { content: '<div> renders twice, why?' } },
+    { type: 'user', isCompactSummary: true, message: { content: 'This session is being continued from a previous conversation…' } },
     { type: 'user', isMeta: true, message: { content: 'meta' } },
     { type: 'user', message: { content: '<command-name>/clear</command-name>' } },
     { type: 'user', isSidechain: true, message: { content: 'subagent prompt' } },
@@ -52,6 +55,8 @@ test('Claude: typed prompts and reply text only, one reply per message id, in or
     ['user', 'Fix the login bug'],
     ['assistant', 'Looking at it.\n\nFound it.'],
     ['assistant', 'Fixed **login**.'],
+    ['user', 'What is in this screenshot?'],
+    ['user', '<div> renders twice, why?'],
   ]);
   assert.equal(t.messages[0]!.at, '2026-10-27T10:00:00.000Z');
 });
@@ -64,7 +69,7 @@ test('Codex: user and assistant messages from the rollout, without injected cont
 test('only the last messages are returned, marked truncated', async () => {
   const t = await readTranscript(home(), 'claude', CLAUDE_ID, 2);
   assert.equal(t.truncated, true);
-  assert.deepEqual(t.messages.map((m) => m.text), ['Looking at it.\n\nFound it.', 'Fixed **login**.']);
+  assert.deepEqual(t.messages.map((m) => m.text), ['What is in this screenshot?', '<div> renders twice, why?']);
 });
 
 test('unknown chats, Antigravity and path-like session refs are unavailable, never read', async () => {
