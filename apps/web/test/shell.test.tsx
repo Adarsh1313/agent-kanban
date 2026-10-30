@@ -221,6 +221,23 @@ describe('Sidebar: pinned and recent', () => {
   });
 });
 
+describe('Shell: before the first load (#5)', () => {
+  it('shows "Loading your chats…" instead of an empty board; N does nothing until loaded', () => {
+    const store = createStore({ ...initialState(), now: NOW });
+    mount(store, <Shell />);
+    const newChat = () => document.querySelector<HTMLElement>('.dialog')?.dataset.state;
+    expect(document.querySelector('.app-loading')?.textContent).toBe('Loading your chats…');
+    expect(document.querySelector('.app')!.hasAttribute('inert')).toBe(true);
+    fireEvent.keyDown(document.body, { key: 'n' });
+    expect(newChat()).toBe('closed');
+    act(() => store.setState((s) => applySnapshot(s, { chats: [chat()], usage: [], suggested: null, connections: [], history: [], projects: [] })));
+    expect(document.querySelector('.app-loading')).toBeNull();
+    expect(document.querySelector('.app')!.hasAttribute('inert')).toBe(false);
+    fireEvent.keyDown(document.body, { key: 'n' });
+    expect(newChat()).toBe('open');
+  });
+});
+
 describe('Shell: connection banner', () => {
   const banner = () => document.querySelector('.conn-banner')?.textContent ?? null;
   it('connecting (before the first open) shows no banner', () => {

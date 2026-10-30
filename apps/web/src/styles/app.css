@@ -25,6 +25,8 @@ html, body { overflow: hidden; }
 /* Connection status (Reconnecting… / server restarted) sits under the top bar */
 .conn-banner { flex: none; padding: var(--space-2) var(--space-4); font-size: var(--text-body); color: var(--color-text-muted); background: var(--color-control); border-bottom: 1px solid var(--color-border); }
 .conn-banner[data-state="unauthorized"] { color: var(--color-needs-text); background: var(--color-needs-soft); }
+.app[data-loading] { visibility: hidden; }
+.app-loading { position: fixed; inset: 0; display: grid; place-items: center; margin: 0; font-size: var(--text-body); color: var(--color-text-muted); }
 
 /* Board: each card sits in a stable slot the board moves between columns (FLIP keeps the same node) */
 .col-cards, .card-slot { display: contents; }
