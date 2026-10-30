@@ -3,6 +3,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { AppState } from '../../state/reducer.ts';
 import { useStore } from '../../state/store.ts';
 import { clockTime, toolIcon } from '../board/format.ts';
+import { Markdown } from './Markdown.tsx';
 import { Icon, ProviderLogo, StatusIcon, providerName } from '../primitives/index.ts';
 import { RequestCard } from './RequestCard.tsx';
 
@@ -176,7 +177,7 @@ export function Thread({ chat }: { chat: Chat }) {
                 </div>
                 {t.calls.length > 0 && <WorkGroup calls={t.calls} working={working} />}
                 {working && t.calls.length === 0 && t.replies.length === 0 && <div className="thread-note"><StatusIcon state="running" />Working…</div>}
-                {t.replies.map((r) => <div className="msg-text" key={r.id}>{r.text}</div>)}
+                {t.replies.map((r) => <div className="msg-text md" key={r.id}><Markdown text={r.text} /></div>)}
               </div>
             )}
           </div>

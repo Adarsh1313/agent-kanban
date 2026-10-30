@@ -53,6 +53,21 @@ html, body { overflow: hidden; }
 .thread .turn { display: flex; flex-direction: column; gap: var(--space-4); }
 .thread .msg.agent { width: 100%; }
 .msg-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+/* Agent replies render markdown (#4): block spacing comes from the elements, not from pre-wrap. */
+.msg-text.md { white-space: normal; }
+.md > :first-child { margin-top: 0; }
+.md > :last-child { margin-bottom: 0; }
+.md-p, .md-list, .md-code, .md-quote { margin: 0 0 var(--space-2); }
+.md-h { margin: var(--space-3) 0 var(--space-1); font-weight: var(--weight-semibold); }
+.md-h1 { font-size: var(--text-heading); }
+.md-list { padding-left: var(--space-5); }
+.md-list li + li { margin-top: var(--space-1); }
+.md-inline, .md-code { font-family: var(--font-mono); font-size: var(--text-caption); background: var(--color-control); border-radius: var(--radius-badge); }
+.md-inline { padding: 0 var(--space-1); }
+.md-code { padding: var(--space-2) var(--space-3); overflow-x: auto; white-space: pre; border: 1px solid var(--color-border); border-radius: var(--radius-control); }
+.md-code code { font: inherit; background: none; }
+.md-quote { padding-left: var(--space-3); border-left: 2px solid var(--color-border-strong); color: var(--color-text-muted); }
+.md a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
 .msg.agent .work + .msg-text, .msg.agent .msg-text + .msg-text, .msg.agent .work + .thread-note { margin-top: var(--space-3); }
 .msg-time { font-size: var(--text-caption); color: var(--color-text-faint); font-variant-numeric: tabular-nums; }
 .msg.user .msg-time { display: block; text-align: right; margin-top: var(--space-1); }

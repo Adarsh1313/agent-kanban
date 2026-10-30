@@ -92,8 +92,8 @@ describe('Chat panel: opening and loading', () => {
     act(() => store.setState((s) => applyEvent(s, { type: 'message.delta', chatId: 'c1', messageId: 'a1', text: 'lo there', offset: 3 })));
     expect(within(panel()).getByText('Hello there')).toBeTruthy();
     act(() => store.setState((s) => applyEvent(s, { type: 'message.completed', chatId: 'c1', message: message({ id: 'a1', text: 'Hello there!', createdAt: '2026-10-23T11:59:00.000Z' }) })));
-    expect(within(panel()).getByText('Hello there!', { selector: '.msg-text' })).toBeTruthy();
-    expect(within(panel()).queryByText('Hello there', { selector: '.msg-text' })).toBeNull();
+    expect(within(panel()).getByText('Hello there!', { selector: '.msg-text, .msg-text .md-p' })).toBeTruthy();
+    expect(within(panel()).queryByText('Hello there', { selector: '.msg-text, .msg-text .md-p' })).toBeNull();
   });
 
   it('announces a completed reply once, not each streamed piece', async () => {
