@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'">
+<title>Agent Kanban</title>
+<!-- Shown when the server couldn't start (design/DESIGN.md, Desktop app). Never the raw error: that goes to desktop.log. -->
+<link rel="stylesheet" href="../../../design/tokens.css">
+<style>
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--color-bg); color: var(--color-text); font-family: var(--font-ui); font-size: var(--text-body);
+    display: grid; place-items: center; text-align: center; -webkit-font-smoothing: antialiased; }
+  main { max-width: 420px; padding: var(--space-6); }
+  h1 { margin: 0 0 var(--space-2); font-size: var(--text-heading); font-weight: var(--weight-semibold); letter-spacing: var(--tracking-tight); }
+  p { margin: 0 0 var(--space-6); color: var(--color-text-muted); line-height: var(--leading-body); font-size: var(--text-lead); }
+  .row { display: flex; gap: var(--space-2); justify-content: center; }
+  button { font: inherit; font-weight: var(--weight-medium); height: 32px; padding: 0 var(--space-4); border: 0; border-radius: var(--radius-control);
+    background: var(--color-control); color: var(--color-text); cursor: pointer;
+    transition: background-color var(--duration-hover) var(--ease-colour), transform var(--duration-press) var(--ease-out); }
+  button:hover { background: var(--color-control-hover); }
+  button:active { transform: scale(var(--press-scale)); }
+  button.primary { background: var(--color-ink); color: var(--color-ink-contrast); }
+  button.primary:hover { background: var(--color-ink-hover); }
+  button:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+  button[disabled] { opacity: .5; cursor: default; }
+  @media (prefers-reduced-motion: reduce) { button { transition-property: background-color; } button:active { transform: none; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>Agent Kanban couldn’t start</h1>
+  <p id="why"></p>
+  <div class="row">
+    <button type="button" id="quit">Quit</button>
+    <button type="button" class="primary" id="retry">Try again</button>
+  </div>
+</main>
+<script>
+  const WHY = {
+    locked: 'Agent Kanban is already open somewhere else, maybe in a browser tab, and is using your chats. Close it, then try again.',
+    other: 'Something stopped it from starting. Try again, and if it keeps happening, restart your computer.',
+  };
+  const reason = new URLSearchParams(location.search).get('reason');
+  document.getElementById('why').textContent = WHY[reason] || WHY.other;
+  const startup = window.agentKanbanStartup;
+  const retry = document.getElementById('retry');
+  retry.addEventListener('click', () => { retry.disabled = true; retry.textContent = 'Starting…'; startup.retry(); });
+  document.getElementById('quit').addEventListener('click', () => startup.quit());
+  retry.focus();
+</script>
+</body>
+</html>

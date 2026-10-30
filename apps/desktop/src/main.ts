@@ -1,12 +1,12 @@
 // Agent Kanban desktop app: Electron's main process. It owns the window, the server child process and
 // (later) the tray; it holds no chat logic. Spec: docs/specs/desktop-app.md.
-import { app, BrowserWindow, nativeTheme, screen, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, nativeTheme, screen, shell } from 'electron';
 import { mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { restorePlacement, type Placement } from './placement.ts';
-import { startServer, type ServerProcess } from './server-process.ts';
+import { startServer, type ServerProcess, type StartResult } from './server-process.ts';
 import { loadState, saveState } from './state.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -39,7 +39,7 @@ function savePlacement(): void {
   saveState(statePath, state);
 }
 
-function createWindow(url: string): void {
+function createWindow(): BrowserWindow {
   const placement = restorePlacement(state.placement, [screen.getPrimaryDisplay(), ...screen.getAllDisplays()].map((d) => d.workArea));
   win = new BrowserWindow({
     x: placement.x, y: placement.y, width: placement.width, height: placement.height,
@@ -57,7 +57,8 @@ function createWindow(url: string): void {
       backgroundThrottling: false,
     },
   });
-  win.setMenu(null);
+  const w = win;
+  w.setMenu(null);
   if (placement.maximized) win.maximize();
   win.once('ready-to-show', showWindow);
 
@@ -78,23 +79,31 @@ function createWindow(url: string): void {
   win.on('move', queueSave);
   win.on('close', savePlacement);
   win.on('closed', () => { win = null; });
-
-  void win.loadURL(url);
+  return w;
 }
 
+function showStartFailed(reason: Extract<StartResult, { type: 'failed' }>['reason']): void {
+  origin = '';
+  void (win ?? createWindow()).loadFile(join(here, 'start-failed.html'), { query: { reason } });
+}
+
+/** Starts the server and loads the board, or the start-failure page if it can't start. */
 async function launch(): Promise<void> {
   server = startServer({ mainPath: join(here, '..', '..', 'server', 'src', 'main.ts'), logPath: join(dataDir, 'desktop.log') });
   const result = await server.started;
   if (result.type !== 'ready') {
-    // Replaced by the start-failure page in the next slice.
-    console.error(result.message);
-    app.quit();
+    server = null;
+    showStartFailed(result.reason);
     return;
   }
   origin = `http://127.0.0.1:${result.port}`;
-  server.onUnexpectedExit(() => { if (!quitting) app.quit(); });
-  createWindow(`${origin}/?token=${result.token}`);
+  server.onUnexpectedExit(() => { server = null; if (!quitting) showStartFailed('other'); });
+  void (win ?? createWindow()).loadURL(`${origin}/?token=${result.token}`);
 }
+
+// Buttons on the start-failure page.
+ipcMain.on('startup:retry', (e) => { if (!server && e.sender === win?.webContents) void launch(); });
+ipcMain.on('startup:quit', () => app.quit());
 
 if (!app.requestSingleInstanceLock()) {
   // Another copy is running: it brings its window forward (second-instance below), and this one leaves.
