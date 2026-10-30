@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Store } from '../src/store.ts';
+import { chatTitle, Store } from '../src/store.ts';
 
 const tick = () => new Promise((r) => setTimeout(r, 5));
 
@@ -15,8 +15,11 @@ test('createChat normalizes title and defaults', () => {
   assert.equal(c.needsReason, null);
   assert.equal(c.archived, false);
   assert.equal(c.pinned, false);
-  assert.equal(c.title, first.slice(0, 60));
-  assert.equal(c.title.length, 60);
+  // Cut at a word with an ellipsis, never mid-word (#9).
+  assert.equal(c.title, 'Line one that is quite long and goes on and on and on and…');
+  assert.ok(c.title.length <= 60);
+  assert.equal(chatTitle('x'.repeat(80)), 'x'.repeat(59) + '…');
+  assert.equal(chatTitle('short'), 'short');
 });
 
 test('updateChat bumps updatedAt and persists across stores', async () => {
@@ -105,7 +108,7 @@ test('upsertToolCall returns the stored tool call with a stable createdAt', () =
 test('title is the first non-blank line, trimmed, at most 60 characters; blank prompts get a fallback', () => {
   const s = new Store(':memory:');
   assert.equal(s.createChat({ provider: 'claude', cwd: '/x', title: '\n   \n  Fix the login bug  \nmore' }).title, 'Fix the login bug');
-  assert.equal(s.createChat({ provider: 'claude', cwd: '/x', title: '  ' + 'x'.repeat(80) }).title, 'x'.repeat(60));
+  assert.equal(s.createChat({ provider: 'claude', cwd: '/x', title: '  ' + 'x'.repeat(80) }).title, 'x'.repeat(59) + '…');
   assert.equal(s.createChat({ provider: 'claude', cwd: '/x', title: ' \r\n \t ' }).title, 'Untitled chat');
 });
 
