@@ -196,16 +196,16 @@
 
 /* Agent rows (connect step) */
 .agent-list { border: 1px solid var(--color-border); border-radius: var(--radius-card); background: var(--color-surface); }
-.agent { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3); border-top: 1px solid var(--color-border); min-height: 64px; }
-.agent:first-child { border-top: 0; }
-.agent .logo { width: 28px; height: 28px; border-radius: 7px; }
-.agent .t { flex: 1; min-width: 0; }
-.agent .t b { display: block; font-weight: var(--weight-medium); }
-.agent .t small { display: flex; align-items: center; gap: 6px; color: var(--color-text-muted); font-size: var(--text-caption); }
-.agent .t small .status { width: 12px; height: 12px; }
-.agent .progress { width: 120px; }
-.agent .ok { display: inline-flex; align-items: center; gap: 6px; color: var(--color-success); font-size: var(--text-caption); font-weight: var(--weight-medium); }
-.agent .skel { height: 10px; width: 120px; border-radius: 4px; background: var(--color-control); }
+.agent-row { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3); border-top: 1px solid var(--color-border); min-height: 64px; }
+.agent-row:first-child { border-top: 0; }
+.agent-row .logo { width: 28px; height: 28px; border-radius: 7px; }
+.agent-row .t { flex: 1; min-width: 0; }
+.agent-row .t b { display: block; font-weight: var(--weight-medium); }
+.agent-row .t small { display: flex; align-items: center; gap: 6px; color: var(--color-text-muted); font-size: var(--text-caption); }
+.agent-row .t small .status { width: 12px; height: 12px; }
+.agent-row .progress { width: 120px; }
+.agent-row .ok { display: inline-flex; align-items: center; gap: 6px; color: var(--color-success); font-size: var(--text-caption); font-weight: var(--weight-medium); }
+.agent-row .skel { height: 10px; width: 120px; border-radius: 4px; background: var(--color-control); }
 
 /* Chats step */
 .found { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: var(--space-2); }

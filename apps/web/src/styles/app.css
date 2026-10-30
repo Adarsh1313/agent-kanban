@@ -172,5 +172,5 @@ body:has(> .onb[data-state="open"]) > .toasts { z-index: 91; }
 .onb .found .onb-show { margin-top: calc(var(--space-1) * 1.5); }
 .onb-k { font-size: var(--text-micro); color: var(--color-text-faint); font-weight: var(--weight-medium); margin-bottom: calc(var(--space-1) * 1.5); }
 .onb .onb-play { height: auto; padding: 0 calc(var(--space-1) / 2); display: inline; }
-.onb .agent .t small + small { color: var(--color-text-faint); }
+.onb .agent-row .t small + small { color: var(--color-text-faint); }
 .onb h1:focus { outline: none; }

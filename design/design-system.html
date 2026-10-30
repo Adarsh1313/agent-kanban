@@ -503,7 +503,7 @@ $('#connPlay').onclick = () => {
 
 /* ── 4e. Onboarding + empty states ── */
 const OB = [['claude', 'Found and signed in', 'ok'], ['codex', 'Installed, not signed in', 'Sign in'], ['antigravity', 'Not on this computer', 'Install']];
-$('#obAgents').innerHTML = OB.map(([p, sub, act]) => `<div class="agent">${logo(p)}<div class="t"><b>${{ claude: 'Claude Code', codex: 'Codex', antigravity: 'Antigravity' }[p]}</b><small>${sub}</small></div>${act === 'ok' ? `<span class="ok"><span class="done-mark">${icon('check')}</span>Connected</span>` : `<button class="btn" type="button">${act}</button>`}</div>`).join('');
+$('#obAgents').innerHTML = OB.map(([p, sub, act]) => `<div class="agent-row">${logo(p)}<div class="t"><b>${{ claude: 'Claude Code', codex: 'Codex', antigravity: 'Antigravity' }[p]}</b><small>${sub}</small></div>${act === 'ok' ? `<span class="ok"><span class="done-mark">${icon('check')}</span>Connected</span>` : `<button class="btn" type="button">${act}</button>`}</div>`).join('');
 let obStep = 1;
 const paintOb = () => { $('#obCount').textContent = `Step ${obStep} of 4`; $('#obBar').querySelectorAll('i').forEach((i, n) => i.style.setProperty('--f', n < obStep ? 1 : 0)); };
 $('#obNext').onclick = () => { obStep = Math.min(4, obStep + 1); paintOb(); };

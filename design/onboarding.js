@@ -147,7 +147,7 @@ function agentRow(id) {
   const act = { detecting: '', connected: `<span class="ok"><span class="done-mark">${icon('check')}</span>Connected</span>`,
     signedout: `<button class="btn" type="button" data-act="signin">Sign in</button>`, missing: `<button class="btn" type="button" data-act="install">Install</button>`,
     installing: `<div class="progress"><i style="--p:0"></i></div>`, signin: `<button class="btn ghost" type="button" data-act="cancel">Cancel</button>` }[s];
-  return `<div class="agent" data-agent="${id}">${logo(id)}<div class="t"><b>${APP[id]}</b><small>${sub}</small></div>${act}</div>`;
+  return `<div class="agent-row" data-agent="${id}">${logo(id)}<div class="t"><b>${APP[id]}</b><small>${sub}</small></div>${act}</div>`;
 }
 function connectStep() {
   const n = PIDS.filter(id => onb.agents[id] === 'connected').length;

@@ -205,7 +205,7 @@ function AgentRow({ id }: { id: ProviderId }) {
   const slow = id === 'antigravity' && (view === 'installing' || (view === 'signin' && antigravityStarting(id, connect)));
 
   return (
-    <div className="agent" data-agent={id} data-view={view} ref={rowRef} tabIndex={-1} onFocus={() => { focusInside.current = true; }}>
+    <div className="agent-row" data-agent={id} data-view={view} ref={rowRef} tabIndex={-1} onFocus={() => { focusInside.current = true; }}>
       <ProviderLogo id={id} />
       <div className="t">
         <b>{name}</b>
