@@ -26,27 +26,26 @@ Questions for the grilling:
 
 Note: `design/` has `design-brief.md` + `tokens.css` but no `DESIGN.md`. If the desktop app needs new UI (tray menu, window chrome, icon), run `/design-grill` for those gaps.
 
-## 2. Then issues by severity (labels P1 → P3)
+## 2. Issues by severity (labels P1 → P3)
 
-**P1**, hurts everyday use:
-- #5 onboarding flashes in late and can take over an open dialog
-- #8 chat panel stays on top of other pages
-- #12 Codex Stop-while-starting + quick Send race
-- #4 render markdown in replies
+**Fixed on branch `fix/p1-issues` (2026-10-30):** #5, #8, #12, #4 (all of P1), #6, #9, #10, #7.
 
-**P2**, noticeable, has a workaround:
-- #7 raw tool names / long paths in steps
-- #9 card hover height jump, titles cut mid-word
-- #10 panel header wrap
-- #6 notifications copy when blocked
-- #21 update failure (needs the message the user saw; both updates worked when run directly)
-- #11 temp test folders as projects (needs a product decision)
+**Waiting on the user:**
+- #21: update failure. Need the message the app showed; both updates worked when run directly.
+- #11: temp test folders as projects. Hide by default, or clean up?
 
-**P3**, polish / later: #13, #14, #16, #17, #19, #18.
+**Next, P3:**
+- #13: Antigravity sign-in polish
+- #14: Antigravity update while busy / old versions
+- #16: past messages for imported chats
+- #17: notifications id, burst cap, archive animation
+- #19: small edge cases
+- #18: hosted web (decide after the desktop app)
 
 ## Done, waiting to be merged
 
 - Branch `fix/chat-layout-and-launcher`: #3 and the launcher.
 - Branch `feat/any-provider-folders`: built on it, adds #22, #23, #24.
+- Branch `fix/p1-issues`: built on that, adds #5 #8 #12 #4 #6 #9 #10 #7. Merging this one brings in all three.
 
 Close those issues when they're merged.
