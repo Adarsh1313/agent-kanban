@@ -146,3 +146,4 @@ export interface ModelOption { id: string; label: string; isDefault: boolean }
 
 export { suggest } from './usage.ts';
 export { folderKey } from './paths.ts';
+export type { ServerToDesktop, DesktopToServer, DesktopStatus, DesktopBridge } from './desktop.ts';

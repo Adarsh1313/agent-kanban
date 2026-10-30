@@ -3,7 +3,7 @@ import { mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { AddressInfo } from 'node:net';
-import type { ProviderId, ServerEvent, UsageReading } from '@agent-kanban/shared';
+import type { DesktopToServer, ProviderId, ServerEvent, ServerToDesktop, UsageReading } from '@agent-kanban/shared';
 import { Store } from './store.ts';
 import { ChatService } from './chats.ts';
 import { UsageService, notInstalledReading } from './usage/service.ts';
@@ -27,6 +27,14 @@ import { acquireLock, releaseLock } from './lock.ts';
 // Last resort: a stray rejection is logged, never allowed to take the server (and every chat) down.
 process.on('unhandledRejection', (e) => console.error('[agent-kanban] unhandled', e));
 
+// Started by the desktop app: it hears from us over the IPC channel, never by reading the console, so the
+// token is never printed. Browser mode (npm start) has no channel and keeps the console URL.
+const desktop = process.env.AGENT_KANBAN_DESKTOP === '1' && typeof process.send === 'function';
+const tellDesktop = (m: ServerToDesktop) => new Promise<void>((done) => {
+  if (!desktop) return done();
+  process.send!(m, undefined, undefined, () => done());
+});
+
 // Provider homes (~/.claude, ~/.codex, ~/.gemini) are always the real home. Agent Kanban's own data
 // (.agent-kanban: database, lock, the Antigravity install) goes under AGENT_KANBAN_HOME when it is set.
 const home = homedir();
@@ -36,7 +44,9 @@ mkdirSync(dataDir, { recursive: true });
 const lockPath = join(dataDir, 'server.lock');
 if (!acquireLock(lockPath)) {
   // A crashed server's pid can be reused by another program: say which file to delete if it really isn't running (#19).
-  console.error(`Agent Kanban is already running. If it isn't, delete ${lockPath} and start it again.`);
+  const message = `Agent Kanban is already running. If it isn't, delete ${lockPath} and start it again.`;
+  console.error(message);
+  await tellDesktop({ type: 'failed', reason: 'locked', message });
   process.exit(1);
 }
 process.on('exit', () => releaseLock(lockPath));
@@ -123,14 +133,17 @@ try {
   });
 } catch (err) {
   const code = (err as NodeJS.ErrnoException).code;
-  console.error(code === 'EADDRINUSE' ? `Port ${port} is already in use. Close the other program or pick another AGENT_KANBAN_PORT.` : `Couldn't start the server: ${(err as Error).message}`);
+  const message = code === 'EADDRINUSE' ? `Port ${port} is already in use. Close the other program or pick another AGENT_KANBAN_PORT.` : `Couldn't start the server: ${(err as Error).message}`;
+  console.error(message);
+  await tellDesktop({ type: 'failed', reason: 'other', message });
   // The adapters may already hold helper processes: shut them down before leaving.
   await Promise.race([adapters.dispose().catch(() => {}), new Promise((r) => setTimeout(r, 5_000))]);
   process.exit(1);
 }
 api.server.on('error', (err) => console.error('Server error:', err));
 const addr = api.server.address() as AddressInfo;
-console.log(`Agent Kanban server: http://127.0.0.1:${addr.port}/?token=${token}`);
+if (desktop) await tellDesktop({ type: 'ready', port: addr.port, token });
+else console.log(`Agent Kanban server: http://127.0.0.1:${addr.port}/?token=${token}`);
 // The desktop launcher (scripts/desktop/start.mjs) asks for the page to open: the token goes straight to the browser.
 if (process.env.AGENT_KANBAN_OPEN_BROWSER === '1') {
   try { openLocalApp(`http://127.0.0.1:${addr.port}/?token=${token}`); } catch (e) { console.error("Couldn't open the browser:", (e as Error).message); }
@@ -157,6 +170,12 @@ async function shutdown(): Promise<void> {
 for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGBREAK'] as const) process.on(sig, () => void shutdown());
 // The desktop "Stop Agent Kanban" shortcut drops a stop.request file in the data folder.
 watchStopRequest(join(dataDir, STOP_REQUEST_FILE), () => void shutdown());
+// The desktop app asks us to stop over the channel (signals kill a child outright on Windows). If the app
+// itself goes away, the channel closes and we stop too, so no server is left running on its own.
+if (desktop) {
+  process.on('message', (m) => { if ((m as DesktopToServer | null)?.type === 'stop') void shutdown(); });
+  process.on('disconnect', () => void shutdown());
+}
 // Test harnesses (scripts/e2e-real.ts) stop the server by closing its stdin: a graceful shutdown on every platform.
 if (process.env.AGENT_KANBAN_E2E === '1') {
   process.stdin.on('end', () => void shutdown());

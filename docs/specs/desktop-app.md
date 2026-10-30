@@ -197,7 +197,7 @@ for development, using the same data.
 ## Progress
 
 - [x] 1. Feasibility: server runs on Electron 45's Node (`node:sqlite`, type stripping, Agent SDK, spawning providers); outcome recorded in ADR 0001
-- [ ] 2. Server desktop mode: random port, IPC `ready` / `failed` / `stop`, exits when the channel closes (seam 1)
+- [x] 2. Server desktop mode: random port, IPC `ready` / `failed` / `stop`, exits when the channel closes (seam 1)
 - [ ] 3. Desktop workspace: single instance, starts the server, window hidden until ready, token handoff, external links to the browser, window placement saved and clamped (seam 3)
 - [ ] 4. Startup failure page with Try again / Quit, `locked` and `other` reasons
 - [ ] 5. Desktop bridge + web status reporting; tray icon with needs-you dot and tray menu; close to tray with first-close note; Quit confirmation and clean stop; Start at login (seams 3 and 4)
