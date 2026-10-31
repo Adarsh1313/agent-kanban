@@ -126,6 +126,8 @@ export interface Settings {
   hiddenProjects: string[];
   /** Folders under the temp folder the user chose to show again (they would otherwise be hidden automatically). */
   unhiddenProjects: string[];
+  /** The projects the user works on, shown in the sidebar (folder paths); null until the user has picked. */
+  myProjects: string[] | null;
 }
 
 export interface Project {
