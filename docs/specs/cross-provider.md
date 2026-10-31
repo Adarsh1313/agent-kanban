@@ -116,7 +116,7 @@ Claude's limit was hit mid-way through a project, so the user moved the work to 
 
 ## Progress
 
-- [ ] Slice 1: settings (`homeProvider`, `skillSync`) + sync engine for skills folders with tests
+- [x] Slice 1: settings (`homeProvider`, `skillSync`) + sync engine for skills folders with tests
 - [ ] Slice 2: instruction files managed block + plugin skills + file watch + `GET/POST /api/skills`
 - [ ] Slice 3: web: onboarding home provider step, Settings section (Show more, skipped list, Sync now)
 - [ ] Slice 4: composer `/` skill list with per-provider form on send

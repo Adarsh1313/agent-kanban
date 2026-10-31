@@ -19,6 +19,9 @@ test('defaults: not onboarded, every provider shown and suggested', () => {
     suggest: { claude: true, codex: true, antigravity: true },
     hiddenProjects: [],
     unhiddenProjects: [],
+    homeProvider: null,
+    skillSync: false,
+    notesProjects: [],
   });
   assert.deepEqual(s.get(), defaultSettings());
 });
@@ -36,9 +39,23 @@ test('patch round-trips through the store (partial per-provider updates) and sur
     suggest: { claude: true, codex: false, antigravity: true },
     hiddenProjects: ['/work/old'],
     unhiddenProjects: [],
+    homeProvider: null,
+    skillSync: false,
+    notesProjects: [],
   };
   assert.deepEqual(out, want);
   assert.deepEqual(new SettingsStore(new Store(join(dir, 'ak.db'))).get(), want);
+});
+
+test('picking a home provider turns skill sync on by default; an explicit choice sticks', () => {
+  const s = new SettingsStore(tempStore());
+  assert.equal(s.patch({ homeProvider: 'claude' }).skillSync, true);
+  assert.equal(s.patch({ skillSync: false }).skillSync, false);
+  assert.equal(s.patch({ homeProvider: 'codex' }).skillSync, false);
+  assert.equal(s.get().homeProvider, 'codex');
+  assert.deepEqual(s.patch({ notesProjects: ['/work/a'] }).notesProjects, ['/work/a']);
+  assert.throws(() => s.patch({ homeProvider: 'gemini' }), SettingsError);
+  assert.throws(() => s.patch({ skillSync: 'on' }), SettingsError);
 });
 
 test('a bad patch is refused as a whole and changes nothing', () => {

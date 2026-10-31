@@ -126,6 +126,18 @@ export interface Settings {
   hiddenProjects: string[];
   /** Folders under the temp folder the user chose to show again (they would otherwise be hidden automatically). */
   unhiddenProjects: string[];
+  /** The provider whose skills and global instructions are copied to the others (null until picked). */
+  homeProvider?: ProviderId | null;
+  /** Skill sync on or off; on by default once a home provider is picked. */
+  skillSync?: boolean;
+  /** Folder keys of projects with project notes turned on. */
+  notesProjects?: string[];
+}
+
+/** What skill sync did: names copied to at least one provider, and copies left out because the name was taken. */
+export interface SkillsReport {
+  synced: string[];
+  skipped: { name: string; provider: ProviderId }[];
 }
 
 export interface Project {
