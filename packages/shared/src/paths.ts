@@ -24,3 +24,6 @@ export function claudeScratchRoot(path: string): string | null {
 
 /** The folder of the project a chat belongs to: its own folder, or the scratch root for Claude scratch chats. */
 export const projectFolder = (cwd: string): string => claudeScratchRoot(cwd) ?? cwd;
+
+/** True for the Claude app's scratch-workspaces folder itself or any scratch folder inside it. */
+export const isClaudeScratch = (path: string): boolean => claudeScratchRoot(path.trim().replace(/[\\/]*$/, '/')) !== null;

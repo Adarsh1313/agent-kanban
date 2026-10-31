@@ -153,5 +153,5 @@ export interface ProjectInfo {
 export interface ModelOption { id: string; label: string; isDefault: boolean }
 
 export { suggest } from './usage.ts';
-export { folderKey, claudeScratchRoot, projectFolder, CLAUDE_SCRATCH_NAME } from './paths.ts';
+export { folderKey, claudeScratchRoot, isClaudeScratch, projectFolder, CLAUDE_SCRATCH_NAME } from './paths.ts';
 export type { ServerToDesktop, DesktopToServer, DesktopStatus, DesktopBridge } from './desktop.ts';

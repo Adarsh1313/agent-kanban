@@ -158,5 +158,5 @@ the same ordering, hiding and naming rules.
 - [x] Slice 3: Projects page sorted by last activity, Show hidden projects switch, Hide project / Unhide, Folder missing note
 - [x] Slice 4: Recent chats as a flat list of 10 (variant A rows, date on hover)
 - [x] Slice 5: All chats view: route, nav entry, All chats link under Recent chats, list, search with highlight, Project/Provider filter menu + chips, sidebar search icon
-- [ ] Slice 6: New chat picker: Older (n) row, search opens it, folder-missing and scratch left out; Project filter menu by project (hidden left out, scratch as one, Older label)
+- [x] Slice 6: New chat picker: Older (n) row, search opens it, folder-missing and scratch left out; Project filter menu by project (hidden left out, scratch as one, Older label)
 - [ ] Slice 7: glossary and README check, close #11

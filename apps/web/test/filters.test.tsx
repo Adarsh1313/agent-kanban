@@ -219,3 +219,32 @@ describe('Shell: F key and the sidebar', () => {
     expect(screen.queryByText('No matching chats')).toBeNull();
   });
 });
+
+describe('Filter menu: Project', () => {
+  const ROOT = 'C:/Users/me/AppData/Roaming/Claude/scratch-workspaces';
+  const chats: Chat[] = [
+    chat({ id: 'a', sessionRef: 'sa', cwd: '/work/alpha', updatedAt: '2026-10-23T11:00:00.000Z' }),
+    chat({ id: 't', sessionRef: 'st', cwd: '/tmp/ak-claude-1', updatedAt: '2026-10-23T11:00:00.000Z' }),
+  ];
+  const history: HistoryChat[] = [
+    { provider: 'claude', sessionRef: 'h1', title: 'Regex', cwd: `${ROOT}/u1/scratch-aa`, updatedAt: '2026-10-22T11:00:00.000Z' },
+    { provider: 'claude', sessionRef: 'h2', title: 'Zstd', cwd: `${ROOT}/u2/scratch-bb`, updatedAt: '2026-10-21T11:00:00.000Z' },
+    { provider: 'codex', sessionRef: 'h3', title: 'Thesis outline', cwd: '/work/thesis', updatedAt: '2026-08-01T11:00:00.000Z' },
+  ];
+  const hiddenTemp = { id: '/tmp/ak-claude-1', name: 'ak-claude-1', path: '/tmp/ak-claude-1', providers: [], columns: { running: 0, needs_you: 0, review: 0, done: 0 }, historyOnly: 0, lastActivityAt: '', hidden: 'auto' as const, folderMissing: false };
+
+  it('offers one option per project (Claude scratch chats as one), leaves hidden ones out, and puts older ones under their own label', () => {
+    const base = seeded({}, chats, history);
+    const store = createStore({ ...base.getState(), projects: [hiddenTemp] });
+    mount(store);
+    openMenu();
+    fireEvent.click(item('Project'));
+    const rows = [...menu().querySelectorAll('.menu-item[role="menuitemcheckbox"], .menu-label')].map((e) => e.textContent?.trim());
+    expect(rows.slice(1)).toEqual(['alpha', 'Claude scratch chats', 'Older · no activity in 30 days', 'thesis']);
+  });
+
+  it('choosing Claude scratch chats keeps every scratch chat', () => {
+    const base = seeded({ project: [ROOT] }, chats, history);
+    expect(recentChats(base.getState(), NOW).map((c) => c.title).sort()).toEqual(['Regex', 'Zstd']);
+  });
+});

@@ -1,9 +1,12 @@
 import type { Chat, Column, ProviderId } from '@agent-kanban/shared';
-import { CLAUDE_SCRATCH_NAME, claudeScratchRoot, folderKey, projectFolder } from '@agent-kanban/shared';
+import { CLAUDE_SCRATCH_NAME, folderKey, isClaudeScratch, projectFolder } from '@agent-kanban/shared';
 import type { AppState, Filters } from './reducer.ts';
 
 const MINUTE = 60_000;
 const ACTIVITY_LIMIT_MIN = { hour: 60, today: 1440, week: 10080 } as const;
+
+/** A project with no activity for this long is "Older": folded away in New chat and the Project filter. */
+export const OLDER_MS = 30 * 86_400_000;
 
 /** How many chats the sidebar's Recent chats lists; All chats has the rest. */
 export const RECENT_CHATS = 10;
@@ -65,7 +68,7 @@ interface Filterable {
 
 function passes(c: Filterable, f: Filters, now: number): boolean {
   if (f.provider && !f.provider.includes(c.provider)) return false;
-  if (f.project && !f.project.some((p) => folderKey(p) === folderKey(c.cwd))) return false;
+  if (f.project && !f.project.some((p) => folderKey(projectFolder(p)) === folderKey(projectFolder(c.cwd)))) return false;
   if (f.status && !(c.column && f.status.includes(c.column))) return false;
   if (f.model && !(c.model !== null && f.model.includes(c.model))) return false;
   if (f.reason && !(c.needsReason !== null && (f.reason as string[]).includes(c.needsReason))) return false;
@@ -186,5 +189,5 @@ function findProjectFor(s: AppState, cwd: string) {
 
 /** The name to show for a chat's or project's folder: the server's project name when known, else the folder's last part. */
 export function projectLabel(s: AppState, cwd: string): string {
-  return findProjectFor(s, cwd)?.name ?? (claudeScratchRoot(cwd) ? CLAUDE_SCRATCH_NAME : baseName(cwd));
+  return findProjectFor(s, cwd)?.name ?? (isClaudeScratch(cwd) ? CLAUDE_SCRATCH_NAME : baseName(cwd));
 }

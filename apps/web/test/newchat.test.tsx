@@ -362,7 +362,7 @@ describe('New chat: loading and odd data', () => {
 
   it('the project picker lists the most recently active projects first', () => {
     mount(seeded({ projects: [
-      project('/work/old', ['claude'], '2026-09-01T10:00:00.000Z'),
+      project('/work/old', ['claude'], '2026-09-28T10:00:00.000Z'),
       project('/work/newest', ['codex'], '2026-10-23T11:00:00.000Z'),
       project('/work/middle', ['claude'], '2026-10-01T10:00:00.000Z'),
     ] }));
@@ -529,5 +529,49 @@ describe('New chat: fix round 1', () => {
     act(() => openNewChat());
     await flush();
     expect(mocked.models).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe('New chat: project picker (Older, missing folders, scratch)', () => {
+  const days = (n: number) => new Date(NOW - n * 86_400_000).toISOString();
+  const RECENT = project('/work/alpha', ['claude'], days(1));
+  const MID = project('/work/beta', ['codex'], days(10));
+  const OLD1 = project('/work/thesis', ['claude'], days(45));
+  const OLD2 = project('/work/old-blog', ['claude'], days(90));
+  const GONE = { ...project('/work/gone', ['claude'], days(2)), folderMissing: true };
+  const SCRATCH = { ...project('C:/Users/me/AppData/Roaming/Claude/scratch-workspaces', ['claude'], days(0)), name: 'Claude scratch chats' };
+  const open = () => {
+    mount(seeded({ projects: [RECENT, MID, OLD1, OLD2, GONE, SCRATCH] }));
+    act(() => openNewChat());
+    fireEvent.click(chip(/^Project:/));
+    return listbox('Project');
+  };
+  const names = (pop: HTMLElement) => within(pop).queryAllByRole('option').map((o) => o.textContent?.trim()).filter((t) => t !== 'Choose another folder…');
+
+  it('lists recent projects newest first, then one "Older" row with the count; missing folders and Claude scratch chats are left out', () => {
+    const pop = open();
+    expect(names(pop)).toEqual(['alpha', 'beta']);
+    const older = within(pop).getByRole('button', { name: /Older/ });
+    expect(older.textContent).toContain('2');
+    expect(older.getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('the Older row unfolds the older projects, dimmed, in place', () => {
+    const pop = open();
+    fireEvent.click(within(pop).getByRole('button', { name: /Older/ }));
+    expect(names(pop)).toEqual(['alpha', 'beta', 'thesis', 'old-blog']);
+    expect(within(pop).getByRole('option', { name: /thesis/ }).classList.contains('dim')).toBe(true);
+  });
+
+  it('typing in the search filters every project, older ones included', () => {
+    const pop = open();
+    fireEvent.change(within(pop).getByRole('searchbox', { name: 'Search projects' }), { target: { value: 'th' } });
+    expect(names(pop)).toEqual(['thesis']);
+  });
+
+  it('the dialog does not open on a project whose folder is missing', () => {
+    mount(seeded({ projects: [GONE, MID] }));
+    act(() => openNewChat());
+    expect(chip(/^Project: beta$/)).toBeTruthy();
   });
 });

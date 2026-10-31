@@ -233,3 +233,10 @@ body:has(> .onb[data-state="open"]) > .toasts { z-index: 91; }
 .all-chats-page mark { background: var(--color-needs-soft); color: inherit; border-radius: 2px; }
 .all-chats-page .show-more-row { margin-top: var(--space-2); }
 @media (max-width: 640px) { .all-chats-page .crow .proj { width: auto; max-width: 40%; } .ac-tools .search input { width: 100%; } }
+
+/* New chat picker: older projects wait behind one "Older (n)" row and show dimmed when it opens. */
+.dlg-pop-project .menu-search { border-bottom: 1px solid var(--color-border); }
+.dlg-pop .older-row { color: var(--color-text-muted); }
+.dlg-pop .older-row .icon { transition: transform var(--duration-pop) var(--ease-out); }
+.dlg-pop .older-row[aria-expanded="true"] .icon { transform: rotate(90deg); }
+.dlg-pop .menu-item.dim { color: var(--color-text-muted); }

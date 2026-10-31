@@ -1,7 +1,7 @@
 import type { Column, ProviderId } from '@agent-kanban/shared';
-import { folderKey } from '@agent-kanban/shared';
+import { folderKey, projectFolder } from '@agent-kanban/shared';
 import type { AppState, Filters } from '../../state/reducer.ts';
-import { isArchived, projectLabel, providerCounts } from '../../state/selectors.ts';
+import { inHiddenProject, isArchived, OLDER_MS, projectLabel, providerCounts } from '../../state/selectors.ts';
 import { PROVIDER_IDS, providerName, type IconName } from '../primitives/index.ts';
 
 export type FilterKey = keyof Filters;
@@ -16,6 +16,8 @@ export interface FilterOption {
   /** What to draw before the label (design: provider logo, status icon). */
   provider?: ProviderId;
   status?: Column;
+  /** A project with no activity for 30 days: listed after the others, under its own label. */
+  older?: boolean;
 }
 
 export interface Category {
@@ -78,12 +80,23 @@ export function filterOptions(s: AppState, key: FilterKey, scope: FilterScope = 
       return (present.length ? present : PROVIDER_IDS).map((p) => ({ v: p, label: providerName(p), provider: p }));
     }
     case 'project': {
-      // One option per folder however it is spelled (the first spelling seen is the value).
-      const byKey = new Map<string, string>();
-      for (const cwd of fromData([...chats.map((c) => c.cwd), ...s.history.map((h) => h.cwd)], chosen)) if (!byKey.has(folderKey(cwd))) byKey.set(folderKey(cwd), cwd);
+      // One option per project however its folder is spelled (the first spelling seen is the value); Claude scratch
+      // chats are one project; hidden projects are left out unless already chosen. Older ones go last.
+      const byKey = new Map<string, { v: string; last: string }>();
+      const seen = (cwd: string, at: string) => {
+        if (inHiddenProject(s, cwd) && !chosen?.some((v) => folderKey(projectFolder(v)) === folderKey(projectFolder(cwd)))) return;
+        const k = folderKey(projectFolder(cwd));
+        const cur = byKey.get(k);
+        if (!cur) byKey.set(k, { v: projectFolder(cwd), last: at });
+        else if (at > cur.last) cur.last = at;
+      };
+      for (const c of chats) seen(c.cwd, c.updatedAt);
+      for (const h of s.history) seen(h.cwd, h.updatedAt);
+      for (const v of chosen ?? []) seen(v, '');
+      const cutoff = s.now - OLDER_MS;
       return [...byKey.values()]
-        .map((cwd) => ({ v: cwd, label: projectLabel(s, cwd) }))
-        .sort((a, b) => a.label.localeCompare(b.label));
+        .map(({ v, last }) => ({ v, label: projectLabel(s, v), older: !last || Date.parse(last) < cutoff }))
+        .sort((a, b) => Number(a.older) - Number(b.older) || a.label.localeCompare(b.label));
     }
     case 'status':
       return STATUS.map(([v, label]) => ({ v, label, status: v }));

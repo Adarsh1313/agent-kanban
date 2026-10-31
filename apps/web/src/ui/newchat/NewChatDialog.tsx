@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import type { ConnectionHealth, ModelOption, Project, ProviderId, UsageReading } from '@agent-kanban/shared';
-import { folderKey } from '@agent-kanban/shared';
+import { folderKey, isClaudeScratch } from '@agent-kanban/shared';
 import { ApiError, api } from '../../api/client.ts';
 import type { AppState } from '../../state/reducer.ts';
-import { baseName, focusedProvider, suggestFor, visibleProjects } from '../../state/selectors.ts';
+import { baseName, focusedProvider, OLDER_MS, suggestFor, visibleProjects } from '../../state/selectors.ts';
 import { useStore } from '../../state/store.ts';
 import { setNewChatHandler, type NewChatOptions } from '../actions.ts';
 import { Dialog, Icon, Popover, PROVIDER_IDS, ProviderLogo, providerName, toast } from '../primitives/index.ts';
@@ -48,9 +48,14 @@ export const isConnected = (c: ConnectionHealth | undefined) => c?.status === 'c
 export const findProject = (projects: Project[], path: string) =>
   path.trim() ? projects.find((p) => p.id.trim() !== '' && (folderKey(p.id) === folderKey(path) || folderKey(p.path) === folderKey(path))) : undefined;
 
-/** Folders a chat can start in (history can carry chats with no folder), most recently active first. */
-const usable = (projects: Project[]) => projects.filter((p) => p.id.trim() !== '')
+/**
+ * Folders a chat can start in, most recently active first: not the empty folder history can carry, not a folder that
+ * is missing, and not Claude scratch chats (many folders, not one).
+ */
+const usable = (projects: Project[]) => projects.filter((p) => p.id.trim() !== '' && !p.folderMissing && !isClaudeScratch(p.id))
   .sort((a, b) => (a.lastActivityAt < b.lastActivityAt ? 1 : a.lastActivityAt > b.lastActivityAt ? -1 : 0));
+
+const isOlder = (p: Project, now: number) => !p.lastActivityAt || Date.parse(p.lastActivityAt) < now - OLDER_MS;
 
 /** The focused provider's latest project, else the latest project. */
 function latestProject(projects: Project[], focus: ProviderId | null): Project | undefined {
@@ -89,7 +94,8 @@ export function usageText(r: UsageReading | undefined): string {
 
 /** Up/Down move between a picker's options (skipping disabled ones), Home/End jump to the ends. */
 function onListKey(e: KeyboardEvent<HTMLElement>) {
-  if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) return;
+  const inField = e.target instanceof HTMLInputElement;
+  if (!['ArrowDown', 'ArrowUp', ...(inField ? [] : ['Home', 'End'])].includes(e.key)) return;
   const items = [...e.currentTarget.querySelectorAll<HTMLElement>('[role="option"]:not([aria-disabled="true"])')];
   if (items.length === 0) return;
   e.preventDefault();
@@ -118,7 +124,7 @@ type Picker = 'project' | 'provider' | 'model' | null;
 /** A known project (by id), or a folder typed by hand. */
 type Where = { kind: 'project'; id: string } | { kind: 'path' };
 
-const pickState = (s: AppState) => ({ projects: visibleProjects(s), connections: s.connections, usage: s.usage, suggested: s.suggested, settings: s.settings, focus: focusedProvider(s), loaded: s.loaded });
+const pickState = (s: AppState) => ({ now: s.now, projects: visibleProjects(s), connections: s.connections, usage: s.usage, suggested: s.suggested, settings: s.settings, focus: focusedProvider(s), loaded: s.loaded });
 
 export function NewChatDialog() {
   const st = useStore(pickState);
@@ -141,6 +147,9 @@ export function NewChatDialog() {
   /** Bumped on every opening, so a late response from an earlier opening never closes or clears a newer one. */
   const session = useRef(0);
   const [picker, setPicker] = useState<Picker>(null);
+  /** The project picker's search and whether its Older row is open; both start empty and closed each time it opens. */
+  const [projectQuery, setProjectQuery] = useState('');
+  const [olderOpen, setOlderOpen] = useState(false);
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const [models, setModels] = useState<ModelList | null>(null);
   const promptRef = useRef<HTMLTextAreaElement>(null);
@@ -265,6 +274,7 @@ export function NewChatDialog() {
   }, [picker]);
   const openPicker = (kind: Exclude<Picker, null>, el: HTMLElement) => {
     if (picker === kind) { setPicker(null); return; }
+    if (kind === 'project') { setProjectQuery(''); setOlderOpen(false); }
     setAnchor(el);
     setPicker(kind);
   };
@@ -405,13 +415,38 @@ export function NewChatDialog() {
 
       <Popover anchor={anchor} open={open && picker === 'project'} onClose={() => setPicker(null)} label="Project" className="menu dlg-pop dlg-pop-project" role="listbox">
         <div className="pane" onKeyDown={onListKey}>
+          <input className="menu-search" name="project-search" type="search" autoComplete="off" spellCheck={false} placeholder="Search projects…" aria-label="Search projects"
+            value={projectQuery} onChange={(e) => setProjectQuery(e.target.value)} />
           <div className="menu-label" role="presentation">Projects found on this computer</div>
           {usable(st.projects).length === 0 && <div className="menu-label" role="presentation">None yet</div>}
           <div className="dlg-scroll" role="presentation">
-            {usable(st.projects).map((p) => {
+            {(() => {
+              const q = projectQuery.trim().toLowerCase();
+              const all = usable(st.projects).filter((p) => !q || p.name.toLowerCase().includes(q) || p.path.toLowerCase().includes(q));
+              const recent = all.filter((p) => !isOlder(p, st.now));
+              const older = all.filter((p) => isOlder(p, st.now));
+              // Searching shows every match; otherwise older projects wait behind one "Older" row.
+              const showOlder = olderOpen || q !== '';
+              return [
+                ...recent.map((p) => ({ p, dim: false })),
+                ...(older.length > 0 && !q ? [null] : []),
+                ...(showOlder ? older.map((p) => ({ p, dim: true })) : []),
+              ];
+            })().map((row) => {
+              if (row === null) {
+                const n = usable(st.projects).filter((p) => isOlder(p, st.now)).length;
+                return (
+                  <button key="older" className="menu-item older-row" type="button" aria-expanded={olderOpen} onClick={() => setOlderOpen((o) => !o)}>
+                    <Icon name="chevron-right" size="sm" />
+                    <span className="grow-text">Older</span>
+                    <span className="r">{n}</span>
+                  </button>
+                );
+              }
+              const { p, dim } = row;
               const selected = where.kind === 'project' && where.id === p.id;
               return (
-                <button key={p.id} className="menu-item" type="button" role="option" aria-selected={selected} title={p.path}
+                <button key={p.id} className={`menu-item${dim ? ' dim' : ''}`} type="button" role="option" aria-selected={selected} title={p.path}
                   onClick={() => { setWhere({ kind: 'project', id: p.id }); setPathError(null); setPicker(null); promptRef.current?.focus(); }}>
                   <Icon name="folder" size="sm" />
                   <span className="grow-text">{p.name}</span>

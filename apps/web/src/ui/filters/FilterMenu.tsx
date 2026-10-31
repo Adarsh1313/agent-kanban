@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { Fragment, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import type { AppState } from '../../state/reducer.ts';
 import { memoState } from '../../state/selectors.ts';
 import { useStore, useStoreInstance } from '../../state/store.ts';
@@ -34,7 +34,7 @@ function PaneBody({ open, children }: { open: boolean; children: ReactNode }) {
 
 /** Every category's options, recomputed only when the data or the filters change (not on streaming text). */
 const optionsSelector = (scope: FilterScope) => memoState(
-  (s: AppState) => [s.chats, s.history, s.projects, s.settings, filtersIn(s, scope), s.ui.archiving],
+  (s: AppState) => [s.chats, s.history, s.projects, s.settings, filtersIn(s, scope), s.ui.archiving, s.now],
   (s) => Object.fromEntries(SCOPE_KEYS[scope].map((k) => [k, filterOptions(s, k, scope)])) as Record<FilterKey, FilterOption[]>,
 );
 const SELECT_OPTIONS: Record<FilterScope, (s: AppState) => Record<FilterKey, FilterOption[]>> = { board: optionsSelector('board'), chats: optionsSelector('chats') };
@@ -106,10 +106,13 @@ function CategoryPane({ nav, open, k, scope }: { nav: MenuNav; open: boolean; k:
           </span>
         )}
       </MenuLabel>
-      {options.map((o) => (
-        <MenuItem key={o.v} checked={cur.has(o.v)} onSelect={() => toggle(o.v)}>
-          <OptionVisual o={o} />{o.label}
-        </MenuItem>
+      {options.map((o, i) => (
+        <Fragment key={o.v}>
+          {o.older && !options[i - 1]?.older && <MenuLabel>Older · no activity in 30 days</MenuLabel>}
+          <MenuItem checked={cur.has(o.v)} onSelect={() => toggle(o.v)}>
+            <OptionVisual o={o} />{o.label}
+          </MenuItem>
+        </Fragment>
       ))}
     </PaneBody>
   );
