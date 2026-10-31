@@ -1,11 +1,11 @@
 import { readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import type {
-  AdapterEvent, Chat, HistoryChat, Message, OpenRequest, ProviderId, ServerEvent, ToolCall, UserAction,
+  AdapterEvent, Chat, Effort, HistoryChat, Message, OpenRequest, ProviderId, ServerEvent, ToolCall, UserAction,
 } from '@agent-kanban/shared';
 import { nextState } from './columns.ts';
 import type { Store } from './store.ts';
-import type { ProviderAdapter } from './adapters/adapter.ts';
+import type { ProviderAdapter, TurnOptions } from './adapters/adapter.ts';
 import { AdapterRegistry } from './adapters/registry.ts';
 import type { AdapterSource } from './adapters/registry.ts';
 import type { UsageService } from './usage/service.ts';
@@ -79,6 +79,8 @@ export class ChatService {
   /** Errors already reported, per chat: one failed resume is shared by concurrent callers of the SAME chat only. */
   private reported = new WeakMap<object, Set<string>>();
   private historyGates = new Map<string, Promise<void>>();
+  /** The effort each chat's current turn runs at, so its replies can note it. */
+  private turnEffort = new Map<string, Effort>();
 
   constructor(opts: {
     store: Store;
@@ -105,9 +107,9 @@ export class ChatService {
 
   // ---- public API ----
 
-  async start(input: { provider: ProviderId; cwd: string; prompt: string; model?: string }): Promise<Chat> {
+  async start(input: { provider: ProviderId; cwd: string; prompt: string; model?: string; effort?: Effort }): Promise<Chat> {
     const chat = this.store.createChat({
-      provider: input.provider, cwd: input.cwd, title: input.prompt, model: input.model ?? null,
+      provider: input.provider, cwd: input.cwd, title: input.prompt, model: input.model ?? null, effort: input.effort ?? 'normal',
     });
     this.addMessage(chat.id, 'user', input.prompt);
     this.broadcast({ type: 'chat.updated', chat });
@@ -201,8 +203,8 @@ export class ChatService {
     return chat;
   }
 
-  /** Rename, pin or snooze a chat. */
-  patch(chatId: string, patch: { title?: string; pinned?: boolean; snoozedUntil?: string | null }): Chat {
+  /** Rename, pin, snooze or set the effort of a chat (effort applies from the next message). */
+  patch(chatId: string, patch: { title?: string; pinned?: boolean; snoozedUntil?: string | null; effort?: Effort }): Chat {
     const current = this.mustGet(chatId);
     if (Object.values(patch).every((v) => v === undefined)) return current;
     // Not activity: the card keeps its place and its "5m ago".
@@ -358,7 +360,7 @@ export class ChatService {
     try {
       const adapter = await this.adapters.ensure(chat.provider);
       if (!adapter) { this.fail(chat.id, chat.provider, null); return; }
-      const { sessionRef } = await adapter.startChat({ cwd: chat.cwd, prompt, ...(chat.model ? { model: chat.model } : {}) });
+      const { sessionRef } = await adapter.startChat({ cwd: chat.cwd, prompt, ...(chat.model ? { model: chat.model } : {}), ...this.turnOptions(chat.id, adapter) });
       this.live.add(chat.id);
       this.claim(chat.id, chat.provider, sessionRef);
       // Stopped, or marked done, while the session was starting: its first turn must not keep running.
@@ -409,7 +411,7 @@ export class ChatService {
         }
         await p;
       }
-      await adapter.sendMessage(chat.sessionRef, text);
+      await adapter.sendMessage(chat.sessionRef, text, this.turnOptions(chat.id, adapter));
     } catch (err) {
       // Concurrent callers share one failed resume: report it once.
       if (typeof err === 'object' && err !== null) {
@@ -420,6 +422,22 @@ export class ChatService {
       }
       this.fail(chat.id, chat.provider, err);
     }
+  }
+
+  /** Reads the chat's effort now (a change applies from the next message) and remembers it for the turn's replies. */
+  private turnOptions(chatId: string, adapter: ProviderAdapter): TurnOptions {
+    const effort = this.store.getChat(chatId)?.effort ?? 'normal';
+    if (!adapter.capabilities?.effort) { this.turnEffort.delete(chatId); return {}; }
+    this.turnEffort.set(chatId, effort);
+    return { effort };
+  }
+
+  /** A new assistant reply: notes the turn's effort when it wasn't Normal. */
+  private newReply(chatId: string, text: string): string {
+    const id = this.store.addMessage(chatId, 'assistant', text).id;
+    const effort = this.turnEffort.get(chatId);
+    if (effort && effort !== 'normal') this.store.setMessageEffort(id, effort);
+    return id;
   }
 
   private touch(chatId: string): void {
@@ -487,7 +505,7 @@ export class ChatService {
         let id = ids.get(e.messageId);
         let offset = 0;
         if (!id) {
-          id = this.store.addMessage(chatId, 'assistant', e.text).id;
+          id = this.newReply(chatId, e.text);
           ids.set(e.messageId, id);
         } else {
           offset = this.store.getMessage(id)?.text.length ?? 0;
@@ -508,7 +526,9 @@ export class ChatService {
           const message = this.store.getMessage(id);
           if (message) this.broadcast({ type: 'message.completed', chatId, message });
         } else {
-          ids.set(e.messageId, this.addMessage(chatId, 'assistant', e.text).id);
+          const newId = this.newReply(chatId, e.text);
+          ids.set(e.messageId, newId);
+          this.broadcast({ type: 'message.completed', chatId, message: this.store.getMessage(newId)! });
         }
         return;
       }

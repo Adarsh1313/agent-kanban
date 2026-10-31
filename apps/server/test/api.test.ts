@@ -303,7 +303,8 @@ test('PATCH /api/chats/:id round-trips pin, title and snooze, and broadcasts', a
     assert.equal(c.title, 'New name');
     assert.equal(c.snoozedUntil, '2026-02-01T00:00:00.000Z');
     assert.equal(((await (await patch({ snoozedUntil: null })).json()) as Chat).snoozedUntil, null);
-    assert.equal(events.length, 3);
+    assert.equal(((await (await patch({ effort: 'thorough' })).json()) as Chat).effort, 'thorough');
+    assert.equal(events.length, 4);
     assert.equal((await patch({ title: 'x' }, 'nope')).status, 404);
   } finally { s.close(); }
 });
@@ -312,7 +313,7 @@ test('PATCH /api/chats/:id rejects bad bodies with 400', async () => {
   const s = await setup({ patch: () => { throw new Error('should not be called'); } });
   const patch = (body: unknown) => s.f('/api/chats/c1', { method: 'PATCH', body: JSON.stringify(body) });
   try {
-    for (const b of [{ title: '   ' }, { title: 5 }, { title: 'x'.repeat(201) }, { pinned: 'yes' }, { snoozedUntil: 5 }, { snoozedUntil: 'tomorrow' }, { column: 'done' }, { title: 'ok', cwd: '/' }]) {
+    for (const b of [{ title: '   ' }, { title: 5 }, { title: 'x'.repeat(201) }, { pinned: 'yes' }, { snoozedUntil: 5 }, { snoozedUntil: 'tomorrow' }, { column: 'done' }, { title: 'ok', cwd: '/' }, { effort: 'max' }, { effort: 1 }]) {
       const r = await patch(b);
       assert.equal(r.status, 400, JSON.stringify(b));
       assert.match(((await r.json()) as { error: string }).error, /\w/);

@@ -78,6 +78,8 @@ export interface AntigravityAdapterOptions {
 
 export class AntigravityAdapter implements ProviderAdapter {
   id = 'antigravity' as const;
+  /** Antigravity has no effort setting yet. */
+  capabilities = { effort: false };
   private listeners = new Set<Listener>();
   private live: Live | null = null;
   private starting: Promise<Live> | null = null;

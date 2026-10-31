@@ -619,3 +619,18 @@ test('listModels does not respawn a crash-looping app-server inside the ping bac
     assert.equal(procs.length, 1, 'no respawn after giving up');
   } finally { mock.timers.reset(); await adapter.dispose(); }
 });
+
+test('effort maps to turn/start effort; instructions go to thread/start as developer instructions', async () => {
+  const log = join(mkdtempSync(join(tmpdir(), 'ak-codex-effort-')), 'calls.log');
+  const { adapter, waitFor, events } = make('', { env: { FAKE_LOG: log } });
+  try {
+    const { sessionRef } = await adapter.startChat({ cwd, prompt: 'hi', effort: 'thorough', instructions: 'End with Next: lines.' });
+    await waitFor((e) => e.type === 'turn.completed');
+    events.length = 0;
+    await adapter.sendMessage(sessionRef, 'again', { effort: 'quick' });
+    await waitFor((e) => e.type === 'turn.completed');
+    const calls = readFileSync(log, 'utf8').trim().split(/\r?\n/).map((l) => JSON.parse(l));
+    assert.equal(calls.find((c) => c.method === 'thread/start').params.developerInstructions, 'End with Next: lines.');
+    assert.deepEqual(calls.filter((c) => c.method === 'turn/start').map((c) => c.params.effort), ['high', 'low']);
+  } finally { await adapter.dispose(); }
+});

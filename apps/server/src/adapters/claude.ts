@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { query as sdkQuery } from '@anthropic-ai/claude-agent-sdk';
 import type { CanUseTool, PermissionResult, Query, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
-import type { AdapterEvent, ModelOption, RequestAction, UsageReading } from '@agent-kanban/shared';
-import type { PingResult, ProviderAdapter } from './adapter.ts';
+import type { AdapterEvent, Effort, ModelOption, RequestAction, UsageReading } from '@agent-kanban/shared';
+import type { PingResult, ProviderAdapter, TurnOptions } from './adapter.ts';
 import { resolveSpawnTarget } from './spawn-target.ts';
 import { claudeUsageToReading } from '../usage/parse.ts';
 
@@ -51,6 +51,8 @@ type Chat = {
   sessionRef: string | null;
   cwd: string;
   model: string | undefined;
+  effort: Effort | undefined;
+  instructions: string | undefined;
   queue: InputQueue;
   query: Query | null;
   turnRunning: boolean;
@@ -62,12 +64,16 @@ type Chat = {
   idleTimer: NodeJS.Timeout | null; // closes the query after a quiet spell; the next message resumes it
 };
 
+/** Agent SDK effort levels for Quick, Normal and Thorough. */
+export const CLAUDE_EFFORT: Record<Effort, 'low' | 'medium' | 'high'> = { quick: 'low', normal: 'medium', thorough: 'high' };
+
 const SHUT_DOWN = 'Claude Code adapter is shut down.';
 const DIED = 'Claude Code stopped unexpectedly.';
 const IDLE_CLOSE_MS = 10 * 60_000;
 
 export class ClaudeAdapter implements ProviderAdapter {
   id = 'claude' as const;
+  capabilities = { effort: true };
   private listeners = new Set<Listener>();
   private chats = new Map<string, Chat>();
   private claudePath: string;
@@ -108,7 +114,7 @@ export class ClaudeAdapter implements ProviderAdapter {
   }
 
   private newChat(cwd: string, model: string | undefined, sessionRef: string | null): Chat {
-    return { sessionRef, cwd, model, queue: new InputQueue(), query: null, turnRunning: false, turnAnnounced: false, stopping: false, pending: new Map(), deferred: [], idleTimer: null };
+    return { sessionRef, cwd, model, effort: undefined, instructions: undefined, queue: new InputQueue(), query: null, turnRunning: false, turnAnnounced: false, stopping: false, pending: new Map(), deferred: [], idleTimer: null };
   }
 
   private clearIdle(chat: Chat): void {
@@ -151,6 +157,8 @@ export class ClaudeAdapter implements ProviderAdapter {
     });
     const options: Record<string, unknown> = { cwd: chat.cwd, pathToClaudeCodeExecutable: this.claudePath, permissionMode: 'default', canUseTool };
     if (chat.model) options.model = chat.model;
+    if (chat.effort) options.effort = CLAUDE_EFFORT[chat.effort];
+    if (chat.instructions) options.systemPrompt = { type: 'preset', preset: 'claude_code', append: chat.instructions };
     if (resume) options.resume = resume;
     const q = this.query({ prompt: chat.queue, options: options as never });
     chat.query = q;
@@ -221,9 +229,11 @@ export class ClaudeAdapter implements ProviderAdapter {
     }
   }
 
-  async startChat(input: { cwd: string; prompt: string; model?: string }): Promise<{ sessionRef: string }> {
+  async startChat(input: { cwd: string; prompt: string; model?: string } & TurnOptions): Promise<{ sessionRef: string }> {
     this.assertOpen();
     const chat = this.newChat(input.cwd, input.model, null);
+    chat.effort = input.effort;
+    chat.instructions = input.instructions;
     const started = new Promise<void>((resolve, reject) => { chat.onStarted = { resolve, reject }; });
     chat.turnRunning = true;
     chat.queue.push(input.prompt);
@@ -247,10 +257,18 @@ export class ClaudeAdapter implements ProviderAdapter {
     return chat;
   }
 
-  async sendMessage(sessionRef: string, text: string): Promise<void> {
+  async sendMessage(sessionRef: string, text: string, opts: TurnOptions = {}): Promise<void> {
     this.assertOpen();
     const chat = this.chatFor(sessionRef);
     this.clearIdle(chat);
+    if (opts.instructions !== undefined) chat.instructions = opts.instructions || undefined;
+    if (opts.effort && opts.effort !== chat.effort) {
+      chat.effort = opts.effort;
+      // A live query takes the new level from this turn on; a closed one gets it when it relaunches.
+      if (chat.query) {
+        try { await chat.query.applyFlagSettings({ effortLevel: CLAUDE_EFFORT[opts.effort] }); } catch { /* keeps the old level */ }
+      }
+    }
     chat.turnRunning = true;
     chat.queue.push(text);
     if (!chat.query) this.launch(chat, sessionRef);

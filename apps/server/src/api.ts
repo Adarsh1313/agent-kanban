@@ -7,7 +7,7 @@ import { existsSync, realpathSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { timingSafeEqual } from 'node:crypto';
 import { WebSocketServer, WebSocket } from 'ws';
-import type { ConnectionHealth, HistoryChat, ModelOption, ProviderId, ServerEvent } from '@agent-kanban/shared';
+import type { ConnectionHealth, Effort, HistoryChat, ModelOption, ProviderId, ServerEvent } from '@agent-kanban/shared';
 import { ActiveElsewhereError, CantContinueError } from './chats.ts';
 import { ConnectBusyError, ConnectStateError } from './connect/service.ts';
 import { PickerBusyError } from './folder-picker.ts';
@@ -18,7 +18,7 @@ import type { SettingsStore } from './settings.ts';
 import type { ChatService } from './chats.ts';
 import type { UsageService } from './usage/service.ts';
 // suggest() lives in shared so the web app can recompute "Most room" from usage.updated events.
-import { folderKey, suggest } from '@agent-kanban/shared';
+import { EFFORTS, folderKey, suggest } from '@agent-kanban/shared';
 
 const PROVIDERS: ProviderId[] = ['claude', 'codex', 'antigravity'];
 const MAX_BODY = 1_000_000;
@@ -82,6 +82,10 @@ function provider(body: Record<string, unknown>): ProviderId {
   return v as ProviderId;
 }
 
+function effort(v: unknown): Effort {
+  if (typeof v !== 'string' || !EFFORTS.includes(v as Effort)) throw new HttpError(400, 'Effort must be quick, normal or thorough.');
+  return v as Effort;
+}
 
 function existingFolder(cwd: string): string {
   let ok = false;
@@ -184,7 +188,7 @@ export function createApi(opts: {
     if ((m = match('GET', '/api/chats/:id/tool-calls'))) return { status: 200, body: chats.listToolCalls(m[0]!) };
     if ((m = match('PATCH', '/api/chats/:id'))) {
       const b = await readJson(req);
-      const patch: { title?: string; pinned?: boolean; snoozedUntil?: string | null } = {};
+      const patch: { title?: string; pinned?: boolean; snoozedUntil?: string | null; effort?: Effort } = {};
       for (const [k, v] of Object.entries(b)) {
         if (k === 'title') {
           const t = typeof v === 'string' ? v.trim() : '';
@@ -199,7 +203,8 @@ export function createApi(opts: {
             if (typeof v !== 'string' || Number.isNaN(Date.parse(v))) throw new HttpError(400, 'Snooze time must be a date.');
             patch.snoozedUntil = new Date(v).toISOString();
           }
-        } else throw new HttpError(400, `You can't change "${k}".`);
+        } else if (k === 'effort') patch.effort = effort(v);
+        else throw new HttpError(400, `You can't change "${k}".`);
       }
       return { status: 200, body: chats.patch(m[0]!, patch) };
     }
@@ -214,9 +219,10 @@ export function createApi(opts: {
     if (match('GET', '/api/models')) return { status: 200, body: await models() };
     if (match('POST', '/api/chats')) {
       const b = await readJson(req);
-      const input: { provider: ProviderId; cwd: string; prompt: string; model?: string } = {
+      const input: { provider: ProviderId; cwd: string; prompt: string; model?: string; effort?: Effort } = {
         provider: provider(b), cwd: str(b, 'cwd'), prompt: str(b, 'prompt'),
       };
+      if (b.effort !== undefined) input.effort = effort(b.effort);
       if (b.model !== undefined) {
         if (typeof b.model !== 'string' || b.model.trim() === '') throw new HttpError(400, 'Model must be a non-empty string.');
         input.model = b.model;

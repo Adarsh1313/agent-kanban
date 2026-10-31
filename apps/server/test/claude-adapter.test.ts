@@ -677,3 +677,19 @@ test('a permission says what it is for: file edits, shell commands, any other to
   for (const n of ['Bash', 'BashOutput', 'KillShell', 'PowerShell']) assert.equal(claudeAction(n), 'command');
   for (const n of ['WebFetch', 'mcp__x__y', 'Read']) assert.equal(claudeAction(n), 'tool');
 });
+
+test('effort maps to the SDK level at launch and a change reaches a live query by applyFlagSettings', async () => {
+  const applied: unknown[] = [];
+  const f = fake(async function* (_o, input) { await input.next(); yield init('e1'); for (;;) { const m = await input.next(); if (m.done) return; } }, {
+    applyFlagSettings: async (s: unknown) => { applied.push(s); },
+  });
+  const a = new ClaudeAdapter({ claudePath: 'c', query: f.query });
+  const { sessionRef } = await a.startChat({ cwd: '.', prompt: 'hi', effort: 'quick', instructions: 'End with Next: lines.' });
+  const o = f.calls[0]!.options;
+  assert.equal(o.effort, 'low');
+  assert.deepEqual(o.systemPrompt, { type: 'preset', preset: 'claude_code', append: 'End with Next: lines.' });
+  await a.sendMessage(sessionRef, 'same', { effort: 'quick' });
+  await a.sendMessage(sessionRef, 'harder', { effort: 'thorough' });
+  assert.deepEqual(applied, [{ effortLevel: 'high' }]);
+  await a.dispose();
+});
