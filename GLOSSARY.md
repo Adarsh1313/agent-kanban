@@ -34,6 +34,10 @@ _Avoid_: Archived project, filtered project
 The quick chats the Claude app starts without a folder, shown together as one project.
 _Avoid_: Scratch workspaces, temp chats
 
+**Older project**:
+A project with no activity for 30 days: folded behind one "Older" row in New chat and listed last in the Project filter.
+_Avoid_: Stale project, archived project
+
 **Folder missing**:
 A project whose folder was moved or deleted: its chats can be read but no new chat can start there.
 _Avoid_: Broken project, stale project

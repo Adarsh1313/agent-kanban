@@ -11,7 +11,7 @@ connection is healthy and up to date.
 |---|---|
 | Server (`apps/server`) | Built: Claude Code + Codex chats, board state, usage limits, chat history, connection health, HTTP + WebSocket API |
 | Design (`design/`) | Clickable prototype and design system |
-| Web app (`apps/web`) | Built: board, chat panel, New chat, usage, filters, notifications, Projects and Connections pages |
+| Web app (`apps/web`) | Built: board, chat panel, New chat, usage, filters, notifications, All chats, Projects and Connections pages |
 | Connect and Antigravity | Built: Antigravity chats (Google's official ACP server), install / sign in / sign out / update for all three providers from the app, first-run onboarding |
 | Desktop app (`apps/desktop`) | Built: Windows app with its own window and tray, per-user installer |
 

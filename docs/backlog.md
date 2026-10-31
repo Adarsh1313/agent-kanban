@@ -25,7 +25,7 @@ Left out: routines, project docs, live preview, cloud/remote, more providers, pl
 
 ## 1b. Projects and chats redesign (closes #11)
 
-Grilled 2026-10-30: `docs/specs/projects-chats-redesign-decisions.md`. Next, in a new session: `/prototype` the sidebar + All chats view, then `/to-spec`.
+Built on `feat/desktop-app` (2026-10-31): `docs/specs/projects-chats-redesign.md`, all slices done. Close #11 when it is merged.
 
 ## 2. Issues by severity (labels P1 → P3)
 
@@ -33,7 +33,6 @@ Grilled 2026-10-30: `docs/specs/projects-chats-redesign-decisions.md`. Next, in 
 
 **Waiting on the user:**
 - #21: update failure. Need the message the app showed; both updates worked when run directly.
-- #11: temp test folders as projects. Hide by default, or clean up?
 
 **P3 (2026-10-30, branch `fix/p1-issues`):**
 - **Done:**
@@ -55,6 +54,6 @@ Grilled 2026-10-30: `docs/specs/projects-chats-redesign-decisions.md`. Next, in 
 - Branch `feat/any-provider-folders`: built on it, adds #22, #23, #24.
 - Branch `fix/p1-issues`: built on that, adds #5 #8 #12 #4 #6 #9 #10 #7, then #13 #16 #19. Merging this one brings in all three.
 
-- Branch `feat/desktop-app`: built on `fix/p1-issues`, adds the desktop app (#20) and Open folder (#15, first half).
+- Branch `feat/desktop-app`: built on `fix/p1-issues`, adds the desktop app (#20) and Open folder (#15, first half), then the projects and chats redesign (#11).
 
 Close those issues when they're merged.
