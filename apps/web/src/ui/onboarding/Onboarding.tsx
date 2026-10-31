@@ -14,10 +14,11 @@ import { pushLayer } from '../primitives/layers.ts';
 import { cssMs, cssValue, reducedMotion } from '../primitives/motion.ts';
 import { Icon, PROVIDER_IDS, ProviderLogo, providerName, StatusIcon, Switch, toast, type StatusState } from '../primitives/index.ts';
 import { navigate } from '../shell/route.ts';
+import { HomeProviderPicker } from '../skills/SkillSync.tsx';
 
 /* First-run onboarding (design/onboarding.js): Welcome → Connect → Bring in your chats → Notifications → Ready. */
 
-const STEP_COUNT = 4;
+const STEP_COUNT = 5;
 const TABBABLE = 'input, textarea, select, button:not([disabled]), [href], [tabindex]:not([tabindex="-1"])'; // Welcome isn't counted
 /** The most recent projects shown as chips; the rest are counted (a real computer can have dozens). */
 const MAX_CHIPS = 12;
@@ -446,7 +447,17 @@ export function Onboarding() {
         </>
       );
       break;
-    case 3: {
+    case 3:
+      pane = (
+        <>
+          {h1('Which agent do you use most?')}
+          <p className="lead">That�s your home provider. We copy its skills and global instructions to the other agents, so they work the way you do. Skills you made in the others are left alone.</p>
+          <HomeProviderPicker ids={ids.length ? ids : PROVIDER_IDS} />
+          <div className="onb-foot">{backBtn}<span className="grow">You can change this later in Connections.</span>{next()}</div>
+        </>
+      );
+      break;
+    case 4: {
       const deskOn = prefs.desktop && support === 'granted';
       const reason = support === 'unsupported' ? UNSUPPORTED : support === 'denied' ? BLOCKED : null;
       const changeDesktop = async (on: boolean) => {

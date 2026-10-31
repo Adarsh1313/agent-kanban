@@ -10,6 +10,7 @@ import type {
   ProjectInfo,
   ProviderId,
   Settings,
+  SkillsReport,
   ToolCall,
   UsageReading,
 } from '@agent-kanban/shared';
@@ -105,6 +106,9 @@ export interface SettingsPatch {
   suggest?: Partial<Record<ProviderId, boolean>>;
   hiddenProjects?: string[];
   unhiddenProjects?: string[];
+  homeProvider?: ProviderId | null;
+  skillSync?: boolean;
+  notesProjects?: string[];
 }
 
 export interface Transcript {
@@ -137,6 +141,9 @@ export const api = {
   historyMessages: (provider: ProviderId, sessionRef: string) =>
     get<Transcript>(`/api/history/${provider}/${encodeURIComponent(sessionRef)}/messages`),
   usage: () => get<UsageResponse>('/api/usage'),
+  /** Skill sync's last report plus every home provider skill (#40). */
+  skills: () => get<SkillsReport>('/api/skills'),
+  syncSkills: () => post<SkillsReport>('/api/skills/sync'),
   refreshUsage: () => post<UsageResponse>('/api/usage/refresh'),
   connections: () => get<ConnectionHealth[]>('/api/connections'),
   checkConnections: (provider?: ProviderId) => post<ConnectionHealth[]>('/api/connections/check', provider ? { provider } : {}),

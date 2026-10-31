@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from 'react';
+import { SkillSyncSection } from '../skills/SkillSync.tsx';
 import type { ConnectionHealth, ConnectState, ProviderId } from '@agent-kanban/shared';
 import { api, type ConnectAction } from '../../api/client.ts';
 import { applyEvent, applySettings, mergeConnect, type AppState } from '../../state/reducer.ts';
@@ -561,6 +562,7 @@ export function ConnectionsPage() {
         <div className="conn-grid">
           {PROVIDER_IDS.map((id) => <ConnectionCard key={id} id={id} />)}
         </div>
+        <SkillSyncSection />
         <ComingLater />
       </div>
     </div>

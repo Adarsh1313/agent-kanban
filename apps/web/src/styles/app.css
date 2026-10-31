@@ -250,3 +250,16 @@ body:has(> .onb[data-state="open"]) > .toasts { z-index: 91; }
 .dlg-pop .older-row[aria-expanded="true"] .icon { transform: rotate(90deg); }
 @media (prefers-reduced-motion: reduce) { .dlg-pop .older-row .icon { transition: none; } }
 .dlg-pop .menu-item.dim { color: var(--color-text-muted); }
+
+/* Skill sync (#40): home provider tiles reuse the Connections card; the synced list sits under the switch. */
+.home-tile { text-align: left; cursor: pointer; font: inherit; color: inherit; }
+.home-tile small { color: var(--color-text-muted); font-size: var(--text-caption); }
+.home-tile[aria-checked="true"] { border-color: var(--color-text); }
+.home-tile:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+.skill-sync { display: flex; flex-direction: column; gap: var(--space-3); margin-bottom: var(--space-8); align-items: flex-start; }
+.skill-sync .home-pick { margin-bottom: 0; width: 100%; }
+.skill-list { display: flex; flex-direction: column; gap: var(--space-1); font-size: var(--text-body); }
+.skill-list p { margin: 0; }
+.skill-list ul { margin: 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-2); }
+.skill-list li { padding: 0 var(--space-2); border: 1px solid var(--color-border); border-radius: var(--radius-card); font-family: var(--font-mono); font-size: var(--text-caption); }
+.skill-skipped { color: var(--color-text-muted); font-size: var(--text-caption); }
