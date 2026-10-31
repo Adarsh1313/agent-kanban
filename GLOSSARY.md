@@ -63,3 +63,61 @@ _Avoid_: Background mode, system tray app
 **Quit**:
 Stopping the desktop app and every running chat; closing the window is not quitting.
 _Avoid_: Close, exit
+
+### Working across providers and limits
+
+**Outside session**:
+A Claude Code chat the user runs in a terminal or the Claude app, not from Agent Kanban; it shows on the board through hooks and can be continued here once it stops.
+_Avoid_: External session, foreign chat
+
+**Home provider**:
+The provider whose skills and global instructions are copied to the others; picked in onboarding.
+_Avoid_: Main provider, primary agent
+
+**Skill sync**:
+The one-way copy of the home provider's skills and instructions into the other providers, each copy marked as managed by Agent Kanban.
+_Avoid_: Skill import, skill mirror
+
+**Handoff**:
+Switching a chat to another provider mid-way; the new provider gets the last messages, the active spec's progress and the project notes.
+_Avoid_: Agent switch, transfer
+
+**Project notes**:
+A notes file in a project that every provider reads and updates at the end of a task, so decisions travel between them.
+_Avoid_: Memory, shared context
+
+**Out of usage**:
+A needs-you reason: the provider's plan limit is reached; the chat resumes on its own at the reset time unless turned off.
+_Avoid_: Rate limited, Limited, quota exceeded
+
+**Follow-up queue**:
+Messages written while a chat is working or out of usage, sent in order when it can continue.
+_Avoid_: Pending messages, outbox
+
+**Account**:
+One sign-in to a provider; a provider can have several and one is active at a time.
+_Avoid_: Instance, profile, login
+
+**API key**:
+A provider key the user adds, used only when they choose it for a chat, billed per use and capped by an optional spend cap.
+_Avoid_: Token, secret, credential
+
+**Effort**:
+How long the agent should think: Quick, Normal or Thorough.
+_Avoid_: Reasoning effort, thinking budget, Ultrathink
+
+**Suggested next steps**:
+Up to 3 follow-ups offered after a reply; clicking one fills the composer.
+_Avoid_: Suggestions, quick replies
+
+**Trash**:
+Where deleted chats wait 30 days before they are gone for good; they can be restored from there.
+_Avoid_: Recycle bin, deleted items
+
+**Compare**:
+Showing up to 3 project boards side by side.
+_Avoid_: Split view, multi-board
+
+**Routine**:
+A skill or prompt that runs in a project on a schedule while the app is open; each run is a new chat.
+_Avoid_: Workflow, scheduled task, cron job
