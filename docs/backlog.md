@@ -1,10 +1,10 @@
 # Backlog (order of work)
 
-Updated 2026-10-30. GitHub issues carry the details; this file is the order. A fresh session resumes from here.
+Updated 2026-10-31. GitHub issues carry the details; this file is the order. A fresh session resumes from here.
 
-## 1. Desktop app (Plan 4): issue #20, now
+## 1. Desktop app (Plan 4): #20, merged
 
-Built on branch `feat/desktop-app` (2026-10-30), slices 1–8 and 10 of `docs/specs/desktop-app.md`. **Left:** run the manual checklist in the spec (Testing Decisions) on the installed app, then tick slice 9, close #20 and narrow #15 to "Open in app".
+Merged into `main` in #35 (2026-10-31): slices 1–8 and 10 of `docs/specs/desktop-app.md`. #20 is closed. **Left:** run the manual checklist in the spec (Testing Decisions) on the installed app, then tick slice 9 and narrow #15 to "Open in app".
 
 Decisions: the spec, `docs/adr/0001-electron-desktop-shell.md` (with the feasibility result), `design/DESIGN.md` (Desktop app), terms in `GLOSSARY.md`. Run it: README "Run it".
 
@@ -23,37 +23,27 @@ Research: `docs/research/2026-10-23-enjoy-competitor-analysis.md`. Features go t
 
 Left out: routines, project docs, live preview, cloud/remote, more providers, plan advice. Pricing: not now, revisit when the repo goes public.
 
-## 1b. Projects and chats redesign (closes #11)
+## 1b. Projects and chats redesign: #11, merged
 
-Built on `feat/desktop-app` (2026-10-31): `docs/specs/projects-chats-redesign.md`, all slices done. Close #11 when it is merged.
+Merged into `main` in #35 (2026-10-31): `docs/specs/projects-chats-redesign.md`, all slices done, #11 closed. Prototype on branch `prototype/projects-chats-redesign`.
+**Follow-ups:** one-off folders from provider history (e.g. `i-have-these-three-csv-files`, worktree names like `angry-newton-faf3ab`) still show as projects; hide them by hand, or decide a rule. The hidden-project check is added by hand in each selector; fold it into one base selector.
 
 ## 2. Issues by severity (labels P1 → P3)
 
-**Fixed on branch `fix/p1-issues` (2026-10-30):** #5, #8, #12, #4 (all of P1), #6, #9, #10, #7.
+**Merged in #35 (2026-10-31), issues closed:** #3, #4, #5, #6, #7, #8, #9, #10, #12, #13, #16, #19, #22, #23, #24.
 
 **Waiting on the user:**
 - #21: update failure. Need the message the app showed; both updates worked when run directly.
 
-**P3 (2026-10-30, branch `fix/p1-issues`):**
-- **Done:**
-  - #13: "Opening your browser…" step; start-failure copy in the design.
-  - #16: past messages for Claude and Codex history chats.
-  - #19: lock path in the "already running" message; NaN guard.
-- **Left:**
-  - #16 paging: only the last 200 messages are shown; Antigravity history isn't readable.
-  - #19 remaining items.
+**P3 left (their issues are closed, so they live here):**
+  - From #16: paging (only the last 200 messages are shown); Antigravity history isn't readable.
+  - From #19: the remaining items.
   - #17: the archive animation belongs to the motion skills; the rest works as is.
   - #14: can't happen until the Antigravity pin moves.
   - #18: closed (not planned) in the desktop grilling.
 
 **Desktop follow-ups (before friends get the app):** #26 install Claude Code / Codex without npm, then #25 Mac build.
 
-## Done, waiting to be merged
+## Merged
 
-- Branch `fix/chat-layout-and-launcher`: #3 and the launcher.
-- Branch `feat/any-provider-folders`: built on it, adds #22, #23, #24.
-- Branch `fix/p1-issues`: built on that, adds #5 #8 #12 #4 #6 #9 #10 #7, then #13 #16 #19. Merging this one brings in all three.
-
-- Branch `feat/desktop-app`: built on `fix/p1-issues`, adds the desktop app (#20) and Open folder (#15, first half), then the projects and chats redesign (#11).
-
-Close those issues when they're merged.
+- #35 (2026-10-31): `fix/chat-layout-and-launcher`, `feat/any-provider-folders`, `fix/p1-issues` and `feat/desktop-app` in one merge. #15 stays open (Open folder done, "Open in app" left).
