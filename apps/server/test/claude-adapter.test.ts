@@ -699,3 +699,16 @@ test('a rejection that overage covered still completes the turn', async () => {
   assert.equal(ev.at(-1).type, 'turn.completed');
   await a.dispose();
 });
+
+test("chats run in the active account's config folder; Default passes no env (#39)", async () => {
+  let env: Record<string, string> = {};
+  const f = fake(async function* (_o, input) { await input.next(); yield init(); yield result(); await never(); });
+  const a = new ClaudeAdapter({ claudePath: 'c', query: f.query, env: () => env });
+  await a.startChat({ cwd: '.', prompt: 'go' });
+  assert.equal(f.calls[0]!.options.env, undefined);
+  env = { CLAUDE_CONFIG_DIR: '/accounts/work' };
+  await a.startChat({ cwd: '.', prompt: 'again' });
+  assert.equal(f.calls[1]!.options.env.CLAUDE_CONFIG_DIR, '/accounts/work');
+  assert.equal(f.calls[1]!.options.env.PATH, process.env.PATH);
+  await a.dispose();
+});

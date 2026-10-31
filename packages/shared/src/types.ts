@@ -60,6 +60,11 @@ export interface Chat {
 
 export interface QueuedMessage { id: string; text: string }
 
+/** Providers that can have several accounts (#39); Antigravity has one in v1. */
+export type AccountProvider = 'claude' | 'codex';
+/** One sign-in to a provider; "default" is the one the provider's own folder holds. */
+export interface Account { id: string; provider: AccountProvider; name: string; active: boolean }
+
 export interface Message { id: string; chatId: string; role: 'user' | 'assistant'; text: string; createdAt: string }
 
 /** A permission or question the agent is waiting on (read back after a page reload). */
@@ -98,6 +103,7 @@ export type ServerEvent =
   | { type: 'connection.updated'; health: ConnectionHealth }
   | { type: 'connect.updated'; state: ConnectState }
   | { type: 'settings.updated'; settings: Settings }
+  | { type: 'accounts.updated'; provider: AccountProvider; accounts: Account[] }
   | { type: 'notification'; chatId: string; kind: 'permission' | 'question' | 'finished' | 'limit' | 'error'; action?: RequestAction };
 
 export type ConnectPhase = 'idle' | 'installing' | 'signing_in' | 'signing_out' | 'updating' | 'error';

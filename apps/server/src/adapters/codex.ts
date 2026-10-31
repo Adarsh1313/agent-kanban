@@ -39,7 +39,7 @@ export class CodexAdapter implements ProviderAdapter {
   private makeProcess: () => JsonRpcProcess;
   /** How long initialize (and model/list) may take; public so a caller can change it between process starts. */
   initializeTimeoutMs: number;
-  private codexHome: string;
+  private homeOf: () => string;
   private fallbackModel = new WeakMap<JsonRpcProcess, string | null>();
   private _modelNote: string | null = null;
   // Keep-alive state for automatic (ping-driven) respawns; user actions bypass it.
@@ -53,12 +53,19 @@ export class CodexAdapter implements ProviderAdapter {
   private lastSignedIn: boolean | null = null;
   private claims = new Set<string>(); // threads a startChat/sendMessage is still setting up: they survive a deliberate recycle
 
-  constructor(opts: { codexPath: string; spawn?: (cmd: string, args: string[]) => JsonRpcProcess; initializeTimeoutMs?: number; pingTimeoutMs?: number; codexHome?: string }) {
+  constructor(opts: { codexPath: string; spawn?: (cmd: string, args: string[]) => JsonRpcProcess; initializeTimeoutMs?: number; pingTimeoutMs?: number; codexHome?: string; env?: () => Record<string, string> }) {
     this.pingTimeoutMs = opts.pingTimeoutMs ?? 15_000;
     const args = ['app-server'];
-    this.codexHome = opts.codexHome ?? join(homedir(), '.codex');
+    const fixedHome = opts.codexHome ?? join(homedir(), '.codex');
+    const accountEnv: () => Record<string, string> = opts.env ?? (() => ({}));
+    // The active account (#39) is read when the app-server starts: its CODEX_HOME holds that sign-in.
+    this.homeOf = () => accountEnv().CODEX_HOME ?? fixedHome;
     this.initializeTimeoutMs = opts.initializeTimeoutMs ?? 15_000;
-    this.makeProcess = () => (opts.spawn ? opts.spawn(opts.codexPath, args) : new JsonRpcProcess(opts.codexPath, args));
+    this.makeProcess = () => {
+      const env = accountEnv();
+      if (opts.spawn) return opts.spawn(opts.codexPath, args);
+      return new JsonRpcProcess(opts.codexPath, args, Object.keys(env).length > 0 ? { env: { ...process.env, ...env } } : {});
+    };
   }
 
   /** Set when the configured Codex model isn't usable with this account and new chats use the default instead. */
@@ -82,6 +89,9 @@ export class CodexAdapter implements ProviderAdapter {
     this.starting = s;
     return s;
   }
+
+  /** Another account is active: the next app-server starts signed in to it (callers switch only while no Codex chat runs). */
+  accountChanged(): void { this.markForRecycle(); }
 
   /** Replace the app-server at the next ping or action (used when it is stale and nothing is running on it). */
   markForRecycle(): void { if (this.proc) this.recycleMarked.add(this.proc); }
@@ -127,7 +137,7 @@ export class CodexAdapter implements ProviderAdapter {
       let configured: string | null = null;
       try {
         // Only the top-level keys, i.e. the text before the first [table] header.
-        const text = readFileSync(join(this.codexHome, 'config.toml'), 'utf8');
+        const text = readFileSync(join(this.homeOf(), 'config.toml'), 'utf8');
         const top = text.split(/^\s*\[/m)[0] ?? '';
         configured = /^model\s*=\s*"([^"]+)"/m.exec(top)?.[1] ?? null;
       } catch { /* no config file */ }

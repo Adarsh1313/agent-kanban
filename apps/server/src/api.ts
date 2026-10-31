@@ -14,6 +14,8 @@ import { PickerBusyError } from './folder-picker.ts';
 import type { Transcript } from './history/transcript.ts';
 import type { ConnectService } from './connect/service.ts';
 import { SettingsError } from './settings.ts';
+import { ACCOUNT_PROVIDERS, AccountBusyError, AccountError, type AccountService } from './accounts.ts';
+import type { AccountProvider } from '@agent-kanban/shared';
 import type { SettingsStore } from './settings.ts';
 import type { ChatService } from './chats.ts';
 import type { UsageService } from './usage/service.ts';
@@ -104,6 +106,8 @@ export function createApi(opts: {
   folderPicker?: { pick(): Promise<string | null> };
   /** A chat's "Open folder": shows a project folder in the file manager (#15). */
   folderOpener?: { open(path: string): Promise<void> };
+  /** Several accounts per provider (#39). */
+  accounts?: AccountService;
   /** Folder holding the built web app (default apps/web/dist). */
   webDist?: string;
   token: string;
@@ -179,6 +183,24 @@ export function createApi(opts: {
     };
     let m: string[] | null;
     if (match('GET', '/api/chats')) return { status: 200, body: chats.listChats() };
+    if (url.pathname.startsWith('/api/accounts') && opts.accounts) {
+      const accounts = opts.accounts;
+      const who = (v: unknown): AccountProvider => {
+        if (typeof v !== 'string' || !ACCOUNT_PROVIDERS.includes(v as AccountProvider)) throw new HttpError(400, 'Accounts are for claude or codex.');
+        return v as AccountProvider;
+      };
+      if (match('GET', '/api/accounts')) return { status: 200, body: accounts.all() };
+      if (match('POST', '/api/accounts')) {
+        const b = await readJson(req);
+        return { status: 201, body: accounts.add(who(b.provider), str(b, 'name')) };
+      }
+      if ((m = match('PATCH', '/api/accounts/:provider/:id'))) {
+        const b = await readJson(req);
+        return { status: 200, body: accounts.rename(who(m[0]), m[1]!, str(b, 'name')) };
+      }
+      if ((m = match('POST', '/api/accounts/:provider/:id/activate'))) return { status: 200, body: accounts.activate(who(m[0]), m[1]!) };
+      if ((m = match('DELETE', '/api/accounts/:provider/:id'))) return { status: 200, body: accounts.remove(who(m[0]), m[1]!) };
+    }
     if ((m = match('GET', '/api/chats/:id/messages'))) return { status: 200, body: chats.listMessages(m[0]!) };
     if ((m = match('GET', '/api/chats/:id/requests'))) return { status: 200, body: chats.listOpenRequests(m[0]!) };
     if ((m = match('GET', '/api/chats/:id/tool-calls'))) return { status: 200, body: chats.listToolCalls(m[0]!) };
@@ -394,6 +416,8 @@ export function createApi(opts: {
       (r) => send(r.status, r.body),
       (err: unknown) => {
         if (err instanceof URIError) return send(404, { error: 'Not found.' });
+        if (err instanceof AccountError) return send(400, { error: err.message });
+        if (err instanceof AccountBusyError) return send(409, { error: err.message });
         if (err instanceof HttpError) {
           if (err.status === 413) return reject413(err.message);
           return send(err.status, { error: err.message });

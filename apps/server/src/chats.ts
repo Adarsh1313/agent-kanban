@@ -345,6 +345,11 @@ export class ChatService {
 
   getChat(chatId: string): Chat { return this.mustGet(chatId); }
 
+  /** True while this app runs the chat (or is starting or resuming it). */
+  runningHere(chatId: string): boolean {
+    return this.live.has(chatId) || this.pending.has(chatId) || this.resuming.has(chatId);
+  }
+
   listMessages(chatId: string): Message[] {
     this.mustGet(chatId);
     return this.store.listMessages(chatId);

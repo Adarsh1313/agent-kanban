@@ -88,13 +88,27 @@ export class ClaudeAdapter implements ProviderAdapter {
   private lastSignedIn: boolean | null = null;
   private idleCloseMs: number;
 
-  constructor(opts: { claudePath: string; query?: typeof sdkQuery; usageTimeoutMs?: number; idleCloseMs?: number }) {
+  /** The active account's settings for Claude Code (CLAUDE_CONFIG_DIR), read whenever a query starts (#39). */
+  private accountEnv: () => Record<string, string>;
+
+  constructor(opts: { claudePath: string; query?: typeof sdkQuery; usageTimeoutMs?: number; idleCloseMs?: number; env?: () => Record<string, string> }) {
+    this.accountEnv = opts.env ?? (() => ({}));
     this.usageTimeoutMs = opts.usageTimeoutMs ?? 15_000;
     this.idleCloseMs = opts.idleCloseMs ?? IDLE_CLOSE_MS;
     // The SDK needs the real executable (an .exe, or a .js script it runs with node), never a .cmd shim.
     const target = resolveSpawnTarget(opts.claudePath);
     this.claudePath = target.args.length === 0 ? target.command : target.args[0]!;
     this.query = opts.query ?? sdkQuery;
+  }
+
+  private envOption(): { env?: Record<string, string | undefined> } {
+    const env = this.accountEnv();
+    return Object.keys(env).length > 0 ? { env: { ...process.env, ...env } } : {};
+  }
+
+  /** The usage query belongs to one account: switching closes it so the next reading uses the new one. */
+  accountChanged(): void {
+    this.closeUsageQuery(true);
   }
 
   onEvent(listener: Listener): () => void {
@@ -157,6 +171,8 @@ export class ClaudeAdapter implements ProviderAdapter {
     const options: Record<string, unknown> = { cwd: chat.cwd, pathToClaudeCodeExecutable: this.claudePath, permissionMode: 'default', canUseTool };
     if (chat.model) options.model = chat.model;
     if (resume) options.resume = resume;
+    const env = this.accountEnv();
+    if (Object.keys(env).length > 0) options.env = { ...process.env, ...env };
     const q = this.query({ prompt: chat.queue, options: options as never });
     chat.query = q;
     this.live.add(chat);
@@ -312,7 +328,7 @@ export class ClaudeAdapter implements ProviderAdapter {
       // One long-lived query with an empty prompt stream; strictMcpConfig + no mcpServers keeps user MCP servers from loading.
       const q = this.query({
         prompt: new InputQueue(),
-        options: { pathToClaudeCodeExecutable: this.claudePath, permissionMode: 'default', mcpServers: {}, strictMcpConfig: true } as never,
+        options: { pathToClaudeCodeExecutable: this.claudePath, permissionMode: 'default', mcpServers: {}, strictMcpConfig: true, ...this.envOption() } as never,
       });
       this.usageQuery = q;
       this.drain(q);

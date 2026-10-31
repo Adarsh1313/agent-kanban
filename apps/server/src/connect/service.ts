@@ -68,6 +68,8 @@ export interface UpdatableAdapter {
 }
 
 export interface ConnectServiceOptions {
+  /** The active account's environment for a CLI's sign-in, status and sign-out (#39). */
+  accountEnv?: (id: 'claude' | 'codex') => Record<string, string>;
   run: CommandRunner;
   npmPath: () => Promise<string | null>;
   /** Where the claude / codex CLI is (PATH lookup in production). */
@@ -293,10 +295,10 @@ export class ConnectService {
   /** Runs a command to the end, killed on abort (or after `timeoutMs`). */
   private async exec(
     cmd: string, args: string[], signal: AbortSignal,
-    o: { timeoutMs?: number; onOutput?: (t: string) => void } = {},
+    o: { timeoutMs?: number; onOutput?: (t: string) => void; env?: Record<string, string> } = {},
   ): Promise<{ code: number | null; errorCode?: string; output: string; timedOut: boolean }> {
     signal.throwIfAborted();
-    const child = this.opts.run(cmd, args);
+    const child = this.opts.run(cmd, args, o.env);
     let output = '';
     child.onOutput((t) => {
       if (output.length < MAX_OUTPUT) output += t.slice(0, MAX_OUTPUT - output.length);
@@ -315,15 +317,19 @@ export class ConnectService {
     }
   }
 
+  private envFor(id: Cli): Record<string, string> | undefined {
+    return this.opts.accountEnv?.(id);
+  }
+
   private async cliSignedIn(id: Cli, bin: string, signal: AbortSignal): Promise<boolean> {
     if (id === 'claude') {
-      const r = await this.exec(bin, ['auth', 'status', '--json'], signal, { timeoutMs: STATUS_TIMEOUT_MS });
+      const r = await this.exec(bin, ['auth', 'status', '--json'], signal, { timeoutMs: STATUS_TIMEOUT_MS, env: this.envFor(id) });
       const start = r.output.indexOf('{');
       const end = r.output.lastIndexOf('}');
       if (start < 0 || end <= start) return false;
       try { return (JSON.parse(r.output.slice(start, end + 1)) as { loggedIn?: unknown }).loggedIn === true; } catch { return false; }
     }
-    const r = await this.exec(bin, ['login', 'status'], signal, { timeoutMs: STATUS_TIMEOUT_MS });
+    const r = await this.exec(bin, ['login', 'status'], signal, { timeoutMs: STATUS_TIMEOUT_MS, env: this.envFor(id) });
     return r.code === 0 && /\bLogged in\b/.test(r.output) && !/not logged in/i.test(r.output);
   }
 
@@ -427,7 +433,7 @@ export class ConnectService {
       if (signal.aborted) return this.finishAborted(id, op);
 
       this.set(id, { step: STEP_SIGN_IN });
-      const proc = this.opts.run(bin, id === 'claude' ? ['auth', 'login', '--claudeai'] : ['login']);
+      const proc = this.opts.run(bin, id === 'claude' ? ['auth', 'login', '--claudeai'] : ['login'], this.envFor(id));
       login = proc;
       let exited = false;
       void proc.exited.then(() => { exited = true; });
@@ -550,7 +556,7 @@ export class ConnectService {
     if (!bin) return this.finish(id, op, { phase: 'error', message: notInstalled(id) });
     let r;
     try {
-      r = await this.exec(bin, id === 'claude' ? ['auth', 'logout'] : ['logout'], signal, { timeoutMs: LOGOUT_TIMEOUT_MS });
+      r = await this.exec(bin, id === 'claude' ? ['auth', 'logout'] : ['logout'], signal, { timeoutMs: LOGOUT_TIMEOUT_MS, env: this.envFor(id) });
     } catch {
       return this.finishAborted(id, op);
     }

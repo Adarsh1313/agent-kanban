@@ -24,6 +24,7 @@ import { findBinary } from './binaries.ts';
 import { createApi } from './api.ts';
 import { ConnectionMonitor, getLatest, makeGetVersion } from './health.ts';
 import { acquireLock, releaseLock } from './lock.ts';
+import { AccountService, AccountStore } from './accounts.ts';
 
 // Last resort: a stray rejection is logged, never allowed to take the server (and every chat) down.
 process.on('unhandledRejection', (e) => console.error('[agent-kanban] unhandled', e));
@@ -55,6 +56,8 @@ if (!acquireLock(lockPath)) {
 }
 process.on('exit', () => releaseLock(lockPath));
 const store = new Store(join(dataDir, 'agent-kanban.db'));
+// Extra accounts (#39) live under the data folder; Default is the provider's own folder.
+const accountStore = new AccountStore({ backend: store, root: join(dataDir, 'accounts'), providerHome: { claude: join(homedir(), '.claude'), codex: join(homedir(), '.codex') } });
 const token = randomBytes(24).toString('hex');
 
 const PROVIDERS: ProviderId[] = ['claude', 'codex', 'antigravity'];
@@ -64,8 +67,8 @@ const findProvider = (id: ProviderId) =>
 // Adapters are created when a provider's binary is first found, so installing one later needs no restart.
 const adapters = new AdapterRegistry({
   findBinary: findProvider,
-  create: (id, path) => (id === 'claude' ? new ClaudeAdapter({ claudePath: path })
-    : id === 'codex' ? new CodexAdapter({ codexPath: path })
+  create: (id, path) => (id === 'claude' ? new ClaudeAdapter({ claudePath: path, env: () => accountStore.env('claude') })
+    : id === 'codex' ? new CodexAdapter({ codexPath: path, env: () => accountStore.env('codex') })
       : new AntigravityAdapter({ exePath: path })),
 });
 // Creating an adapter starts nothing: the Antigravity agent (slow to start) is launched only by a chat or sign-in.
@@ -115,9 +118,20 @@ const connect = new ConnectService({
   // The check after an operation is always sent (newer checkedAt), so the card stops saying Checking… even when nothing changed.
   onHealth: (health) => broadcast({ type: 'connection.updated', health }),
   home: akHome,
+  accountEnv: (id) => accountStore.env(id),
 });
 connectRef = connect;
-const api = createApi({ chats, usage, history: () => readAllHistory(home), token, connections, adapters, connect, settings, folderPicker: new FolderPicker(), folderOpener: new FolderOpener(),
+const accounts = new AccountService({
+  accounts: accountStore,
+  runningOn: (p) => chats.listChats().some((c) => c.provider === p && chats.runningHere(c.id)),
+  switched: (p) => {
+    (adapters.get(p) as { accountChanged?: () => void } | undefined)?.accountChanged?.();
+    usage.refresh(p).catch(() => {});
+    connections.check(p).catch(() => {});
+  },
+  emit: (e) => broadcast(e),
+});
+const api = createApi({ accounts, chats, usage, history: () => readAllHistory(home), token, connections, adapters, connect, settings, folderPicker: new FolderPicker(), folderOpener: new FolderOpener(),
   transcript: (provider, sessionRef) => readTranscript(home, provider, sessionRef) });
 broadcast = api.broadcast;
 
