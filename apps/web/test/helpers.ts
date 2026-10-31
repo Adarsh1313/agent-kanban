@@ -16,6 +16,7 @@ export function chat(over: Partial<Chat> = {}): Chat {
     archived: false,
     pinned: false,
     snoozedUntil: null,
+    effort: 'normal',
     ...over,
   };
 }

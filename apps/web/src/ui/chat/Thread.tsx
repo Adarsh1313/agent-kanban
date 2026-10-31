@@ -6,6 +6,7 @@ import { clockTime, inFolder, toolIcon } from '../board/format.ts';
 import { Markdown } from './Markdown.tsx';
 import { Icon, ProviderLogo, StatusIcon, providerName } from '../primitives/index.ts';
 import { RequestCard } from './RequestCard.tsx';
+import { EFFORT_LABEL } from './EffortPicker.tsx';
 
 /** The thread renders the latest this-many messages; "Show earlier" adds this many more. */
 export const THREAD_PAGE = 200;
@@ -21,7 +22,7 @@ interface Turn {
   key: string;
   start: string;
   user: Message | null;
-  replies: { id: string; text: string; createdAt: string | null }[];
+  replies: (Pick<Message, 'id' | 'text' | 'effort' | 'suggestions'> & { createdAt: string | null })[];
   calls: ToolCall[];
 }
 
@@ -36,7 +37,7 @@ export function buildTurns(messages: Message[], calls: ToolCall[], streaming: Re
       turns.push({ key: m.id, start: m.createdAt, user: m.role === 'user' ? m : null, replies: [], calls: [] });
       if (m.role === 'user') continue;
     }
-    turns[turns.length - 1]!.replies.push({ id: m.id, text: m.text, createdAt: m.createdAt });
+    turns[turns.length - 1]!.replies.push({ id: m.id, text: m.text, createdAt: m.createdAt, ...(m.effort ? { effort: m.effort } : {}), ...(m.suggestions ? { suggestions: m.suggestions } : {}) });
   }
   const live = Object.entries(streaming);
   if (turns.length === 0 && (calls.length > 0 || live.length > 0)) turns.push({ key: 'start', start: '', user: null, replies: [], calls: [] });
@@ -97,6 +98,12 @@ const selectThread = (id: string) => (s: AppState) => ({
 function lastAssistant(messages: Message[]): Message | null {
   for (let i = messages.length - 1; i >= 0; i--) if (messages[i]!.role === 'assistant') return messages[i]!;
   return null;
+}
+
+/** "Quick" or "Thorough" when the turn's reply ran at an effort other than Normal. */
+function effortNote(replies: { effort?: Message['effort'] }[]): string | null {
+  const e = replies.find((r) => r.effort && r.effort !== 'normal')?.effort;
+  return e ? EFFORT_LABEL[e] : null;
 }
 
 /** One board chat's thread: the latest messages, a "Worked · N steps" group per turn, streaming text and open requests. */
@@ -178,6 +185,7 @@ export function Thread({ chat }: { chat: Chat }) {
                 {t.calls.length > 0 && <WorkGroup calls={t.calls} working={working} cwd={chat.cwd} />}
                 {working && t.calls.length === 0 && t.replies.length === 0 && <div className="thread-note"><StatusIcon state="running" />Working…</div>}
                 {t.replies.map((r) => <div className="msg-text md" key={r.id}><Markdown text={r.text} /></div>)}
+                {effortNote(t.replies) && <div className="effort-note">{effortNote(t.replies)} effort</div>}
               </div>
             )}
           </div>

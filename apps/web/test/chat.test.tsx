@@ -562,3 +562,32 @@ describe('buildTurns', () => {
     expect(turns[1]!.replies.map((r) => r.text)).toEqual(['partial']);
   });
 });
+
+describe('Composer: effort', () => {
+  it('offers Quick, Normal and Thorough and saves the pick for the chat', async () => {
+    mocked.patchChat.mockResolvedValue(chat({ title: 'Talk', column: 'review', effort: 'thorough' }));
+    mount(seeded([chat({ title: 'Talk', column: 'review' })]));
+    fireEvent.click(card('Talk'));
+    fireEvent.click(within(panel()).getByRole('button', { name: 'Effort: Normal' }));
+    const items = screen.getAllByRole('menuitemcheckbox');
+    expect(items.map((i) => i.textContent?.split(/(?=[A-Z][a-z]+ )/)[0])).toEqual(['Quick', 'Normal', 'Thorough']);
+    expect(items[1]!.getAttribute('aria-checked')).toBe('true');
+    fireEvent.click(items[2]!);
+    await waitFor(() => expect(mocked.patchChat).toHaveBeenCalledWith('c1', { effort: 'thorough' }));
+    await waitFor(() => expect(within(panel()).getByRole('button', { name: 'Effort: Thorough' })).toBeTruthy());
+  });
+
+  it('is hidden for a provider without an effort setting', async () => {
+    mount(seeded([chat({ title: 'Anti', provider: 'antigravity', column: 'review' })]));
+    fireEvent.click(card('Anti'));
+    await flush();
+    expect(within(panel()).queryByRole('button', { name: /^Effort/ })).toBeNull();
+  });
+
+  it('notes a reply that ran at an effort other than Normal', async () => {
+    thread([message({ id: 'u', role: 'user', text: 'go' }), message({ id: 'a', text: 'done', effort: 'quick' })]);
+    mount(seeded([chat({ title: 'Talk', column: 'review' })]));
+    fireEvent.click(card('Talk'));
+    await waitFor(() => expect(within(panel()).getByText('Quick effort')).toBeTruthy());
+  });
+});

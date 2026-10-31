@@ -11,6 +11,7 @@ import { Icon, ProviderLogo, StatusIcon, Tooltip, providerName, toast } from '..
 import { pushLayer } from '../primitives/layers.ts';
 import { ChatActionsMenu, runAction, type ChatActionsTarget } from './ChatActionsMenu.tsx';
 import { Composer } from './Composer.tsx';
+import { EffortPicker } from './EffortPicker.tsx';
 import { Thread } from './Thread.tsx';
 import { HistoryThread } from './HistoryThread.tsx';
 
@@ -240,7 +241,7 @@ export function ChatPanel() {
         {s.kind === 'chat' ? (
           <>
             <Thread chat={s.chat} key={`t:${s.chat.id}`} />
-            <Composer key={`c:${s.chat.id}`} ref={composerRef} onSend={sendTo(s.chat)} hint={HINT}
+            <Composer key={`c:${s.chat.id}`} ref={composerRef} onSend={sendTo(s.chat)} hint={HINT} tools={<EffortPicker chat={s.chat} />}
               placeholder={s.chat.column === 'running' ? 'Send a note. It reaches the agent after this step' : 'Reply or give a new instruction'} />
           </>
         ) : (
