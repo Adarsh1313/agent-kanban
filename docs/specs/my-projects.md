@@ -133,4 +133,4 @@ During onboarding, the user picks **My projects**: the projects they work on now
 - [x] Slice 3: onboarding "Your projects" step and the shared picker dialog (tiles, pre-tick, Older, search, Skip); Edit and pick-card entry points
 - [x] Slice 4: managing My projects: star on Projects rows and project page, Remove from card, auto-add on new chat, "New activity · Add" hint
 - [x] Slice 5: global search palette (field replaces sidebar New chat, Ctrl+K, two columns, project → chats, keyboard, See all results, Esc)
-- [ ] Slice 6: DESIGN.md section, glossary/README/onboarding copy check, close #38
+- [x] Slice 6: DESIGN.md section, glossary/README/onboarding copy check, close #38

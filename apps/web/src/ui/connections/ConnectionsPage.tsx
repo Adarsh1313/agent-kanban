@@ -94,7 +94,7 @@ export function connectDoneToast(prev: ConnectState | undefined, next: ConnectSt
   if (Date.parse(next.updatedAt) < Date.parse(prev.updatedAt)) return null; // an older state the store ignores
   const name = providerName(next.provider);
   switch (next.lastOp) {
-    case 'signin': return `${name} is connected. Its chats now show in Recent chats`;
+    case 'signin': return `${name} is connected. Its chats now show in the sidebar and All chats`;
     case 'update': return health?.latestVersion ? `${name} updated to ${health.latestVersion}` : `${name} updated`;
     case 'signout': return `Signed out of ${name}`;
     default: return null;
@@ -327,8 +327,8 @@ function ConnectionCard({ id }: { id: ProviderId }) {
           )}
           <div className="conn-toggles">
             <div className="toggle-row">
-              <span>Show its chats in Recent chats</span>
-              <Switch checked={intent.showChats ?? showChats ?? true} disabled={showChats === null} label={`Show ${name} chats in Recent chats`} onChange={(on) => void toggle('showChats', on)} />
+              <span>Show its chats in the sidebar</span>
+              <Switch checked={intent.showChats ?? showChats ?? true} disabled={showChats === null} label={`Show ${name} chats in the sidebar`} onChange={(on) => void toggle('showChats', on)} />
             </div>
             <div className="toggle-row">
               <span>Suggest it for new chats</span>

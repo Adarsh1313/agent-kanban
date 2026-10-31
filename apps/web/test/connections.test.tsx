@@ -324,7 +324,7 @@ describe('connections actions', () => {
   it('the switches patch settings; Show its chats refetches history and projects; a failure toasts and keeps the switch', async () => {
     const store = seeded(ALL());
     mount(store);
-    const show = within(card('codex')).getByRole('switch', { name: 'Show Codex chats in Recent chats' });
+    const show = within(card('codex')).getByRole('switch', { name: 'Show Codex chats in the sidebar' });
     const sug = within(card('codex')).getByRole('switch', { name: 'Suggest Codex for new chats' });
     expect(show.getAttribute('aria-checked')).toBe('true');
 
@@ -395,7 +395,7 @@ describe('connections fix round 1', () => {
     const store = seeded(ALL(), [], [], [cs('claude', { phase: 'signing_in' }), cs('codex', { phase: 'updating' })]);
     mount(store);
     act(() => applyConnectEvent(store, cs('claude', { lastOp: 'signin', outcome: 'done', updatedAt: later(1) })));
-    expect(await screen.findByText('Claude Code is connected. Its chats now show in Recent chats')).toBeTruthy();
+    expect(await screen.findByText('Claude Code is connected. Its chats now show in the sidebar and All chats')).toBeTruthy();
     act(() => applyConnectEvent(store, cs('codex', { lastOp: 'update', outcome: 'done', updatedAt: later(1) })));
     expect(await screen.findByText('Codex updated to 0.157.0')).toBeTruthy();
 
@@ -405,7 +405,7 @@ describe('connections fix round 1', () => {
     // A resync that finds a finished sign-in is not announced either.
     act(() => store.setState((s) => applyEvent(s, { type: 'connect.updated', state: cs('antigravity', { phase: 'signing_in', updatedAt: later(4) }) })));
     act(() => store.setState((s) => applySnapshot(s, { chats: [], usage: [], suggested: null, connections: ALL(), history: [], projects: [], connect: [cs('antigravity', { lastOp: 'signin', outcome: 'done', updatedAt: later(5) })] })));
-    expect(screen.queryByText('Antigravity is connected. Its chats now show in Recent chats')).toBeNull();
+    expect(screen.queryByText('Antigravity is connected. Its chats now show in the sidebar and All chats')).toBeNull();
     expect(screen.queryAllByText(/is connected|updated to/)).toHaveLength(2);
   });
 
@@ -462,7 +462,7 @@ describe('connections fix round 1', () => {
     mocked.patchSettings.mockResolvedValueOnce({ ...SETTINGS, suggest: { ...ON, codex: false } });
     mocked.patchSettings.mockResolvedValueOnce({ ...SETTINGS, suggest: { ...ON, codex: false } });
     mount(seeded(ALL()));
-    const show = within(card('codex')).getByRole('switch', { name: 'Show Codex chats in Recent chats' });
+    const show = within(card('codex')).getByRole('switch', { name: 'Show Codex chats in the sidebar' });
     const sug = within(card('codex')).getByRole('switch', { name: 'Suggest Codex for new chats' });
     fireEvent.click(show);
     fireEvent.click(show); // remembered while its request runs, not sent yet

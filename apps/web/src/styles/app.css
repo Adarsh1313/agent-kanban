@@ -211,7 +211,7 @@ body:has(> .onb[data-state="open"]) > .toasts { z-index: 91; }
 /* The chat panel runs to the top edge too: its header keeps its buttons clear of the caption buttons. */
 .desktop :is(.topbar, .panel-head) { padding-right: calc(var(--titlebar-controls-width) + var(--space-2)); }
 
-/* Recent chats (prototype variant A): the project label sits muted on the right; hovering swaps it for the date. */
+/* Sidebar chat rows (Pinned, card bodies): the project label sits muted on the right; hovering swaps it for the date. */
 .chat-row .rest { flex: none; max-width: 34%; color: var(--color-text-faint); font-size: var(--text-caption); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .chat-row .rest .d { display: none; }
 /* The "…" button floats over the row's right edge, so while hidden it takes no width from the title; the label makes
