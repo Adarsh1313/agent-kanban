@@ -50,7 +50,15 @@ export interface Chat {
   archived: boolean;
   pinned: boolean;
   snoozedUntil: string | null;
+  /** Out of usage: when it continues on its own (left out when not waiting on a reset, #39). */
+  resumeAt?: string | null;
+  /** False when the user chose "Don't resume" (left out = resume, the default). */
+  autoResume?: boolean;
+  /** Messages written while out of usage, sent in order when it can continue (left out when empty). */
+  queue?: QueuedMessage[];
 }
+
+export interface QueuedMessage { id: string; text: string }
 
 export interface Message { id: string; chatId: string; role: 'user' | 'assistant'; text: string; createdAt: string }
 

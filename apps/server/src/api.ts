@@ -184,7 +184,7 @@ export function createApi(opts: {
     if ((m = match('GET', '/api/chats/:id/tool-calls'))) return { status: 200, body: chats.listToolCalls(m[0]!) };
     if ((m = match('PATCH', '/api/chats/:id'))) {
       const b = await readJson(req);
-      const patch: { title?: string; pinned?: boolean; snoozedUntil?: string | null } = {};
+      const patch: { title?: string; pinned?: boolean; snoozedUntil?: string | null; autoResume?: boolean } = {};
       for (const [k, v] of Object.entries(b)) {
         if (k === 'title') {
           const t = typeof v === 'string' ? v.trim() : '';
@@ -193,6 +193,9 @@ export function createApi(opts: {
         } else if (k === 'pinned') {
           if (typeof v !== 'boolean') throw new HttpError(400, 'Pinned must be true or false.');
           patch.pinned = v;
+        } else if (k === 'autoResume') {
+          if (typeof v !== 'boolean') throw new HttpError(400, 'Auto-resume must be true or false.');
+          patch.autoResume = v;
         } else if (k === 'snoozedUntil') {
           if (v === null) patch.snoozedUntil = null;
           else {
@@ -239,6 +242,12 @@ export function createApi(opts: {
       await chats.answer(m[0]!, m[1]!, decision);
       return { status: 204 };
     }
+    if ((m = match('PATCH', '/api/chats/:id/queue/:queued'))) {
+      const b = await readJson(req);
+      return { status: 200, body: chats.editQueued(m[0]!, m[1]!, str(b, 'text')) };
+    }
+    if ((m = match('DELETE', '/api/chats/:id/queue/:queued'))) return { status: 200, body: chats.removeQueued(m[0]!, m[1]!) };
+    if ((m = match('POST', '/api/chats/:id/queue/:queued/send-now'))) { await chats.sendQueuedNow(m[0]!, m[1]!); return { status: 204 }; }
     if ((m = match('POST', '/api/chats/:id/stop'))) { await chats.stop(m[0]!); return { status: 200, body: chats.getChat(m[0]!) }; }
     if ((m = match('POST', '/api/chats/:id/done'))) return { status: 200, body: chats.markDone(m[0]!) };
     if ((m = match('POST', '/api/chats/:id/undone'))) return { status: 200, body: chats.dragOutOfDone(m[0]!) };
@@ -325,7 +334,7 @@ export function createApi(opts: {
       res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Vary', 'Origin');
       res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
-      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, OPTIONS');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
     }
     const send = (status: number, body?: unknown) => {
       if (body === undefined) { res.writeHead(status); res.end(); return; }
@@ -391,7 +400,7 @@ export function createApi(opts: {
         }
         const msg = err instanceof Error ? err.message : '';
         if (err instanceof ActiveElsewhereError || err instanceof CantContinueError || err instanceof ConnectBusyError || err instanceof ConnectStateError || err instanceof PickerBusyError) return send(409, { error: msg });
-        if (msg === 'That request is no longer open.') return send(409, { error: msg });
+        if (msg === 'That request is no longer open.' || msg === 'That message is no longer queued.') return send(409, { error: msg });
         if (msg === 'Chat not found.') return send(404, { error: msg });
         console.error(err);
         send(500, { error: 'Something went wrong.' });

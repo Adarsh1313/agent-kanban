@@ -99,10 +99,16 @@ The patterns come from Enjoy ("Out of usage", an editable queue) and T3 Code ("p
 
 ## Progress
 
-- [ ] Slice 1: out-of-usage state + resume scheduler (persisted, restart-safe, Don't resume) with API tests
-- [ ] Slice 2: follow-up queue API (append, edit, delete, send-now, send at turn end)
+- [x] Slice 1: out-of-usage state + resume scheduler (persisted, restart-safe, Don't resume) with API tests
+- [x] Slice 2: follow-up queue API (append, edit, delete, send-now, send at turn end)
 - [ ] Slice 3: web: Out of usage card/panel copy, toggle, queue chips, "N queued" on cards
 - [ ] Slice 4: accounts: table, config folders, sign-in per account, active account passed to adapters, usage per account
 - [ ] Slice 5: web: Connections account list, Use this account, remove; switch-and-continue nudge
 - [ ] Slice 6: Codex free resets (research gate; drop if not exposed)
 - [ ] Slice 7: DESIGN.md, glossary check, close #39 (and #27, #30, #31)
+
+## Implementation notes
+
+- The needs-you reason stays `limit` internally; the copy says "Out of usage".
+- Claude's adapter now reads the SDK's `rate_limit_event` (rejected, `resetsAt`) and the "hit your limit" result text. Before this, only Codex reported limits.
+- The queue holds messages only while out of usage. A message sent while the agent is running still goes straight to the provider, which already holds it until the current step ends, so nothing changed there.

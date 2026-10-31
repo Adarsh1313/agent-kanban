@@ -55,6 +55,8 @@ type Chat = {
   query: Query | null;
   turnRunning: boolean;
   turnAnnounced: boolean;
+  /** Set by a rejected rate_limit_event during this turn: its reset time, or '' when not given. */
+  limitResetsAt?: string;
   stopping: boolean;
   pending: Map<string, Pending>;
   onStarted?: { resolve: () => void; reject: (e: Error) => void };
@@ -65,6 +67,9 @@ type Chat = {
 const SHUT_DOWN = 'Claude Code adapter is shut down.';
 const DIED = 'Claude Code stopped unexpectedly.';
 const IDLE_CLOSE_MS = 10 * 60_000;
+
+/** Claude Code's result text when a plan limit stopped the turn (no rate_limit_event came first). */
+const LIMIT_TEXT = /hit your (usage )?limit|usage limit reached|out of usage/i;
 
 export class ClaudeAdapter implements ProviderAdapter {
   id = 'claude' as const;
@@ -211,12 +216,21 @@ export class ClaudeAdapter implements ProviderAdapter {
           this.emit({ type: 'tool.call', sessionRef, toolCallId: String(block.id), name: String(block.name), summary: toolSummary(block.name, block.input ?? {}), status: 'running' });
         }
       });
+    } else if (m.type === 'rate_limit_event') {
+      // Claude.ai plan limits: a rejected request means the turn ends out of usage until resetsAt (#39).
+      const info = m.rate_limit_info;
+      if (info?.status === 'rejected') chat.limitResetsAt = typeof info.resetsAt === 'number' ? new Date(info.resetsAt * 1000).toISOString() : '';
     } else if (m.type === 'result') {
       const swallow = chat.stopping;
+      const limit = chat.limitResetsAt;
+      chat.limitResetsAt = undefined;
       chat.turnRunning = false; chat.turnAnnounced = false; chat.stopping = false;
       this.scheduleIdleClose(chat);
       if (swallow) return;
-      if (m.is_error) this.emit({ type: 'error', sessionRef, message: typeof m.result === 'string' && m.result ? m.result : 'Claude Code ran into a problem.' });
+      const text = typeof m.result === 'string' ? m.result : '';
+      if (limit !== undefined || (m.is_error && LIMIT_TEXT.test(text))) {
+        this.emit(limit ? { type: 'limit.reached', sessionRef, resetsAt: limit } : { type: 'limit.reached', sessionRef });
+      } else if (m.is_error) this.emit({ type: 'error', sessionRef, message: typeof m.result === 'string' && m.result ? m.result : 'Claude Code ran into a problem.' });
       else this.emit({ type: 'turn.completed', sessionRef });
     }
   }
