@@ -473,7 +473,12 @@ export function Onboarding() {
           <div className="onb-foot">
             {backBtn}
             <span className="grow">{ticked.size} picked · change any time in the sidebar</span>
-            <button className="btn ghost" type="button" onClick={() => savePicks(defaultPicks(projects, store.getState().now))}>Skip</button>
+            <button className="btn ghost" type="button" onClick={() => {
+              // Skip keeps what is saved (a replay); the first time it keeps the pre-ticked projects.
+              const s = store.getState();
+              if (s.settings?.myProjects) go(PROJECTS_STEP + 1);
+              else savePicks(defaultPicks(projects, s.now));
+            }}>Skip</button>
             <button className="btn primary" type="button" data-primary onClick={() => savePicks(pickedPaths(projects, ticked))}>Continue</button>
           </div>
         </>

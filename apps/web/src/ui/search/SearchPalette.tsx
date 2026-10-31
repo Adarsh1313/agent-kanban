@@ -26,6 +26,9 @@ function highlight(text: string, q: string): ReactNode {
   return <>{text.slice(0, i)}<mark>{text.slice(i, i + q.length)}</mark>{text.slice(i + q.length)}</>;
 }
 
+/** Chats started here plus the ones only in a provider's own history. */
+const chatCount = (p: Project) => p.providers.reduce((n, x) => n + x.chats, 0) + p.historyOnly;
+
 const byActivity = (a: Project, b: Project) => (a.lastActivityAt < b.lastActivityAt ? 1 : a.lastActivityAt > b.lastActivityAt ? -1 : 0);
 
 type Item = { kind: 'project'; project: Project } | { kind: 'chat'; chat: ListedChat };
@@ -161,7 +164,7 @@ function Palette({ onClose }: { onClose: () => void }) {
                     onMouseEnter={() => setSel(i)} onClick={() => choose(items[i])}>
                     <span className="folder-glyph proj-glyph" aria-hidden="true">{(p.name || '?')[0]!.toUpperCase()}</span>
                     <span className="r-t">{highlight(p.name, q)}</span>
-                    <span className="r-m">{relativeTime(p.lastActivityAt, now)}</span>
+                    <span className="r-m">{chatCount(p)} chat{chatCount(p) === 1 ? '' : 's'} · {relativeTime(p.lastActivityAt, now)}</span>
                   </li>
                 ))}
               </ul>
