@@ -106,6 +106,8 @@ export function createApi(opts: {
   folderPicker?: { pick(): Promise<string | null> };
   /** A chat's "Open folder": shows a project folder in the file manager (#15). */
   folderOpener?: { open(path: string): Promise<void> };
+  /** Codex's banked free resets (#31). */
+  codexResets?: { read(): Promise<number>; use(): Promise<string> };
   /** Several accounts per provider (#39). */
   accounts?: AccountService;
   /** Folder holding the built web app (default apps/web/dist). */
@@ -183,6 +185,8 @@ export function createApi(opts: {
     };
     let m: string[] | null;
     if (match('GET', '/api/chats')) return { status: 200, body: chats.listChats() };
+    if (opts.codexResets && match('GET', '/api/usage/codex/resets')) return { status: 200, body: { available: await opts.codexResets.read() } };
+    if (opts.codexResets && match('POST', '/api/usage/codex/resets/use')) return { status: 200, body: { outcome: await opts.codexResets.use() } };
     if (url.pathname.startsWith('/api/accounts') && opts.accounts) {
       const accounts = opts.accounts;
       const who = (v: unknown): AccountProvider => {
@@ -269,6 +273,7 @@ export function createApi(opts: {
       return { status: 200, body: chats.editQueued(m[0]!, m[1]!, str(b, 'text')) };
     }
     if ((m = match('DELETE', '/api/chats/:id/queue/:queued'))) return { status: 200, body: chats.removeQueued(m[0]!, m[1]!) };
+    if ((m = match('POST', '/api/chats/:id/resume-now'))) { await chats.resumeNow(m[0]!); return { status: 204 }; }
     if ((m = match('POST', '/api/chats/:id/queue/:queued/send-now'))) { await chats.sendQueuedNow(m[0]!, m[1]!); return { status: 204 }; }
     if ((m = match('POST', '/api/chats/:id/stop'))) { await chats.stop(m[0]!); return { status: 200, body: chats.getChat(m[0]!) }; }
     if ((m = match('POST', '/api/chats/:id/done'))) return { status: 200, body: chats.markDone(m[0]!) };

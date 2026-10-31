@@ -32,6 +32,13 @@ one running-blue card halfway between two ink columns.
 - **One primary (ink) button per view.** On the board that is New chat.
 - **Cards** carry title, provider logo + model, folder, time. Needs-you adds one reason badge; running
   adds the activity line. Detail lives in the side panel, never a new page.
+- **Out of usage** is a needs-you reason (amber), never an error: "Out of usage · resumes 2:40 pm" while it will
+  continue on its own, "Out of usage · resets 2:40 pm" or "· resets later" when it won't, plus "2 queued" on the card. The
+  panel puts a short block above the composer: the "Continue on its own when usage resets" switch, "N free resets ·
+  Use reset" for Codex, one "Switch to Work and continue" button per other account, then the queued messages as
+  bordered rows (click to edit, Send now, remove). The composer says "Queue a message. It goes out when it can continue".
+- **Accounts** sit on a provider's Connections card under its switches: plain rows (name, an "Active" badge or "Use this
+  account", remove), then "Add another account", which opens a one-line name field. Never switched automatically.
 - **Card actions appear on hover/focus.** Undoable actions (Stop, Archive) never confirm; Archive shows
   an Undo toast. Only the user moves cards to Done; drops on agent-owned columns snap back with a toast.
 - **Shadows only for floating things** (dragged card, menus, panel, dialog). Cards use a border.

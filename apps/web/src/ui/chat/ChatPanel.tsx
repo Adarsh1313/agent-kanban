@@ -61,10 +61,49 @@ export function OutOfUsage({ chat }: { chat: Chat }) {
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const queue = chat.queue ?? [];
+  // Another signed-in account of this provider can carry on now; the user picks it, it never switches by itself.
+  const accounts = useStore((s) => (chat.provider === 'claude' || chat.provider === 'codex' ? s.accounts[chat.provider] : undefined));
+  const others = (accounts ?? []).filter((a) => !a.active);
+  const canSwitch = chat.provider === 'claude' || chat.provider === 'codex';
+  const [resets, setResets] = useState(0);
+  useEffect(() => {
+    if (chat.provider !== 'codex') return;
+    let live = true;
+    api.codexResets().then((r) => { if (live) setResets(r.available); }, () => {});
+    return () => { live = false; };
+  }, [chat.provider]);
+  const redeemReset = async () => {
+    try {
+      const { outcome } = await api.useCodexReset();
+      toast(outcome === 'reset' ? 'Used a free reset. Codex chats carry on now.' : outcome === 'nothingToReset' ? 'Nothing to reset right now.' : outcome === 'noCredit' ? 'No free resets left.' : "Couldn't use a free reset. Try again.");
+      if (outcome === 'reset' || outcome === 'noCredit') setResets((n) => Math.max(0, n - (outcome === 'reset' ? 1 : n)));
+    } catch (e) { toast(errorText(e)); }
+  };
+  useEffect(() => {
+    if (!canSwitch || accounts) return;
+    api.accounts().then((all) => store.setState((s) => ({ ...s, accounts: { ...s.accounts, ...all } })), () => {});
+  }, [canSwitch, accounts, store]);
   const act = (fn: () => Promise<Chat | void>) => void runAction(store, fn);
   const save = (id: string) => { setEditing(null); if (draft.trim()) act(() => api.editQueued(chat.id, id, draft.trim())); };
   return (
     <div className="out-of-usage">
+      {resets > 0 && (
+        <div className="toggle-row">
+          <span>{resets === 1 ? '1 free reset' : `${resets} free resets`}</span>
+          <button className="btn" type="button" onClick={() => void redeemReset()}>Use reset</button>
+        </div>
+      )}
+      {others.length > 0 && (
+        <div className="switch-accounts">
+          {others.map((a) => (
+            <button key={a.id} className="btn" type="button" onClick={() => act(async () => {
+              const list = await api.activateAccount(chat.provider as 'claude' | 'codex', a.id);
+              store.setState((s) => ({ ...s, accounts: { ...s.accounts, [chat.provider]: list } }));
+              await api.resumeNow(chat.id);
+            })}>Switch to {a.name} and continue</button>
+          ))}
+        </div>
+      )}
       {chat.resumeAt && (
         <div className="toggle-row">
           <span>Continue on its own when usage resets</span>

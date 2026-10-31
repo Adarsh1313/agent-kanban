@@ -13,7 +13,7 @@ import type {
   ServerEvent,
   Settings,
   ToolCall,
-  UsageReading,
+  UsageReading, Account, AccountProvider,
 } from '@agent-kanban/shared';
 import { suggest } from '@agent-kanban/shared';
 
@@ -88,6 +88,8 @@ export interface AppState {
   connect: Partial<Record<ProviderId, ConnectState>>;
   /** null until loaded. */
   settings: Settings | null;
+  /** Each provider's accounts once asked (#39). */
+  accounts: Partial<Record<AccountProvider, Account[]>>;
   history: HistoryChat[];
   projects: Project[];
   notifications: AppNotification[];
@@ -135,6 +137,7 @@ export function initialState(): AppState {
     connections: {},
     connect: {},
     settings: null,
+    accounts: {},
     history: [],
     projects: [],
     notifications: [],
@@ -334,6 +337,8 @@ export function applyEvent(s: AppState, e: ServerEvent, now: Date = new Date()):
       return mk([], { connections: { ...s.connections, [e.health.provider]: e.health } });
     case 'connect.updated':
       return mk([], { connect: mergeConnect(s.connect, [e.state]) });
+    case 'accounts.updated':
+      return mk([], { accounts: { ...s.accounts, [e.provider]: e.accounts } });
     case 'settings.updated':
       // Saved in another tab (or onboarding): every open page follows.
       return { ...applySettings(s, e.settings), sync: bump(s, []) };

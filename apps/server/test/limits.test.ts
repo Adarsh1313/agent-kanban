@@ -130,3 +130,14 @@ test('a reset that passed while the app was closed resumes on start', async () =
     assert.ok(adapter.calls.includes('send:after restart'));
   } finally { svc.dispose(); }
 });
+
+test('resume now continues an out-of-usage chat straight away with its queue', async () => {
+  const s = await setup();
+  try {
+    s.adapter.emit({ type: 'limit.reached', sessionRef: 's1', resetsAt: RESET });
+    await s.svc.send(s.id, 'queued one');
+    await s.svc.resumeNow(s.id);
+    assert.ok(s.adapter.calls.includes('send:queued one'));
+    await assert.rejects(s.svc.resumeNow(s.id), /isn't waiting on usage/);
+  } finally { s.svc.dispose(); }
+});

@@ -11,7 +11,7 @@ import type {
   ProviderId,
   Settings,
   ToolCall,
-  UsageReading,
+  UsageReading, Account, AccountProvider,
 } from '@agent-kanban/shared';
 
 const TOKEN_KEY = 'agent-kanban.token';
@@ -147,6 +147,16 @@ export const api = {
   connectStates: () => get<ConnectState[]>('/api/connect'),
   /** Starts (or cancels) an operation; the answer is the provider's state right after, and progress follows as connect.updated events. */
   connect: (provider: ProviderId, action: ConnectAction) => post<ConnectState>(`/api/connect/${enc(provider)}/${action}`),
+  /** Several accounts per provider (#39); each change answers with that provider's accounts. */
+  accounts: () => get<Record<AccountProvider, Account[]>>('/api/accounts'),
+  addAccount: (provider: AccountProvider, name: string) => post<Account[]>('/api/accounts', { provider, name }),
+  renameAccount: (provider: AccountProvider, id: string, name: string) => request<Account[]>('PATCH', `/api/accounts/${provider}/${enc(id)}`, { name }),
+  activateAccount: (provider: AccountProvider, id: string) => post<Account[]>(`/api/accounts/${provider}/${enc(id)}/activate`),
+  removeAccount: (provider: AccountProvider, id: string) => request<Account[]>('DELETE', `/api/accounts/${provider}/${enc(id)}`),
+  /** Codex's banked free resets (#31). */
+  codexResets: () => get<{ available: number }>('/api/usage/codex/resets'),
+  useCodexReset: () => post<{ outcome: string }>('/api/usage/codex/resets/use'),
+  resumeNow: (id: string) => post<void>(`/api/chats/${enc(id)}/resume-now`),
   settings: () => get<Settings>('/api/settings'),
   patchSettings: (patch: SettingsPatch) => request<Settings>('PATCH', '/api/settings', patch),
   projects: () => get<Project[]>('/api/projects'),

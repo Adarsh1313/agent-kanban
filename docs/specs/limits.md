@@ -103,9 +103,9 @@ The patterns come from Enjoy ("Out of usage", an editable queue) and T3 Code ("p
 - [x] Slice 2: follow-up queue API (append, edit, delete, send-now, send at turn end)
 - [x] Slice 3: web: Out of usage card/panel copy, toggle, queue chips, "N queued" on cards
 - [x] Slice 4: accounts: table, config folders, sign-in per account, active account passed to adapters, usage per account
-- [ ] Slice 5: web: Connections account list, Use this account, remove; switch-and-continue nudge
-- [ ] Slice 6: Codex free resets (research gate; drop if not exposed)
-- [ ] Slice 7: DESIGN.md, glossary check, close #39 (and #27, #30, #31)
+- [x] Slice 5: web: Connections account list, Use this account, remove; switch-and-continue nudge
+- [x] Slice 6: Codex free resets (research gate; drop if not exposed)
+- [x] Slice 7: DESIGN.md, glossary check, close #39 (and #27, #30, #31)
 
 ## Implementation notes
 
@@ -115,3 +115,5 @@ The patterns come from Enjoy ("Out of usage", an editable queue) and T3 Code ("p
 - Accounts are stored in the settings table (`accounts.<provider>`, `activeAccount.<provider>`), not a new table. Each extra account's folder links (a junction on Windows) the default `projects` (Claude) or `sessions` (Codex) folder, so every account's chats stay in one history and can be continued after a switch.
 - A Codex switch waits until no Codex chat is running (409), because one Codex helper process serves every chat. Claude switches straight away, and running chats keep their account.
 - Adding an account makes it active, so the card's Sign in signs in to it. There's no per-chat `accountId` yet.
+- Codex free resets: the research gate passed. The app-server returns `rateLimitResetCredits.availableCount` from `account/rateLimits/read` and redeems with `account/rateLimitResetCredit/consume` (an idempotency key per attempt). A used reset resumes out-of-usage Codex chats at once.
+- Not built yet: usage meters for each account (story 18), and checking that the other account has room before offering "Switch to X and continue". The button is shown for every other account and the user decides.

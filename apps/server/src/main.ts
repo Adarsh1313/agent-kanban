@@ -131,7 +131,23 @@ const accounts = new AccountService({
   },
   emit: (e) => broadcast(e),
 });
-const api = createApi({ accounts, chats, usage, history: () => readAllHistory(home), token, connections, adapters, connect, settings, folderPicker: new FolderPicker(), folderOpener: new FolderOpener(),
+// A used reset puts Codex back to work: its out-of-usage chats continue now.
+const codexResets = {
+  read: async () => { const a = adapters.get('codex'); return a instanceof CodexAdapter ? a.readResetCredits() : 0; },
+  use: async () => {
+    const a = adapters.get('codex');
+    if (!(a instanceof CodexAdapter)) return 'failed';
+    const outcome = await a.useResetCredit();
+    if (outcome === 'reset') {
+      usage.refresh('codex').catch(() => {});
+      for (const c of chats.listChats()) {
+        if (c.provider === 'codex' && c.column === 'needs_you' && c.needsReason === 'limit') chats.resumeNow(c.id).catch(() => {});
+      }
+    }
+    return outcome;
+  },
+};
+const api = createApi({ codexResets, accounts, chats, usage, history: () => readAllHistory(home), token, connections, adapters, connect, settings, folderPicker: new FolderPicker(), folderOpener: new FolderOpener(),
   transcript: (provider, sessionRef) => readTranscript(home, provider, sessionRef) });
 broadcast = api.broadcast;
 

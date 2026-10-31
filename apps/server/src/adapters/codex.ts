@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -376,6 +377,27 @@ export class CodexAdapter implements ProviderAdapter {
     } catch {
       return failed;
     }
+  }
+
+  /** Free resets the account has banked (#31): 0 when Codex reports none or can't be asked. */
+  async readResetCredits(): Promise<number> {
+    if (this.inBackoff()) return 0;
+    try {
+      const p = await this.ensureProcess();
+      const r = await p.request<{ rateLimitResetCredits?: { availableCount?: number } | null }>('account/rateLimits/read', undefined);
+      const n = r?.rateLimitResetCredits?.availableCount;
+      return typeof n === 'number' && n > 0 ? n : 0;
+    } catch { return 0; }
+  }
+
+  /** Redeems one free reset; one idempotency key per attempt so a retry never spends two. */
+  async useResetCredit(): Promise<'reset' | 'nothingToReset' | 'noCredit' | 'alreadyRedeemed' | 'failed'> {
+    try {
+      const p = await this.ensureProcess();
+      const r = await p.request<{ outcome?: string }>('account/rateLimitResetCredit/consume', { idempotencyKey: randomUUID() });
+      const o = r?.outcome;
+      return o === 'reset' || o === 'nothingToReset' || o === 'noCredit' || o === 'alreadyRedeemed' ? o : 'failed';
+    } catch { return 'failed'; }
   }
 
   /** No app-server is running or starting, and the ping backoff (or giving up) says not to spawn one for background reads. */

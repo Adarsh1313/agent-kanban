@@ -163,11 +163,23 @@ export class ChatService {
     const now = this.now().getTime();
     for (const chat of this.store.listChats()) {
       if (!this.waitingOnReset(chat) || Date.parse(chat.resumeAt!) > now) continue;
-      const [first, ...rest] = chat.queue ?? [];
-      this.store.updateChat(chat.id, { queue: rest }, { touch: false });
-      void this.sendNow(chat.id, first?.text ?? RESUME_TEXT).catch((e) => console.error('[agent-kanban] auto-resume', e));
+      void this.continueOutOfUsage(chat).catch((e) => console.error('[agent-kanban] auto-resume', e));
     }
     this.armResume();
+  }
+
+  /** Continues an out-of-usage chat now (after switching to an account with room): its queue first. */
+  async resumeNow(chatId: string): Promise<void> {
+    const chat = this.mustGet(chatId);
+    if (chat.column !== 'needs_you' || chat.needsReason !== 'limit') throw new CantContinueError("This chat isn't waiting on usage.");
+    await this.continueOutOfUsage(chat);
+    this.armResume();
+  }
+
+  private async continueOutOfUsage(chat: Chat): Promise<void> {
+    const [first, ...rest] = chat.queue ?? [];
+    this.store.updateChat(chat.id, { queue: rest }, { touch: false });
+    await this.sendNow(chat.id, first?.text ?? RESUME_TEXT);
   }
 
   private waitingOnReset(chat: Chat): boolean {
