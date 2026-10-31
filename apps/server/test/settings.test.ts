@@ -18,6 +18,7 @@ test('defaults: not onboarded, every provider shown and suggested', () => {
     showChats: { claude: true, codex: true, antigravity: true },
     suggest: { claude: true, codex: true, antigravity: true },
     hiddenProjects: [],
+    unhiddenProjects: [],
   });
   assert.deepEqual(s.get(), defaultSettings());
 });
@@ -34,6 +35,7 @@ test('patch round-trips through the store (partial per-provider updates) and sur
     showChats: { claude: true, codex: true, antigravity: false },
     suggest: { claude: true, codex: false, antigravity: true },
     hiddenProjects: ['/work/old'],
+    unhiddenProjects: [],
   };
   assert.deepEqual(out, want);
   assert.deepEqual(new SettingsStore(new Store(join(dir, 'ak.db'))).get(), want);

@@ -103,6 +103,8 @@ export interface SettingsPatch {
   onboarded?: boolean;
   showChats?: Partial<Record<ProviderId, boolean>>;
   suggest?: Partial<Record<ProviderId, boolean>>;
+  hiddenProjects?: string[];
+  unhiddenProjects?: string[];
 }
 
 export interface Transcript {

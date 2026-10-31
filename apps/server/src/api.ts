@@ -142,7 +142,7 @@ export function createApi(opts: {
     return settings ? settings.filterHistory(all) : all;
   };
 
-  const projectRules = (): ProjectRules => ({ tempDir: tmpdir(), hidden: settings?.get().hiddenProjects ?? [], exists: existsSync });
+  const projectRules = (): ProjectRules => ({ tempDir: tmpdir(), hidden: settings?.get().hiddenProjects ?? [], unhidden: settings?.get().unhiddenProjects ?? [], exists: existsSync });
 
   // A provider's model list rarely changes: a non-empty answer is reused for 5 minutes (an empty one is asked again).
   const modelCache = new Map<ProviderId, { at: number; models: ModelOption[] }>();

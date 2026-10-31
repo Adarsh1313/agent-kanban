@@ -124,6 +124,8 @@ export interface Settings {
   suggest: Record<ProviderId, boolean>;
   /** Folders the user hid with "Hide project" (projects under the temp folder are hidden without being listed). */
   hiddenProjects: string[];
+  /** Folders under the temp folder the user chose to show again (they would otherwise be hidden automatically). */
+  unhiddenProjects: string[];
 }
 
 export interface Project {

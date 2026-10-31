@@ -76,3 +76,10 @@ test("the Claude app's scratch folders are one project, \"Claude scratch chats\"
   assert.equal(scratch[0]!.folderMissing, false);
   assert.equal(ps.length, 2);
 });
+
+test('an auto-hidden project the user unhid is shown, and hiding it again wins', async () => {
+  let ps = await projectsFor([h(temp, 't1')], { unhiddenProjects: [temp] });
+  assert.equal(byPath(ps, temp)?.hidden, null);
+  ps = await projectsFor([h(temp, 't1')], { unhiddenProjects: [temp], hiddenProjects: [temp] });
+  assert.equal(byPath(ps, temp)?.hidden, 'manual');
+});

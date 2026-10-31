@@ -17,7 +17,7 @@ const project = (path: string, hidden: Project['hidden'] = null): Project => ({
   id: path, name: path.split('/').pop()!, path, providers: [], columns: { running: 0, needs_you: 0, review: 0, done: 0 },
   historyOnly: 0, lastActivityAt: '2026-10-23T10:00:00.000Z', hidden, folderMissing: false,
 });
-const settings = (hiddenProjects: string[] = []): Settings => ({ onboarded: true, showChats: ON, suggest: ON, hiddenProjects });
+const settings = (hiddenProjects: string[] = []): Settings => ({ onboarded: true, showChats: ON, suggest: ON, hiddenProjects, unhiddenProjects: [] });
 const hist = (cwd: string, sessionRef: string, title: string): HistoryChat => ({ provider: 'codex', sessionRef, title, cwd, updatedAt: '2026-10-23T11:00:00.000Z' });
 
 function seeded(projects: Project[], extra: Partial<AppState> = {}): Store {

@@ -1,8 +1,11 @@
 import type { Chat, Column, NeedsReason, Project, ProjectInfo, ProviderId } from '@agent-kanban/shared';
-import { folderKey } from '@agent-kanban/shared';
+import { folderKey, projectFolder } from '@agent-kanban/shared';
 import { api } from '../../api/client.ts';
-import type { AppState } from '../../state/reducer.ts';
-import { isArchived, isSnoozed, memoState } from '../../state/selectors.ts';
+import { applySettings, type AppState } from '../../state/reducer.ts';
+import { hiddenFolders, isArchived, isSnoozed, memoState } from '../../state/selectors.ts';
+import { refreshProjects, type Store } from '../../state/store.ts';
+import { errorText } from '../board/Card.tsx';
+import { toast } from '../primitives/index.ts';
 import { relativeTime } from '../board/format.ts';
 
 /** The file each provider reads its project instructions from. */
@@ -30,7 +33,7 @@ export interface ProjectChat {
 function buildIndex(s: AppState): Record<string, ProjectChat[]> {
   const out: Record<string, ProjectChat[]> = {};
   const add = (c: ProjectChat) => {
-    const k = folderKey(c.cwd);
+    const k = folderKey(projectFolder(c.cwd));
     (out[k] ??= []).push(c);
   };
   const known = new Set<string>();
@@ -146,3 +149,29 @@ export function loadProjectInfo(path: string, force = false): Promise<ProjectInf
 }
 /** Tests start without cached folder info. */
 export const resetProjectInfoCache = () => { infoCache.clear(); infoDone.clear(); };
+
+/** True when this project is hidden (automatically or by hand), as the sidebar, board and New chat see it. */
+export const isProjectHidden = (s: AppState, p: Project) => hiddenFolders(s).has(folderKey(p.id));
+
+/**
+ * Hide project / Unhide. Hiding lists the folder in hiddenProjects; unhiding takes it off, and for a project hidden
+ * automatically (temp folder) also lists it in unhiddenProjects. The project list is fetched again so the server's
+ * marks follow. False (with a toast) when the setting couldn't be saved.
+ */
+export async function setProjectHidden(store: Store, project: Project, hide: boolean): Promise<boolean> {
+  const cur = store.getState().settings;
+  const k = folderKey(project.id);
+  const without = (list: string[] | undefined) => (list ?? []).filter((f) => folderKey(f) !== k);
+  const patch = hide
+    ? { hiddenProjects: [...without(cur?.hiddenProjects), project.path], unhiddenProjects: without(cur?.unhiddenProjects) }
+    : { hiddenProjects: without(cur?.hiddenProjects), unhiddenProjects: project.hidden === 'auto' ? [...without(cur?.unhiddenProjects), project.path] : without(cur?.unhiddenProjects) };
+  try {
+    const settings = await api.patchSettings(patch);
+    store.setState((s) => applySettings(s, settings));
+    void refreshProjects(store, api).catch(() => { /* the next resync fetches them */ });
+    return true;
+  } catch (e) {
+    toast(errorText(e));
+    return false;
+  }
+}

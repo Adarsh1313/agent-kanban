@@ -22,6 +22,8 @@ export interface ProjectRules {
   tempDir?: string;
   /** Folders the user hid by hand. */
   hidden?: string[];
+  /** Folders under the temp folder the user chose to show again. */
+  unhidden?: string[];
   /** Whether a folder is still on disk (left out: every folder counts as there). */
   exists?: (path: string) => boolean;
 }
@@ -30,8 +32,9 @@ export interface ProjectRules {
 export function buildProjects(chats: Chat[], history: HistoryChat[], rules: ProjectRules = {}): Project[] {
   const map = new Map<string, Project & { models: Map<ProviderId, { at: string; model: string }> }>();
   const manual = new Set((rules.hidden ?? []).map(folderKey));
+  const shown = new Set((rules.unhidden ?? []).map(folderKey));
   const hiddenFor = (cwd: string): Project['hidden'] =>
-    rules.tempDir && isInside(cwd, rules.tempDir) ? 'auto' : manual.has(folderKey(cwd)) ? 'manual' : null;
+    manual.has(folderKey(cwd)) ? 'manual' : rules.tempDir && isInside(cwd, rules.tempDir) && !shown.has(folderKey(cwd)) ? 'auto' : null;
   const get = (chatCwd: string) => {
     // The Claude app's scratch chats each have their own folder; they are one project, named for what they are.
     const scratch = claudeScratchRoot(chatCwd);

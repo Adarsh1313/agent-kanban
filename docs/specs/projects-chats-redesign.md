@@ -84,7 +84,10 @@ the same ordering, hiding and naming rules.
   one project named "Claude scratch chats". Its id is that `scratch-workspaces` folder so it is stable.
 - **Hidden projects are a setting**: `Settings` gains `hiddenProjects` (a list of folder paths the user hid by hand).
   `PATCH /api/settings` accepts it, validates it is a list of strings and stores it under its own key; the existing
-  `settings.updated` broadcast keeps every open window in sync. No new endpoint. Auto-hidden is computed, never stored.
+  `settings.updated` broadcast keeps every open window in sync. No new endpoint. Auto-hidden is computed, never stored;
+  unhiding an auto-hidden project lists it in a second setting, `unhiddenProjects`, and a hand hide wins over both.
+- **Hide project / Unhide** live on a project's page (there is no per-project menu); Unhide also sits on each dimmed
+  row of the Projects list while Show hidden projects is on.
 - **`GET /api/projects` returns hidden projects too**, marked, so the Projects page can show them under "Show hidden
   projects". Everything else filters them out on the web side with one shared selector (visible projects) so the
   sidebar, board cards, New chat picker and onboarding counts can't drift apart. History is never deleted.
@@ -152,7 +155,7 @@ the same ordering, hiding and naming rules.
 
 - [x] Slice 1: server marks hidden (auto/manual) and folder-missing projects, groups Claude scratch chats; `hiddenProjects` setting with PATCH + broadcast (API tests)
 - [x] Slice 2: web hides hidden projects everywhere (sidebar, board, picker, onboarding counts) via one visible-projects selector
-- [ ] Slice 3: Projects page sorted by last activity, Show hidden projects switch, Hide project / Unhide, Folder missing note
+- [x] Slice 3: Projects page sorted by last activity, Show hidden projects switch, Hide project / Unhide, Folder missing note
 - [ ] Slice 4: Recent chats as a flat list of 10 (variant A rows, date on hover, All chats link)
 - [ ] Slice 5: All chats view: route, nav entry, list, search with highlight, Project/Provider filter menu + chips, sidebar search icon
 - [ ] Slice 6: New chat picker: Older (n) row, search opens it, folder-missing and scratch left out; Project filter menu by project (hidden left out, scratch as one, Older label)

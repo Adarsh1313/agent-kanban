@@ -35,12 +35,16 @@ export const baseName = (p: string) => p.replace(/[\\/]+$/, '').split(/[\\/]/).p
 
 /**
  * Folders (by folderKey) whose chats are kept out of every list: projects the server hid automatically (temp folder),
- * and the ones in the hiddenProjects setting. The setting wins over the server's 'manual' mark, so Hide and Unhide
+ * unless unhid, and the ones in the hiddenProjects setting. The settings win over the server's 'manual' mark, so Hide and Unhide
  * take effect before the project list is fetched again; before settings load, the server's mark is used.
  */
 function buildHidden(s: AppState): ReadonlySet<string> {
   const out = new Set<string>();
-  for (const p of s.projects) if (p.hidden === 'auto' || (p.hidden === 'manual' && !s.settings)) out.add(folderKey(p.id));
+  const shown = new Set((s.settings?.unhiddenProjects ?? []).map(folderKey));
+  for (const p of s.projects) {
+    const k = folderKey(p.id);
+    if ((p.hidden === 'auto' && !shown.has(k)) || (p.hidden === 'manual' && !s.settings)) out.add(k);
+  }
   for (const f of s.settings?.hiddenProjects ?? []) out.add(folderKey(f));
   return out;
 }
