@@ -123,7 +123,8 @@ const connect = new ConnectService({
 connectRef = connect;
 const accounts = new AccountService({
   accounts: accountStore,
-  runningOn: (p) => chats.listChats().some((c) => c.provider === p && chats.runningHere(c.id)),
+  // A turn in progress (Running), not merely a chat the helper still has open: those continue on the new account.
+  runningOn: (p) => chats.listChats().some((c) => c.provider === p && c.column === 'running'),
   switched: (p) => {
     (adapters.get(p) as { accountChanged?: () => void } | undefined)?.accountChanged?.();
     usage.refresh(p).catch(() => {});
