@@ -16,7 +16,7 @@ function userText(rec: Record<string, unknown>): string {
   return '';
 }
 
-async function readSession(path: string, sessionRef: string): Promise<HistoryChat | null> {
+export async function readClaudeSession(path: string, sessionRef: string): Promise<HistoryChat | null> {
   try {
     const mtime = (await stat(path)).mtime.toISOString();
     let custom = '';
@@ -44,7 +44,7 @@ export async function readClaudeHistory(claudeHome: string): Promise<HistoryChat
     try { files = await readdir(join(root, d)); } catch { continue; }
     for (const f of files) {
       if (!f.endsWith('.jsonl')) continue;
-      const chat = await readSession(join(root, d, f), f.slice(0, -'.jsonl'.length));
+      const chat = await readClaudeSession(join(root, d, f), f.slice(0, -'.jsonl'.length));
       if (chat) out.push(chat);
     }
   }

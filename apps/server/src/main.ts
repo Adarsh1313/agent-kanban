@@ -24,6 +24,10 @@ import { findBinary } from './binaries.ts';
 import { createApi } from './api.ts';
 import { ConnectionMonitor, getLatest, makeGetVersion } from './health.ts';
 import { acquireLock, releaseLock } from './lock.ts';
+import { ClaudeHooks } from './outside/hooks.ts';
+import { OutsideSessions } from './outside/sessions.ts';
+import { readClaudeSession } from './history/claude.ts';
+import { unlinkSync, writeFileSync } from 'node:fs';
 
 // Last resort: a stray rejection is logged, never allowed to take the server (and every chat) down.
 process.on('unhandledRejection', (e) => console.error('[agent-kanban] unhandled', e));
@@ -117,7 +121,14 @@ const connect = new ConnectService({
   home: akHome,
 });
 connectRef = connect;
-const api = createApi({ chats, usage, history: () => readAllHistory(home), token, connections, adapters, connect, settings, folderPicker: new FolderPicker(), folderOpener: new FolderOpener(),
+// Claude Code hooks run our script with Node; in the desktop app the server's own binary is Electron run as Node.
+const execPath = process.execPath.replace(/\\/g, '/');
+const nodeRunner = process.versions.electron ? `ELECTRON_RUN_AS_NODE=1 "${execPath}"` : `"${execPath}"`;
+const hookEndpoint = join(dataDir, 'hook-endpoint.json');
+const hookSecret = randomBytes(24).toString('hex');
+const claudeHooks = new ClaudeHooks({ settingsPath: join(home, '.claude', 'settings.json'), scriptPath: join(dataDir, 'agent-kanban-hook.mjs'), endpointPath: hookEndpoint, runner: nodeRunner });
+const outside = new OutsideSessions({ store, emit: (e) => broadcast(e), runningHere: (id) => chats.runningHere(id), claudeHome: join(home, '.claude') });
+const api = createApi({ hooks: claudeHooks, outside, hookSecret, chats, usage, history: () => readAllHistory(home), token, connections, adapters, connect, settings, folderPicker: new FolderPicker(), folderOpener: new FolderOpener(),
   transcript: (provider, sessionRef) => readTranscript(home, provider, sessionRef) });
 broadcast = api.broadcast;
 
@@ -146,6 +157,13 @@ try {
 }
 api.server.on('error', (err) => console.error('Server error:', err));
 const addr = api.server.address() as AddressInfo;
+// The hook script finds this server through this file; it is ours only while we run.
+writeFileSync(hookEndpoint, JSON.stringify({ port: addr.port, secret: hookSecret }), { mode: 0o600 });
+process.on('exit', () => { try { unlinkSync(hookEndpoint); } catch { /* already gone */ } });
+let installedHooks = false;
+try { installedHooks = claudeHooks.installed(); } catch { /* unreadable settings: treated as not installed */ }
+if (installedHooks) void outside.catchUp(readClaudeSession).catch((e) => console.error('[agent-kanban] outside catch-up', e));
+setInterval(() => { try { outside.settleIdle(); } catch (e) { console.error('[agent-kanban] outside settle', e); } }, 60_000).unref();
 if (desktop) await tellDesktop({ type: 'ready', port: addr.port, token });
 else console.log(`Agent Kanban server: http://127.0.0.1:${addr.port}/?token=${token}`);
 // Browser mode can ask for the page to open (AGENT_KANBAN_OPEN_BROWSER=1): the token goes straight to the browser.

@@ -2,7 +2,7 @@ export type ProviderId = 'claude' | 'codex' | 'antigravity';
 
 export type Column = 'running' | 'needs_you' | 'review' | 'done';
 
-export type NeedsReason = 'permission' | 'question' | 'limit' | 'error' | 'interrupted' | 'stopped';
+export type NeedsReason = 'permission' | 'question' | 'limit' | 'error' | 'interrupted' | 'stopped' | 'waiting';
 
 export interface ChatState {
   column: Column;
@@ -50,6 +50,10 @@ export interface Chat {
   archived: boolean;
   pinned: boolean;
   snoozedUntil: string | null;
+  /** Set on a Claude Code chat the user ran outside the app (#37); left out for the app's own chats. */
+  origin?: 'outside';
+  /** True while that outside chat is still running in Claude Code: it can only be watched, not replied to. */
+  outsideLive?: boolean;
 }
 
 export interface Message { id: string; chatId: string; role: 'user' | 'assistant'; text: string; createdAt: string }
@@ -90,6 +94,7 @@ export type ServerEvent =
   | { type: 'connection.updated'; health: ConnectionHealth }
   | { type: 'connect.updated'; state: ConnectState }
   | { type: 'settings.updated'; settings: Settings }
+  | { type: 'hooks.updated'; installed: boolean }
   | { type: 'notification'; chatId: string; kind: 'permission' | 'question' | 'finished' | 'limit' | 'error'; action?: RequestAction };
 
 export type ConnectPhase = 'idle' | 'installing' | 'signing_in' | 'signing_out' | 'updating' | 'error';
