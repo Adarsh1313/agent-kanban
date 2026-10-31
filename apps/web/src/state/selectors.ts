@@ -170,6 +170,12 @@ export function projectCard(s: AppState, projectId: string): ProjectCard {
   };
 }
 
+const NO_FILTERS: Filters = { provider: null, project: null, status: null, model: null, reason: null, activity: null, source: null };
+
+/** Every visible chat, newest first, without any filter: what global search looks through. */
+export const searchableChats = memoState((s) => [s.chats, s.history, s.projects, s.settings, s.ui.archiving, s.now], (s) =>
+  listedChats(s, s.now, NO_FILTERS, true).sort(byRecent).map((c) => withProject(s, c)));
+
 /** All chats: every chat on the board (pinned and snoozed too) or only in a provider's history, newest first, with All chats' own filters. */
 export function allChats(s: AppState, now: number = Date.now()): ListedChat[] {
   return listedChats(s, now, s.ui.chatsFilters, true).sort(byRecent).map((c) => withProject(s, c));

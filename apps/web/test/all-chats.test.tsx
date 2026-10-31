@@ -105,10 +105,15 @@ describe('Getting to All chats', () => {
     expect(location.hash).toBe('#/chats');
   });
 
-  it("the sidebar's search icon opens All chats with the search box focused", async () => {
-    mount(seeded());
-    fireEvent.click(screen.getByRole('button', { name: 'Search chats' }));
-    expect(location.hash).toBe('#/chats');
-    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('searchbox', { name: 'Search chats' })));
+  it('"See all results" in global search opens All chats with the query in its focused search box', async () => {
+    const store = seeded();
+    mount(store);
+    act(() => {
+      store.setState((s) => ({ ...s, ui: { ...s.ui, chatsSearchText: 'login', chatsSearchFocus: s.ui.chatsSearchFocus + 1 } }));
+      location.hash = '#/chats';
+    });
+    const box = await screen.findByRole('searchbox', { name: 'Search chats' }) as HTMLInputElement;
+    await waitFor(() => expect(document.activeElement).toBe(box));
+    expect(box.value).toBe('login');
   });
 });

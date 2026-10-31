@@ -157,14 +157,17 @@ describe('Sidebar: pinned and project cards', () => {
   });
 
   it('renders 1 000 history chats on a cold mount within budget', () => {
-    const store = seeded([], hist(1000));
+    const base = seeded([], hist(1000));
+    // A realistic My projects: 10 of the 40 folders.
+    const st = base.getState();
+    const store = createStore({ ...st, settings: { ...st.settings!, myProjects: st.settings!.myProjects!.slice(0, 10) } });
     // One cold mount, with a budget that leaves room for a loaded CI machine (it takes ~30-60 ms locally).
     // It is here to catch a quadratic regression, not to benchmark: the structure checks below are the real test.
     const t0 = performance.now();
     mount(store);
     const took = performance.now() - t0;
-    // 40 projects, 3 chats on each card.
-    expect(document.querySelectorAll('.project-card .chat-row').length).toBe(120);
+    // 10 cards, 3 chats on each.
+    expect(document.querySelectorAll('.project-card .chat-row').length).toBe(30);
     expect(took).toBeLessThan(1000);
   });
 });
@@ -275,11 +278,11 @@ describe('Shell: routes', () => {
     mount(seeded(), <Shell />);
     // Replaces the handler the shell's New chat dialog registered (newchat.test.tsx covers the dialog itself).
     setNewChatHandler(handler);
-    // Sidebar, top bar and the board's Running column "+".
+    // Top bar and the board's Running column "+" (the sidebar has global search instead).
     for (const b of screen.getAllByRole('button', { name: /^New chat( N)?$/ })) fireEvent.click(b);
-    expect(handler).toHaveBeenCalledTimes(3);
+    expect(handler).toHaveBeenCalledTimes(2);
     fireEvent.keyDown(document.body, { key: 'n' });
-    expect(handler).toHaveBeenCalledTimes(4);
+    expect(handler).toHaveBeenCalledTimes(3);
     setNewChatHandler(null);
   });
 });

@@ -64,6 +64,10 @@ export interface UiState {
   chatsSearchFocus: number;
   /** The My projects picker dialog is open (from the sidebar's pick card, Edit or empty state). */
   pickProjects: boolean;
+  /** The global search palette is open (sidebar field, Ctrl+K). */
+  searchOpen: boolean;
+  /** Text "See all results" hands to All chats' search box (with chatsSearchFocus bumped). */
+  chatsSearchText: string;
 }
 
 export interface SyncState {
@@ -157,6 +161,8 @@ export function initialState(): AppState {
       chatsFilters: { provider: null, project: null, status: null, model: null, reason: null, activity: null, source: null },
       chatsSearchFocus: 0,
       pickProjects: false,
+      searchOpen: false,
+      chatsSearchText: '',
     },
   };
 }

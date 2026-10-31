@@ -9,7 +9,8 @@ import { defaultPicks, inMine, isOlderProject, pickable, saveMyProjects } from '
 
 export const PICK_TITLE = 'Which projects do you work on?';
 
-const chatCount = (p: Project) => p.providers.reduce((n, x) => n + x.chats, 0);
+/** Chats started here (counted per provider) plus the ones only in a provider's own history. */
+const chatCount = (p: Project) => p.providers.reduce((n, x) => n + x.chats, 0) + p.historyOnly;
 
 /**
  * The My projects picker: a grid of project tiles to tick, newest first, with older projects (no activity in 30 days)

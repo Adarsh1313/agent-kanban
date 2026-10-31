@@ -5,12 +5,12 @@ import { focusedProvider, hiddenFolders, isArchived, isSnoozed, pinned as pinned
 import type { AppState } from '../../state/reducer.ts';
 import { uniqueProjects } from '../projects/model.ts';
 import { useStore, useStoreInstance } from '../../state/store.ts';
-import { openNewChat } from '../actions.ts';
-import { Icon, Menu, MenuItem, PROVIDER_IDS, ProviderLogo, Tooltip, providerName } from '../primitives/index.ts';
+import { Icon, Menu, MenuItem, PROVIDER_IDS, ProviderLogo, providerName } from '../primitives/index.ts';
 import { replayOnboarding } from '../onboarding/Onboarding.tsx';
 import { MyProjects } from '../myprojects/MyProjects.tsx';
 import { ChatRow } from './ChatRow.tsx';
 import { navigate, hashFor } from './route.ts';
+import { openSearch } from '../search/SearchPalette.tsx';
 import { toggleTheme } from './theme.ts';
 
 const NAV = [
@@ -79,11 +79,6 @@ export function Sidebar() {
   const store = useStoreInstance();
   const view = useStore((s) => s.ui.view);
   const n = useStore(counts);
-  // The search icon opens All chats with its search box focused (the page focuses it when this counter moves).
-  const searchChats = () => {
-    store.setState((s) => ({ ...s, ui: { ...s.ui, chatsSearchFocus: s.ui.chatsSearchFocus + 1 } }));
-    if (location.hash !== hashFor('chats')) navigate('chats');
-  };
   const navRef = useRef<HTMLElement>(null);
   const capRef = useRef<HTMLSpanElement>(null);
   const placed = useRef(false);
@@ -138,8 +133,9 @@ export function Sidebar() {
         Agent Kanban <span className="chev"><Icon name="updown" /></span>
       </button>
       <div className="side-actions">
-        <button className="btn new" type="button" onClick={() => openNewChat()}><Icon name="plus" />New chat <span className="kbd">N</span></button>
-        <Tooltip label="Search chats"><button className="btn icon-only ghost" type="button" aria-label="Search chats" onClick={searchChats}><Icon name="search" /></button></Tooltip>
+        <button className="gsearch" type="button" onClick={() => openSearch(store)}>
+          <Icon name="search" size="sm" /><span className="gs-t">Search chats and projects</span><span className="kbd" aria-hidden="true">Ctrl K</span>
+        </button>
       </div>
       <nav className="navlist" aria-label="Main" ref={navRef}>
         <span className="cap" ref={capRef} />
