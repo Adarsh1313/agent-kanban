@@ -6,7 +6,9 @@ import { applySnapshot, initialState } from '../src/state/reducer.ts';
 import { createStore, StoreProvider, type Store } from '../src/state/store.ts';
 import { Sidebar } from '../src/ui/shell/Sidebar.tsx';
 import { PickProjectsDialog } from '../src/ui/myprojects/PickProjects.tsx';
-import { defaultPicks } from '../src/ui/myprojects/model.ts';
+import { addAfterStart, defaultPicks } from '../src/ui/myprojects/model.ts';
+import { StarButton } from '../src/ui/myprojects/StarButton.tsx';
+import type { HistoryChat } from '@agent-kanban/shared';
 
 vi.mock('../src/api/client.ts', async (orig) => {
   const m = await orig<typeof import('../src/api/client.ts')>();
@@ -29,8 +31,8 @@ const PROJECTS = [
   project('/work/twenty', 20), project('/work/old1', 40), project('/work/old2', 90), project('/tmp/ak-1', 1, { hidden: 'auto' }),
 ];
 
-function seeded(mine: string[] | null): Store {
-  const s = applySnapshot(initialState(), { chats: [], usage: [], suggested: null, connections: [], history: [], projects: PROJECTS, settings: settings(mine) });
+function seeded(mine: string[] | null, history: HistoryChat[] = []): Store {
+  const s = applySnapshot(initialState(), { chats: [], usage: [], suggested: null, connections: [], history, projects: PROJECTS, settings: settings(mine) });
   return createStore({ ...s, now: NOW });
 }
 const mount = (store: Store) => render(<StoreProvider store={store}><Sidebar /><PickProjectsDialog /></StoreProvider>);
@@ -89,5 +91,53 @@ describe('Picking My projects', () => {
     act(() => { fireEvent.click(within(dialog()).getByRole('button', { name: 'Cancel' })); });
     expect(patchSettings).not.toHaveBeenCalled();
     expect(store.getState().ui.pickProjects).toBe(false);
+  });
+});
+
+describe('Managing My projects', () => {
+  const hist = (cwd: string, hoursAgo: number): HistoryChat => ({ provider: 'claude', sessionRef: `h-${cwd}`, title: 'Outside chat', cwd, updatedAt: new Date(NOW - hoursAgo * 3_600_000).toISOString() });
+
+  it("a card's Remove takes the project out of My projects", async () => {
+    mount(seeded(['/work/a', '/work/b']));
+    fireEvent.click(screen.getByRole('button', { name: 'Remove a from My projects' }));
+    await waitFor(() => expect(patchSettings).toHaveBeenCalledWith({ myProjects: ['/work/b'] }));
+  });
+
+  it('outside activity in a project not in My projects shows "New activity · Add"; Add adds it, Dismiss hides it', async () => {
+    const view = mount(seeded(['/work/a'], [hist('/work/c', 2), hist('/work/old1', 3), hist('/work/d', 30)]));
+    // c (2h ago) and old1 (3h ago) had outside activity in the last day; d's is too old. The newest shows.
+    expect(screen.getByText(/New activity in/).textContent).toBe('New activity in c');
+    fireEvent.click(screen.getByRole('button', { name: 'Add c to My projects' }));
+    await waitFor(() => expect(patchSettings).toHaveBeenCalledWith({ myProjects: ['/work/a', '/work/c'] }));
+    view.unmount();
+    mount(seeded(['/work/a'], [hist('/work/c', 2)]));
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss new activity in c' }));
+    expect(screen.queryByText(/New activity in/)).toBeNull();
+  });
+
+  it('no hint before the user has picked (the pick card asks instead)', () => {
+    mount(seeded(null, [hist('/work/c', 2)]));
+    expect(screen.queryByText(/New activity in/)).toBeNull();
+  });
+
+  it('the star adds a project to My projects and takes it out again', async () => {
+    const store = seeded(['/work/a']);
+    render(<StoreProvider store={store}><StarButton project={PROJECTS[1]!} /><StarButton project={PROJECTS[0]!} /></StoreProvider>);
+    const add = screen.getByRole('button', { name: 'Add b to My projects' });
+    expect(add.getAttribute('aria-pressed')).toBe('false');
+    fireEvent.click(add);
+    await waitFor(() => expect(patchSettings).toHaveBeenCalledWith({ myProjects: ['/work/a', '/work/b'] }));
+    fireEvent.click(screen.getByRole('button', { name: 'Remove a from My projects' }));
+    await waitFor(() => expect(patchSettings).toHaveBeenLastCalledWith({ myProjects: ['/work/b'] }));
+  });
+
+  it('starting a chat adds its project, unless the user has never picked or it is there already', async () => {
+    addAfterStart(seeded(['/work/a']), '/work/g');
+    await waitFor(() => expect(patchSettings).toHaveBeenCalledWith({ myProjects: ['/work/a', '/work/g'] }));
+    patchSettings.mockClear();
+    addAfterStart(seeded(['/work/a']), '/work/a/');
+    addAfterStart(seeded(null), '/work/g');
+    await new Promise((r) => setTimeout(r, 10));
+    expect(patchSettings).not.toHaveBeenCalled();
   });
 });

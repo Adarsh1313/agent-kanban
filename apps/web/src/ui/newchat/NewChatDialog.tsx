@@ -4,7 +4,8 @@ import { folderKey, isClaudeScratch } from '@agent-kanban/shared';
 import { ApiError, api } from '../../api/client.ts';
 import type { AppState } from '../../state/reducer.ts';
 import { baseName, focusedProvider, OLDER_MS, suggestFor, visibleProjects } from '../../state/selectors.ts';
-import { useStore } from '../../state/store.ts';
+import { useStore, useStoreInstance } from '../../state/store.ts';
+import { addAfterStart } from '../myprojects/model.ts';
 import { setNewChatHandler, type NewChatOptions } from '../actions.ts';
 import { Dialog, Icon, Popover, PROVIDER_IDS, ProviderLogo, providerName, toast } from '../primitives/index.ts';
 import { cssMs, cssValue, reducedMotion } from '../primitives/motion.ts';
@@ -143,6 +144,7 @@ type Where = { kind: 'project'; id: string } | { kind: 'path' };
 const pickState = (s: AppState) => ({ now: s.now, projects: visibleProjects(s), connections: s.connections, usage: s.usage, suggested: s.suggested, settings: s.settings, focus: focusedProvider(s), loaded: s.loaded });
 
 export function NewChatDialog() {
+  const store = useStoreInstance();
   const st = useStore(pickState);
   const [open, setOpen] = useState(false);
   const [where, setWhere] = useState<Where>({ kind: 'path' });
@@ -323,6 +325,7 @@ export function NewChatDialog() {
     setBusy(true);
     try {
       await api.startChat({ provider, cwd, prompt: text, ...(modelId ? { model: modelId } : {}) });
+      addAfterStart(store, cwd);
       // The card arrives in Running through the server's chat.updated event. Text typed while starting is kept.
       setPrompt((p) => (p.trim() === text ? '' : p));
       if (session.current === mine && openRef.current) {

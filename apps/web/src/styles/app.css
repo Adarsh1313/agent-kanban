@@ -294,3 +294,19 @@ body:has(> .onb[data-state="open"]) > .toasts { z-index: 91; }
 .pick-older { display: flex; align-items: center; gap: var(--space-1); padding-left: var(--space-2); }
 .pick-count { color: var(--color-text-faint); font-size: var(--text-caption); }
 @media (max-width: 640px) { .pick-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.project-card { position: relative; }
+.pc-remove { position: absolute; top: var(--space-2); right: calc(var(--space-6) + var(--space-1)); width: var(--control-height-sm); height: var(--control-height-sm); opacity: 0; }
+.project-card:hover .pc-remove, .pc-remove:focus-visible { opacity: 1; }
+@media (hover: none) { .pc-remove { opacity: 1; } }
+.activity-hint { display: flex; align-items: center; gap: var(--space-1); margin-top: var(--space-2); padding: var(--space-1) var(--space-1) var(--space-1) var(--space-2);
+  border: 1px dashed var(--color-border); border-radius: var(--radius-control); font-size: var(--text-caption); color: var(--color-text-muted); }
+.activity-hint > span { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.activity-hint b { color: var(--color-text); font-weight: var(--weight-medium); }
+.hint-add { font-weight: var(--weight-medium); color: var(--color-text); padding: 0 var(--space-1); border-radius: var(--radius-control); }
+@media (hover: hover) and (pointer: fine) { .hint-add:hover { background: var(--color-nav-hover); } }
+.hint-x { width: var(--control-height-sm); height: var(--control-height-sm); }
+.star-btn[aria-pressed="true"] .icon path { fill: currentColor; }
+.star-btn[aria-pressed="true"] { color: var(--color-text); }
+.plist-rows .row-star { position: absolute; right: calc(var(--space-3) + var(--space-1) * 1.5); top: 0; bottom: 0; margin: auto 0; width: var(--control-height-sm); height: var(--control-height-sm); opacity: 0; }
+.plist-rows li:hover .row-star, .plist-rows .row-star:focus-visible, .plist-rows .row-star[aria-pressed="true"] { opacity: 1; }
+@media (hover: none) { .plist-rows .row-star { opacity: 1; } }

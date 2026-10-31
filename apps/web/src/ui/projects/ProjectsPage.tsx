@@ -7,6 +7,7 @@ import { Icon, PROVIDER_IDS, ProviderLogo, providerName, StatusIcon, Switch, Too
 import { hashFor } from '../shell/route.ts';
 import { ProjectDetail } from './ProjectDetail.tsx';
 import { agoLabel, chatsByFolder, folderKey, plural, setProjectHidden, statsOf, uniqueProjects, workedWith, type ProjectStats } from './model.ts';
+import { StarButton } from '../myprojects/StarButton.tsx';
 import { hiddenFolders } from '../../state/selectors.ts';
 
 type Sort = 'name' | 'activity';
@@ -68,6 +69,7 @@ function ProjectRow({ row, now, stagger }: { row: Row; now: number; stagger: num
       <div className="when">{agoLabel(row.lastAt, now)}</div>
       <div className="go" aria-hidden="true"><Icon name="chevron-right" /></div>
     </a>
+    {!row.hidden && <StarButton project={project} />}
     {row.hidden && (
       <Tooltip label="Unhide">
         <button className="btn icon-only ghost unhide" type="button" aria-label={`Unhide ${project.name}`} onClick={() => void setProjectHidden(store, project, false)}>

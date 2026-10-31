@@ -1,5 +1,5 @@
 import type { Project } from '@agent-kanban/shared';
-import { folderKey, isClaudeScratch } from '@agent-kanban/shared';
+import { folderKey, isClaudeScratch, projectFolder } from '@agent-kanban/shared';
 import { api } from '../../api/client.ts';
 import { applySettings } from '../../state/reducer.ts';
 import { OLDER_MS } from '../../state/selectors.ts';
@@ -49,6 +49,17 @@ export async function saveMyProjects(store: Store, next: (cur: string[] | null) 
     toast(errorText(e));
     return false;
   }
+}
+
+/**
+ * After a chat starts here (New chat, or carrying a history chat on): its project joins My projects, unless the user
+ * has never picked (then the pick card still asks) or it is already there. Fire and forget.
+ */
+export function addAfterStart(store: Store, cwd: string): void {
+  const mine = store.getState().settings?.myProjects;
+  const folder = projectFolder(cwd);
+  if (mine === null || mine === undefined || inMine(mine, folder)) return;
+  void setInMyProjects(store, folder, true);
 }
 
 /** Adds a project to My projects or removes it (the star on Projects, Remove on a card, Add on the hint). */
