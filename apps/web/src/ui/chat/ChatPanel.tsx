@@ -7,7 +7,7 @@ import { loadChat, noteChatFolder, refreshHistory, useStore, useStoreInstance } 
 import { setHistoryHandler, setRowMenuHandler } from '../actions.ts';
 import { errorText, RESUME_TEXT } from '../board/Card.tsx';
 import { relativeTime } from '../board/format.ts';
-import { Icon, ProviderLogo, StatusIcon, Tooltip, providerName, toast } from '../primitives/index.ts';
+import { Icon, ProviderLogo, StatusIcon, Switch, Tooltip, providerName, toast } from '../primitives/index.ts';
 import { pushLayer } from '../primitives/layers.ts';
 import { ChatActionsMenu, runAction, type ChatActionsTarget } from './ChatActionsMenu.tsx';
 import { Composer } from './Composer.tsx';
@@ -52,6 +52,40 @@ function TitleEdit({ chat, onDone }: { chat: Chat; onDone: () => void }) {
   return (
     <input id="panel-title" className="title-edit" aria-label="Chat title" defaultValue={chat.title} autoFocus maxLength={200}
       onFocus={(e) => e.currentTarget.select()} onKeyDown={onKey} onBlur={(e) => save(e.currentTarget.value)} />
+  );
+}
+
+/** Out of usage (#39): what waits for the reset, and the switch that stops it continuing on its own. */
+export function OutOfUsage({ chat }: { chat: Chat }) {
+  const store = useStoreInstance();
+  const [editing, setEditing] = useState<string | null>(null);
+  const [draft, setDraft] = useState('');
+  const queue = chat.queue ?? [];
+  const act = (fn: () => Promise<Chat | void>) => void runAction(store, fn);
+  const save = (id: string) => { setEditing(null); if (draft.trim()) act(() => api.editQueued(chat.id, id, draft.trim())); };
+  return (
+    <div className="out-of-usage">
+      {chat.resumeAt && (
+        <div className="toggle-row">
+          <span>Continue on its own when usage resets</span>
+          <Switch checked={chat.autoResume !== false} label="Continue on its own when usage resets" onChange={(on) => act(() => api.patchChat(chat.id, { autoResume: on }))} />
+        </div>
+      )}
+      {queue.length > 0 && (
+        <ul className="queue" aria-label="Queued messages">
+          {queue.map((q) => (
+            <li key={q.id} className="queue-chip">
+              {editing === q.id
+                ? <input className="queue-edit" aria-label="Edit queued message" value={draft} autoFocus onChange={(e) => setDraft(e.target.value)}
+                    onBlur={() => save(q.id)} onKeyDown={(e) => { if (e.key === 'Enter') save(q.id); if (e.key === 'Escape') setEditing(null); }} />
+                : <button type="button" className="queue-text" aria-label={`Edit queued message: ${q.text}`} onClick={() => { setEditing(q.id); setDraft(q.text); }}>{q.text}</button>}
+              <button type="button" className="btn ghost" onClick={() => act(() => api.sendQueuedNow(chat.id, q.id))}>Send now</button>
+              <button type="button" className="btn ghost icon-only" aria-label={`Remove queued message: ${q.text}`} onClick={() => act(() => api.removeQueued(chat.id, q.id))}><Icon name="x" size="sm" /></button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 
@@ -240,8 +274,9 @@ export function ChatPanel() {
         {s.kind === 'chat' ? (
           <>
             <Thread chat={s.chat} key={`t:${s.chat.id}`} />
+            {s.chat.column === 'needs_you' && s.chat.needsReason === 'limit' && <OutOfUsage chat={s.chat} />}
             <Composer key={`c:${s.chat.id}`} ref={composerRef} onSend={sendTo(s.chat)} hint={HINT}
-              placeholder={s.chat.column === 'running' ? 'Send a note. It reaches the agent after this step' : 'Reply or give a new instruction'} />
+              placeholder={s.chat.column === 'running' ? 'Send a note. It reaches the agent after this step' : s.chat.needsReason === 'limit' ? 'Queue a message. It goes out when it can continue' : 'Reply or give a new instruction'} />
           </>
         ) : (
           <>

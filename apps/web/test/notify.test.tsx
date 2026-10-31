@@ -350,7 +350,7 @@ describe('notifications popover', () => {
     const rows = [...pop().querySelectorAll<HTMLElement>('.notif')];
     expect(rows.map((r) => r.querySelector('small')!.textContent)).toEqual([
       'Codex finished. Ready for review',
-      'Claude Code hit its usage limit',
+      'Claude Code is out of usage',
       'Claude Code wants to run a command',
     ]);
     expect(rows.map((r) => r.querySelector('b')!.textContent)).toEqual(['Write docs', 'Fix the login bug', 'Fix the login bug']);

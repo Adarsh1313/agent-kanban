@@ -95,7 +95,7 @@ const get = <T>(path: string) => request<T>('GET', path);
 const post = <T>(path: string, body?: unknown) => request<T>('POST', path, body);
 
 export type AnswerDecision = 'allow' | 'deny' | { reply: string };
-export interface ChatPatch { title?: string; pinned?: boolean; snoozedUntil?: string | null }
+export interface ChatPatch { title?: string; pinned?: boolean; snoozedUntil?: string | null; autoResume?: boolean }
 export interface UsageResponse { readings: UsageReading[]; suggested: ProviderId | null }
 /** What the Connections page can ask the server to do for a provider (`open` re-opens the sign-in page the server holds). */
 export type ConnectAction = 'install' | 'signin' | 'signout' | 'update' | 'cancel' | 'open';
@@ -130,6 +130,10 @@ export const api = {
   done: (id: string) => post<Chat>(`/api/chats/${enc(id)}/done`),
   undone: (id: string) => post<Chat>(`/api/chats/${enc(id)}/undone`),
   archive: (id: string, opts: RequestOptions = {}) => request<Chat>('POST', `/api/chats/${enc(id)}/archive`, undefined, opts),
+  /** The follow-up queue of an out-of-usage chat (#39). */
+  editQueued: (id: string, queued: string, text: string) => request<Chat>('PATCH', `/api/chats/${enc(id)}/queue/${enc(queued)}`, { text }),
+  removeQueued: (id: string, queued: string) => request<Chat>('DELETE', `/api/chats/${enc(id)}/queue/${enc(queued)}`),
+  sendQueuedNow: (id: string, queued: string) => post<void>(`/api/chats/${enc(id)}/queue/${enc(queued)}/send-now`),
   patchChat: (id: string, patch: ChatPatch) => request<Chat>('PATCH', `/api/chats/${enc(id)}`, patch),
   history: () => get<HistoryChat[]>('/api/history'),
   continueHistory: (body: { provider: ProviderId; sessionRef: string; text: string }) => post<Chat>('/api/history/continue', body),

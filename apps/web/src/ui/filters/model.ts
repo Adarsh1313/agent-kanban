@@ -49,7 +49,7 @@ const REASONS: [string, string][] = [
   ['permission', 'Permission to run a command'],
   ['question', 'An answer to a question'],
   ['stopped', 'You stopped it'],
-  ['limit', 'Usage limit reached'],
+  ['limit', 'Out of usage'],
   ['error', 'Something went wrong'],
   ['interrupted', 'Interrupted'],
 ];

@@ -11,7 +11,7 @@ const NOTE_TEXT: Record<AppNotification['kind'], string> = {
   permission: 'wants to run a command',
   question: 'asked you a question',
   finished: 'finished. Ready for review',
-  limit: 'hit its usage limit',
+  limit: 'is out of usage',
   error: 'stopped with an error',
 };
 

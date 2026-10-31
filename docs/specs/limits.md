@@ -101,7 +101,7 @@ The patterns come from Enjoy ("Out of usage", an editable queue) and T3 Code ("p
 
 - [x] Slice 1: out-of-usage state + resume scheduler (persisted, restart-safe, Don't resume) with API tests
 - [x] Slice 2: follow-up queue API (append, edit, delete, send-now, send at turn end)
-- [ ] Slice 3: web: Out of usage card/panel copy, toggle, queue chips, "N queued" on cards
+- [x] Slice 3: web: Out of usage card/panel copy, toggle, queue chips, "N queued" on cards
 - [ ] Slice 4: accounts: table, config folders, sign-in per account, active account passed to adapters, usage per account
 - [ ] Slice 5: web: Connections account list, Use this account, remove; switch-and-continue nudge
 - [ ] Slice 6: Codex free resets (research gate; drop if not exposed)

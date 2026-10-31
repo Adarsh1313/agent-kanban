@@ -53,7 +53,12 @@ export function ReasonBadge({ chat }: { chat: Chat }) {
     case 'permission': { const t = permissionText(action); return <span className="badge needs">{t[0]!.toUpperCase() + t.slice(1)}</span>; }
     case 'question': return <span className="badge needs">Asked you a question</span>;
     case 'stopped': return <span className="badge quiet"><Icon name="stop" size="sm" />Stopped</span>;
-    case 'limit': return <span className="badge danger">{resets ? `Limit reached · resets ${clockTime(resets, now)}` : 'Limit reached'}</span>;
+    case 'limit': {
+      // Out of usage (#39): it continues on its own at resumeAt unless the user said not to.
+      const at = chat.resumeAt && chat.autoResume !== false ? chat.resumeAt : null;
+      const text = at ? `Out of usage · resumes ${clockTime(at, now)}` : resets ? `Out of usage · resets ${clockTime(resets, now)}` : 'Out of usage · resets later';
+      return <span className="badge needs">{text}</span>;
+    }
     case 'error': return <span className="badge danger">Something went wrong</span>;
     case 'interrupted': return <span className="badge quiet">Interrupted</span>;
     default: return null;
@@ -233,7 +238,7 @@ export function Card({ id, fresh, onArrived }: { id: string; fresh: boolean; onA
         <span className="card-proj"><Icon name="folder" size="sm" />{project}</span><span className="sep">·</span>
         <span className="tnum">{relativeTime(chat.updatedAt, now)}</span>
       </div>
-      {column === 'needs_you' && reason && <div className="card-meta"><ReasonBadge chat={chat} /></div>}
+      {column === 'needs_you' && reason && <div className="card-meta"><ReasonBadge chat={chat} />{chat.queue?.length ? <span className="tnum">{chat.queue.length} queued</span> : null}</div>}
       {finished && (
         <div className="card-meta">
           {steps !== undefined && <><Icon name="check" size="sm" /><span>{steps === 0 ? 'No steps' : `${steps} step${steps === 1 ? '' : 's'}`}</span><span className="sep">·</span></>}
