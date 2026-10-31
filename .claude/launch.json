@@ -37,19 +37,6 @@
         "AGENT_KANBAN_PORT": "3006"
       },
       "port": 3006
-    },
-    {
-      "name": "api-sandbox",
-      "runtimeExecutable": "node",
-      "runtimeArgs": [
-        "--disable-warning=ExperimentalWarning",
-        "apps/server/src/main.ts"
-      ],
-      "env": {
-        "AGENT_KANBAN_PORT": "3006",
-        "AGENT_KANBAN_HOME": "C:/Users/Adarsh/AppData/Local/Temp/claude/C--Users-Adarsh-open-project/84fe627a-5d64-44f7-a71e-9c17dcceafab/scratchpad/ak-home"
-      },
-      "port": 3006
     }
   ]
 }
