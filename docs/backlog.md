@@ -2,9 +2,9 @@
 
 Updated 2026-10-31. GitHub issues carry the details; this file is the order. A fresh session resumes from here.
 
-## 1. Desktop app (Plan 4): #20, merged
+## 1. Desktop app (Plan 4): #20, merged, manual check left
 
-Merged into `main` in #35 (2026-10-31): slices 1–8 and 10 of `docs/specs/desktop-app.md`. #20 is closed. **Left:** run the manual checklist in the spec (Testing Decisions) on the installed app, then tick slice 9 and narrow #15 to "Open in app".
+Merged into `main` in #35 (2026-10-31): slices 1–8 and 10 of `docs/specs/desktop-app.md`. #20 stays open until the manual checklist in the spec (Testing Decisions) is run on the installed app; then tick slice 9, close #20 and narrow #15 to "Open in app".
 
 Decisions: the spec, `docs/adr/0001-electron-desktop-shell.md` (with the feasibility result), `design/DESIGN.md` (Desktop app), terms in `GLOSSARY.md`. Run it: README "Run it".
 
