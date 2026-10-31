@@ -220,3 +220,16 @@ body:has(> .onb[data-state="open"]) > .toasts { z-index: 91; }
 }
 .chat-row:focus-visible .rest .p { display: none; }
 .chat-row:focus-visible .rest .d { display: inline; }
+
+/* All chats: search + Filter on one line, then a plain list (prototype variant A). */
+.ac-tools { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; margin-bottom: var(--space-3); }
+.ac-tools .search input { width: 260px; }
+.ac-count { margin-left: auto; color: var(--color-text-faint); font-size: var(--text-caption); font-variant-numeric: tabular-nums; }
+.all-chats-page .filterbar { padding: 0 0 var(--space-3); border-bottom: 0; }
+.all-chats-page .crow .proj { flex: none; display: inline-flex; align-items: center; gap: 6px; width: 180px; min-width: 0; color: var(--color-text-muted); font-size: var(--text-caption); white-space: nowrap; overflow: hidden; }
+.all-chats-page .crow .proj > span:last-child { overflow: hidden; text-overflow: ellipsis; }
+.all-chats-page .crow .proj .folder-glyph { width: 14px; height: 14px; font-size: 9px; }
+.all-chats-page .crow .when { flex: none; width: 72px; text-align: right; color: var(--color-text-faint); font-size: var(--text-caption); font-variant-numeric: tabular-nums; }
+.all-chats-page mark { background: var(--color-needs-soft); color: inherit; border-radius: 2px; }
+.all-chats-page .show-more-row { margin-top: var(--space-2); }
+@media (max-width: 640px) { .all-chats-page .crow .proj { width: auto; max-width: 40%; } .ac-tools .search input { width: 100%; } }

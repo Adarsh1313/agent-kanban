@@ -14,6 +14,7 @@ import { dateTime, relativeTime } from '../board/format.ts';
 
 const NAV = [
   ['board', 'board', 'Board'],
+  ['chats', 'inbox', 'All chats'],
   ['projects', 'projects', 'Projects'],
   ['connections', 'plug', 'Connections'],
 ] as const;
@@ -115,6 +116,9 @@ function Recent() {
           <ChatRow key={c.key} chat={c} project={c.projectName}
             current={c.chatId !== null ? c.chatId === openChatId : openHistory !== null && openHistory.provider === c.provider && openHistory.sessionRef === c.sessionRef} />
         ))}
+        <button className="show-more-row all-projects" type="button" aria-label="See all chats" onClick={() => navigate('chats')}>
+          All chats<Icon name="chevron-right" size="sm" />
+        </button>
       </div>
     </SideSection>
   );
@@ -145,6 +149,11 @@ export function Sidebar() {
   const store = useStoreInstance();
   const view = useStore((s) => s.ui.view);
   const n = useStore(counts);
+  // The search icon opens All chats with its search box focused (the page focuses it when this counter moves).
+  const searchChats = () => {
+    store.setState((s) => ({ ...s, ui: { ...s.ui, chatsSearchFocus: s.ui.chatsSearchFocus + 1 } }));
+    if (location.hash !== hashFor('chats')) navigate('chats');
+  };
   const navRef = useRef<HTMLElement>(null);
   const capRef = useRef<HTMLSpanElement>(null);
   const placed = useRef(false);
@@ -200,13 +209,13 @@ export function Sidebar() {
       </button>
       <div className="side-actions">
         <button className="btn new" type="button" onClick={() => openNewChat()}><Icon name="plus" />New chat <span className="kbd">N</span></button>
-        <Tooltip label="Search chats"><button className="btn icon-only ghost" type="button" aria-label="Search chats"><Icon name="search" /></button></Tooltip>
+        <Tooltip label="Search chats"><button className="btn icon-only ghost" type="button" aria-label="Search chats" onClick={searchChats}><Icon name="search" /></button></Tooltip>
       </div>
       <nav className="navlist" aria-label="Main" ref={navRef}>
         <span className="cap" ref={capRef} />
         {NAV.map(([id, icon, label]) => (
           <button key={id} className="navitem" type="button" aria-current={view === id ? 'page' : undefined} onClick={() => { if (location.hash !== hashFor(id)) navigate(id); }}>
-            <Icon name={icon} />{label} <span className="count">{n[id === 'board' ? 'board' : id]}</span>
+            <Icon name={icon} />{label} {id !== 'chats' && <span className="count">{n[id]}</span>}
           </button>
         ))}
       </nav>

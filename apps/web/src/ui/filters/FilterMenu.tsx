@@ -5,7 +5,7 @@ import { useStore, useStoreInstance } from '../../state/store.ts';
 import { setFilterHandler } from '../actions.ts';
 import { Icon, Menu, MenuItem, MenuLabel, type MenuNav } from '../primitives/index.ts';
 import { OptionVisual } from './FilterBar.tsx';
-import { CATEGORIES, FILTER_KEYS, filterOptions, selected, setFilter, type FilterKey, type FilterOption } from './model.ts';
+import { CATEGORIES, filterOptions, filtersIn, SCOPE_KEYS, selected, setFilter, type FilterKey, type FilterOption, type FilterScope } from './model.ts';
 
 const MAX_HITS = 8;
 
@@ -33,24 +33,26 @@ function PaneBody({ open, children }: { open: boolean; children: ReactNode }) {
 }
 
 /** Every category's options, recomputed only when the data or the filters change (not on streaming text). */
-const selectAllOptions = memoState(
-  (s: AppState) => [s.chats, s.history, s.projects, s.ui.filters, s.ui.archiving],
-  (s) => Object.fromEntries(FILTER_KEYS.map((k) => [k, filterOptions(s, k)])) as Record<FilterKey, FilterOption[]>,
+const optionsSelector = (scope: FilterScope) => memoState(
+  (s: AppState) => [s.chats, s.history, s.projects, s.settings, filtersIn(s, scope), s.ui.archiving],
+  (s) => Object.fromEntries(SCOPE_KEYS[scope].map((k) => [k, filterOptions(s, k, scope)])) as Record<FilterKey, FilterOption[]>,
 );
+const SELECT_OPTIONS: Record<FilterScope, (s: AppState) => Record<FilterKey, FilterOption[]>> = { board: optionsSelector('board'), chats: optionsSelector('chats') };
 
 interface Hit { key: FilterKey; o: FilterOption }
 
-function Root({ nav, open, query, setQuery }: { nav: MenuNav; open: boolean; query: string; setQuery: (q: string) => void }) {
+function Root({ nav, open, query, setQuery, scope }: { nav: MenuNav; open: boolean; query: string; setQuery: (q: string) => void; scope: FilterScope }) {
   const store = useStoreInstance();
-  const filters = useStore((s) => s.ui.filters);
-  const all = useStore(selectAllOptions);
+  const filters = useStore((s) => filtersIn(s, scope));
+  const all = useStore(SELECT_OPTIONS[scope]);
+  const keys = SCOPE_KEYS[scope];
   const q = query.trim().toLowerCase();
   const found: Hit[] = q
-    ? FILTER_KEYS.flatMap((key) => all[key].filter((o) => o.label.toLowerCase().includes(q)).map((o) => ({ key, o }))).slice(0, MAX_HITS)
+    ? keys.flatMap((key) => all[key].filter((o) => o.label.toLowerCase().includes(q)).map((o) => ({ key, o }))).slice(0, MAX_HITS)
     : [];
   // Linear-style: picking a value found by search sets that category to it and opens the category's pane.
   const jump = ({ key, o }: Hit) => {
-    store.setState((s) => setFilter(s, key, [o.v]));
+    store.setState((s) => setFilter(s, key, [o.v], scope));
     setQuery('');
     nav.go(key);
   };
@@ -59,7 +61,7 @@ function Root({ nav, open, query, setQuery }: { nav: MenuNav; open: boolean; que
       <input className="menu-search" name="filter-search" type="search" autoComplete="off" spellCheck={false} placeholder="Filter by…" aria-label="Search filters"
         value={query} onChange={(e) => setQuery(e.target.value)}
         onKeyDown={(e) => { if (e.key === 'Enter' && found[0]) { e.preventDefault(); jump(found[0]); } }} />
-      {!q && FILTER_KEYS.map((key) => {
+      {!q && keys.map((key) => {
         const cat = CATEGORIES[key];
         const chosen = selected(filters, key);
         return (
@@ -78,14 +80,14 @@ function Root({ nav, open, query, setQuery }: { nav: MenuNav; open: boolean; que
   );
 }
 
-function CategoryPane({ nav, open, k }: { nav: MenuNav; open: boolean; k: FilterKey }) {
+function CategoryPane({ nav, open, k, scope }: { nav: MenuNav; open: boolean; k: FilterKey; scope: FilterScope }) {
   const store = useStoreInstance();
   const cat = CATEGORIES[k];
-  const options = useStore(selectAllOptions)[k];
-  const chosen = useStore((s) => selected(s.ui.filters, k));
+  const options = useStore(SELECT_OPTIONS[scope])[k]!;
+  const chosen = useStore((s) => selected(filtersIn(s, scope), k));
   // No filter means every option is in.
   const cur = new Set(chosen ?? (cat.single ? [] : options.map((o) => o.v)));
-  const set = (values: string[]) => store.setState((s) => setFilter(s, k, values));
+  const set = (values: string[]) => store.setState((s) => setFilter(s, k, values, scope));
   const toggle = (v: string) => {
     if (cat.single) return set([v]);
     const next = new Set(cur);
@@ -113,21 +115,22 @@ function CategoryPane({ nav, open, k }: { nav: MenuNav; open: boolean; k: Filter
   );
 }
 
-/** The top bar's Filter button and its menu: categories → options pane, search, Select all / None. F opens it. */
-export function FilterButton() {
+/** A Filter button and its menu: categories → options pane, search, Select all / None. On the board, F opens it. */
+export function FilterButton({ scope = 'board' }: { scope?: FilterScope }) {
   const [anchor, setAnchor] = useState<HTMLButtonElement | null>(null);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   useEffect(() => {
+    if (scope !== 'board') return;
     setFilterHandler(() => setOpen(true));
     return () => setFilterHandler(null);
-  }, []);
+  }, [scope]);
   useEffect(() => { if (!open) setQuery(''); }, [open]);
 
   const panes: Record<string, (nav: MenuNav) => ReactNode> = {
-    root: (nav) => <Root nav={nav} open={open} query={query} setQuery={setQuery} />,
+    root: (nav) => <Root nav={nav} open={open} query={query} setQuery={setQuery} scope={scope} />,
   };
-  for (const k of FILTER_KEYS) panes[k] = (nav) => <CategoryPane nav={nav} open={open} k={k} />;
+  for (const k of SCOPE_KEYS[scope]) panes[k] = (nav) => <CategoryPane nav={nav} open={open} k={k} scope={scope} />;
 
   return (
     <>

@@ -6,6 +6,10 @@ import { PROVIDER_IDS, providerName, type IconName } from '../primitives/index.t
 
 export type FilterKey = keyof Filters;
 
+/** Which filters a menu or chip row works on: the board's, or All chats' own (Project and Provider only). */
+export type FilterScope = 'board' | 'chats';
+export const filtersIn = (s: AppState, scope: FilterScope): Filters => (scope === 'chats' ? s.ui.chatsFilters : s.ui.filters);
+
 export interface FilterOption {
   v: string;
   label: string;
@@ -25,6 +29,8 @@ export interface Category {
 
 /** Categories in design/board.html order. */
 export const FILTER_KEYS: FilterKey[] = ['provider', 'project', 'status', 'model', 'reason', 'activity', 'source'];
+/** The categories each scope offers. */
+export const SCOPE_KEYS: Record<FilterScope, FilterKey[]> = { board: FILTER_KEYS, chats: ['provider', 'project'] };
 
 export const CATEGORIES: Record<FilterKey, Category> = {
   provider: { label: 'Provider', icon: 'plug', plural: 'providers' },
@@ -62,8 +68,8 @@ function fromData(values: Iterable<string>, chosen: string[] | null): string[] {
 }
 
 /** The options a category offers, from the current data: providers and projects with chats, models seen on chats. */
-export function filterOptions(s: AppState, key: FilterKey): FilterOption[] {
-  const chosen = selected(s.ui.filters, key);
+export function filterOptions(s: AppState, key: FilterKey, scope: FilterScope = 'board'): FilterOption[] {
+  const chosen = selected(filtersIn(s, scope), key);
   const chats = Object.values(s.chats).filter((c) => !isArchived(s, c));
   switch (key) {
     case 'provider': {
@@ -101,12 +107,12 @@ export function filterOptions(s: AppState, key: FilterKey): FilterOption[] {
  * Sets one category. As in the design, choosing every option of a multi-value category means "no filter" (null);
  * an empty list stays and matches nothing ("none selected").
  */
-export function withFilter(s: AppState, key: FilterKey, values: string[] | null): Filters {
-  const f = s.ui.filters;
+export function withFilter(s: AppState, key: FilterKey, values: string[] | null, scope: FilterScope = 'board'): Filters {
+  const f = filtersIn(s, scope);
   if (key === 'activity') return { ...f, activity: (values?.[0] as Filters['activity'] | undefined) ?? null };
   let next = values;
   if (next) {
-    const all = filterOptions(s, key).map((o) => o.v);
+    const all = filterOptions(s, key, scope).map((o) => o.v);
     const set = new Set(next);
     if (set.size === all.length && all.every((v) => set.has(v))) next = null;
   }
@@ -115,15 +121,17 @@ export function withFilter(s: AppState, key: FilterKey, values: string[] | null)
 
 export const NO_FILTERS: Filters = { provider: null, project: null, status: null, model: null, reason: null, activity: null, source: null };
 
-export const setFilter = (s: AppState, key: FilterKey, values: string[] | null): AppState => ({ ...s, ui: { ...s.ui, filters: withFilter(s, key, values) } });
-export const clearAllFilters = (s: AppState): AppState => ({ ...s, ui: { ...s.ui, filters: NO_FILTERS } });
+export const setFilter = (s: AppState, key: FilterKey, values: string[] | null, scope: FilterScope = 'board'): AppState =>
+  ({ ...s, ui: { ...s.ui, [scope === 'chats' ? 'chatsFilters' : 'filters']: withFilter(s, key, values, scope) } });
+export const clearAllFilters = (s: AppState, scope: FilterScope = 'board'): AppState =>
+  ({ ...s, ui: { ...s.ui, [scope === 'chats' ? 'chatsFilters' : 'filters']: NO_FILTERS } });
 export const activeKeys = (f: Filters): FilterKey[] => FILTER_KEYS.filter((k) => f[k] !== null);
 
 /** Chip parts, as design/board.html words them: "Provider" "is any of" "Claude Code, Codex" / "3 providers" / "none selected". */
-export function chipParts(s: AppState, key: FilterKey): { op: string; values: FilterOption[]; text: string | null } {
+export function chipParts(s: AppState, key: FilterKey, scope: FilterScope = 'board'): { op: string; values: FilterOption[]; text: string | null } {
   const cat = CATEGORIES[key];
-  const chosen = selected(s.ui.filters, key) ?? [];
-  const opts = filterOptions(s, key).filter((o) => chosen.includes(o.v));
+  const chosen = selected(filtersIn(s, scope), key) ?? [];
+  const opts = filterOptions(s, key, scope).filter((o) => chosen.includes(o.v));
   const op = cat.single || chosen.length <= 1 ? 'is' : 'is any of';
   if (chosen.length === 0) return { op, values: [], text: 'none selected' };
   if (opts.length <= 2) return { op, values: opts, text: null };
