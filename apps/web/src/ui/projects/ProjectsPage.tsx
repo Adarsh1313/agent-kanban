@@ -69,7 +69,11 @@ function ProjectRow({ row, now, stagger }: { row: Row; now: number; stagger: num
       <div className="go" aria-hidden="true"><Icon name="chevron-right" /></div>
     </a>
     {row.hidden && (
-      <button className="btn unhide" type="button" aria-label={`Unhide ${project.name}`} onClick={() => void setProjectHidden(store, project, false)}>Unhide</button>
+      <Tooltip label="Unhide">
+        <button className="btn icon-only ghost unhide" type="button" aria-label={`Unhide ${project.name}`} onClick={() => void setProjectHidden(store, project, false)}>
+          <Icon name="eye" size="sm" />
+        </button>
+      </Tooltip>
     )}
     </li>
   );

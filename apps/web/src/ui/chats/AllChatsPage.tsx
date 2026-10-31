@@ -79,14 +79,17 @@ export function AllChatsPage() {
   return (
     <div className="page all-chats-page">
       <div className="page-inner">
-        <div className="ac-tools">
+        <div className="page-head">
+          <div className="t">
+            <h2 className="page-title">All chats <span className="count">{rows.length}</span></h2>
+            <p>Every chat from Claude Code, Codex and Antigravity, on the board or only in their own history. Newest first.</p>
+          </div>
           <label className="search">
             <Icon name="search" size="sm" />
             <input ref={box} name="chat-search" type="search" autoComplete="off" spellCheck={false} placeholder="Search chats and projects" aria-label="Search chats"
               value={query} onChange={(e) => { setQuery(e.target.value); setShown(PAGE); }} />
           </label>
           <FilterButton scope="chats" />
-          <span className="ac-count">{rows.length} {rows.length === 1 ? 'chat' : 'chats'}</span>
         </div>
         <FilterBar scope="chats" />
         {!loaded ? null : rows.length === 0 ? (
