@@ -55,6 +55,9 @@ function TitleEdit({ chat, onDone }: { chat: Chat; onDone: () => void }) {
   );
 }
 
+/** Shown instead of the composer while a chat runs in Claude Code outside the app (#37). */
+export const OUTSIDE_NOTE = 'This chat is running in Claude Code outside the app. Reply there, or continue here once it stops.';
+
 /** The header button for the chat's state: Stop while running, Resume when stopped, Mark done in Review. */
 function StateAction({ chat }: { chat: Chat }) {
   const store = useStoreInstance();
@@ -66,7 +69,7 @@ function StateAction({ chat }: { chat: Chat }) {
     setBusy(false);
   };
   const reason = chat.needsReason;
-  if (chat.column === 'running') {
+  if (chat.column === 'running' && !chat.outsideLive) {
     return <button className="btn danger" type="button" disabled={busy} onClick={() => void run(() => api.stop(chat.id))}><Icon name="stop" size="sm" />{busy ? 'Stopping…' : 'Stop'}</button>;
   }
   if (chat.column === 'needs_you' && (reason === 'stopped' || reason === 'interrupted')) {
@@ -240,8 +243,10 @@ export function ChatPanel() {
         {s.kind === 'chat' ? (
           <>
             <Thread chat={s.chat} key={`t:${s.chat.id}`} />
-            <Composer key={`c:${s.chat.id}`} ref={composerRef} onSend={sendTo(s.chat)} hint={HINT}
-              placeholder={s.chat.column === 'running' ? 'Send a note. It reaches the agent after this step' : 'Reply or give a new instruction'} />
+            {s.chat.outsideLive
+              ? <p className="panel-outside" role="status">{OUTSIDE_NOTE}</p>
+              : <Composer key={`c:${s.chat.id}`} ref={composerRef} onSend={sendTo(s.chat)} hint={HINT}
+                placeholder={s.chat.column === 'running' ? 'Send a note. It reaches the agent after this step' : s.chat.origin === 'outside' ? 'Continue this chat here' : 'Reply or give a new instruction'} />}
           </>
         ) : (
           <>
