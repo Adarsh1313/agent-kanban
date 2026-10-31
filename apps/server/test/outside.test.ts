@@ -116,6 +116,8 @@ test('hook events move one outside chat Running → Needs you → Review', async
     assert.equal(chat!.column, 'review');
     assert.equal(chat!.outsideLive, false);
     assert.equal(s.store.listChats().length, 1);
+    await s.hook(ev('Notification', { message: 'Claude is waiting for your input' }));
+    assert.equal(s.store.listChats()[0]!.column, 'review', 'idle reminder after Stop is ignored');
     const kinds = s.events.filter((e) => e.type === 'notification').map((e) => (e as { kind: string }).kind);
     assert.deepEqual(kinds, ['permission', 'question', 'finished']);
   } finally { s.close(); }

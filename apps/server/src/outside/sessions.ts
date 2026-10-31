@@ -59,6 +59,8 @@ export class OutsideSessions {
     let chat = this.store.findBySessionRef('claude', p.session_id);
     // The app's own run of this chat is in charge of its card.
     if (chat && this.runningHere(chat.id)) return;
+    // Claude Code's idle reminder comes a minute after Stop: a chat that already stopped stays in Review.
+    if (chat && p.hook_event_name === 'Notification' && !chat.outsideLive && notificationReason(p.message) === 'waiting') return;
     if (p.transcript_path) this.transcripts.set(p.session_id, p.transcript_path);
     const first = p.prompt?.trim() ? p.prompt : undefined;
     if (!chat) chat = this.store.createChat({ provider: 'claude', cwd: p.cwd, title: first ?? UNTITLED, sessionRef: p.session_id });
