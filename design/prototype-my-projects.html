@@ -1,0 +1,453 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PROTOTYPE · My projects</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="components.css">
+<link rel="stylesheet" href="views.css">
+<!--
+  PROTOTYPE, throwaway. Answers decision 16 in docs/specs/my-projects-decisions.md:
+  what the sidebar's My projects block, the global search dropdown and the onboarding pick step look like.
+  Three structurally different variants: ?v=a|b|c, the bottom bar, or the [ and ] keys.
+  The bar also opens the onboarding step and switches between "picked", "never picked" and "empty".
+-->
+<style>
+  html, body { height: 100%; overflow: hidden; }
+  .app { display: flex; height: 100vh; overflow: hidden; }
+  .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .sidebar { position: relative; }
+  .sidebar .scroll { flex: 1; overflow-y: auto; margin: 0 calc(var(--space-2) * -1); padding: 0 var(--space-2) 80px; }
+  .proto-note { margin: 0 0 var(--space-3); font-size: var(--text-caption); color: var(--color-text-faint); max-width: 70ch; }
+  .needs-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--color-needs); flex: none; }
+  .badge-n { min-width: 16px; height: 16px; padding: 0 4px; border-radius: var(--radius-full); background: var(--color-needs-soft); color: var(--color-text); font-size: var(--text-micro); font-variant-numeric: tabular-nums; display: inline-flex; align-items: center; justify-content: center; flex: none; }
+  .star { width: 14px; height: 14px; flex: none; }
+  .gsearch { display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 var(--space-2); border: 1px solid var(--color-border); border-radius: var(--radius-control); background: var(--color-surface); color: var(--color-text-faint); flex: 1; }
+  .gsearch input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; font: inherit; font-size: var(--text-body); color: var(--color-text); }
+  .gsearch:focus-within { border-color: var(--color-border-strong); }
+  .gsearch .kbd { margin-left: auto; }
+  .side-title { display: flex; align-items: center; }
+  .side-title .act { margin-left: auto; font-size: var(--text-micro); color: var(--color-text-faint); padding: 0 4px; border-radius: var(--radius-control); }
+  @media (hover: hover) and (pointer: fine) { .side-title .act:hover { color: var(--color-text); background: var(--color-nav-hover); } }
+  .hint { display: flex; align-items: center; gap: 6px; margin: 4px 0; padding: 6px var(--space-2); border: 1px dashed var(--color-border); border-radius: var(--radius-control); font-size: var(--text-caption); color: var(--color-text-muted); }
+  .hint b { color: var(--color-text); font-weight: var(--weight-medium); }
+  .hint button { margin-left: auto; font-size: var(--text-caption); color: var(--color-text); font-weight: var(--weight-medium); }
+  .pick-card { margin: 0 0 var(--space-3); padding: var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-card); background: var(--color-surface); display: flex; flex-direction: column; gap: var(--space-2); font-size: var(--text-caption); color: var(--color-text-muted); }
+  .pick-card b { color: var(--color-text); font-size: var(--text-body); font-weight: var(--weight-semibold); }
+  .pick-card .btn { align-self: flex-start; }
+  .side-empty { padding: var(--space-3) var(--space-2); font-size: var(--text-caption); color: var(--color-text-muted); display: flex; flex-direction: column; gap: var(--space-2); align-items: flex-start; }
+  .chat-row .when { display: none; margin-left: auto; color: var(--color-text-faint); font-size: var(--text-caption); }
+  @media (hover: hover) and (pointer: fine) { .chat-row:hover .when { display: inline; } }
+  .more-row { font-size: var(--text-caption); color: var(--color-text-faint); height: 24px; display: flex; align-items: center; width: 100%; text-align: left; border-radius: var(--radius-control); }
+  @media (hover: hover) and (pointer: fine) { .more-row:hover { color: var(--color-text); background: var(--color-nav-hover); } }
+  .dim { opacity: .55; }
+  mark { background: var(--color-needs-soft); color: inherit; border-radius: 2px; }
+
+  /* ── A: tree ── */
+  .ta-proj { display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 var(--space-2) 0 2px; border-radius: var(--radius-control); width: 100%; text-align: left; font-weight: var(--weight-medium); }
+  .ta-proj .chev { transition: transform var(--duration-pop) var(--ease-out); color: var(--color-text-faint); }
+  .ta-proj[aria-expanded="false"] .chev { transform: rotate(-90deg); }
+  .ta-proj .nm { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ta-proj .rm { display: none; color: var(--color-text-faint); }
+  @media (hover: hover) and (pointer: fine) { .ta-proj:hover { background: var(--color-nav-hover); } .ta-proj:hover .rm { display: inline-flex; } .ta-proj:hover .badges { display: none; } }
+  .ta-proj .badges { display: inline-flex; align-items: center; gap: 6px; }
+  .ta-kids { padding-left: 20px; margin-bottom: 4px; }
+  .ta-kids .more-row { padding-left: var(--space-2); }
+
+  /* ── B: cards ── */
+  .tb-card { border: 1px solid var(--color-border); border-radius: var(--radius-card); background: var(--color-surface); margin-bottom: var(--space-2); overflow: hidden; }
+  .tb-head { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2); width: 100%; text-align: left; }
+  .tb-head .two { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .tb-head .nm { font-weight: var(--weight-semibold); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tb-head .sum { font-size: var(--text-micro); color: var(--color-text-faint); display: flex; gap: 6px; align-items: center; }
+  .tb-head .sum { white-space: nowrap; overflow: hidden; }
+  .tb-head .sum span { display: inline-flex; align-items: center; gap: 4px; }
+  .tb-head .sum .on { color: var(--color-text-muted); }
+  .tb-body { border-top: 1px solid var(--color-border); padding: 2px var(--space-1) var(--space-1); }
+  .tb-body .chat-row { height: 26px; font-size: var(--text-caption); }
+
+  /* ── C: rail (one open at a time) ── */
+  .tc-proj { display: flex; align-items: center; gap: var(--space-2); height: 32px; padding: 0 var(--space-2); border-radius: var(--radius-control); width: 100%; text-align: left; }
+  .tc-proj .nm { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tc-proj[aria-expanded="true"] { background: var(--color-control); font-weight: var(--weight-medium); }
+  @media (hover: hover) and (pointer: fine) { .tc-proj:hover { background: var(--color-nav-hover); } }
+  .tc-open { margin: 2px 0 6px var(--space-4); border-left: 1px solid var(--color-border); padding-left: var(--space-2); }
+
+  /* ── Search results ── */
+  .sres { padding: var(--space-1); }
+  .sres .menu-label { padding-top: var(--space-2); }
+  .sres .menu-item .folder-glyph { width: 16px; height: 16px; }
+  .sres .menu-item .m { margin-left: auto; color: var(--color-text-faint); font-size: var(--text-caption); white-space: nowrap; }
+  .sres .menu-item.kid { padding-left: 34px; font-size: var(--text-caption); min-height: 26px; }
+  .sres .menu-item[aria-selected="true"] { background: var(--color-control); }
+  .sres .see-all { font-size: var(--text-caption); color: var(--color-text-muted); border-top: 1px solid var(--color-border); margin-top: var(--space-1); }
+  .pop-a { position: fixed; z-index: 70; left: var(--space-3); top: 84px; width: 340px; max-height: 70vh; overflow-y: auto; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-panel); box-shadow: var(--shadow-card-lift); }
+  .pal-b { position: fixed; z-index: 70; left: 50%; top: 12vh; transform: translateX(-50%); width: min(720px, calc(100vw - 32px)); background: var(--color-surface); border-radius: var(--radius-panel); box-shadow: var(--shadow-card-lift); overflow: hidden; }
+  .pal-b .pal-in { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--color-border); font-size: var(--text-lead); }
+  .pal-b .pal-in input { flex: 1; border: 0; outline: 0; background: transparent; font: inherit; color: var(--color-text); }
+  .pal-b .cols { display: grid; grid-template-columns: 240px minmax(0, 1fr); max-height: 52vh; }
+  .pal-b .cols > div { overflow-y: auto; }
+  .pal-b .cols > div:first-child { border-right: 1px solid var(--color-border); }
+  .scrim-b { position: fixed; inset: 0; z-index: 69; background: color-mix(in srgb, var(--color-ink) 30%, transparent); }
+
+  /* ── Onboarding pick step ── */
+  .pk-search { display: flex; align-items: center; gap: 6px; height: 34px; padding: 0 var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-control); background: var(--color-surface); }
+  .pk-search input { flex: 1; border: 0; outline: 0; background: transparent; font: inherit; color: var(--color-text); }
+  .pk-list { border: 1px solid var(--color-border); border-radius: var(--radius-card); background: var(--color-surface); max-height: 46vh; overflow-y: auto; }
+  .pk-row { display: flex; align-items: center; gap: var(--space-3); min-height: 42px; padding: 0 var(--space-3); width: 100%; text-align: left; border-top: 1px solid var(--color-border); }
+  .pk-row:first-child { border-top: 0; }
+  .pk-row .two { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .pk-row .two small { color: var(--color-text-faint); font-size: var(--text-caption); }
+  .pk-row .logos { display: inline-flex; gap: 4px; }
+  .cbox { width: 16px; height: 16px; border-radius: 4px; border: 1px solid var(--color-border-strong); display: grid; place-items: center; flex: none; color: transparent; }
+  [aria-checked="true"] > .cbox { background: var(--color-ink); border-color: var(--color-ink); color: var(--color-ink-contrast); }
+  .pk-older { color: var(--color-text-muted); font-size: var(--text-caption); }
+  .pk-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-2); max-height: 46vh; overflow-y: auto; padding: 2px; }
+  .pk-tile { border: 1px solid var(--color-border); border-radius: var(--radius-card); background: var(--color-surface); padding: var(--space-3); text-align: left; display: flex; flex-direction: column; gap: 6px; position: relative; }
+  .pk-tile .folder-glyph { width: 28px; height: 28px; font-size: 15px; }
+  .pk-tile .nm { font-weight: var(--weight-semibold); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pk-tile small { color: var(--color-text-faint); font-size: var(--text-caption); }
+  .pk-tile[aria-checked="true"] { border-color: var(--color-ink); box-shadow: inset 0 0 0 1px var(--color-ink); }
+  .pk-tile .cbox { position: absolute; top: var(--space-2); right: var(--space-2); }
+  .pk-split { display: grid; grid-template-columns: minmax(0, 1fr) 240px; gap: var(--space-4); align-items: start; }
+  .pk-preview { border: 1px solid var(--color-border); border-radius: var(--radius-card); background: var(--color-bg); padding: var(--space-2); font-size: var(--text-caption); }
+  .pk-preview .side-title { margin-bottom: 4px; }
+  .onb-stage.wide { max-width: 860px; }
+
+  /* ── Variant bar ── */
+  .vbar { position: fixed; left: 50%; bottom: var(--space-4); transform: translateX(-50%); z-index: 95; display: flex; align-items: center; gap: var(--space-1); padding: var(--space-1); background: var(--color-ink); color: var(--color-ink-contrast); border-radius: var(--radius-full); box-shadow: var(--shadow-card-lift); font-size: var(--text-caption); }
+  .vbar button { white-space: nowrap; height: 28px; padding: 0 var(--space-3); border-radius: var(--radius-full); color: color-mix(in srgb, var(--color-ink-contrast) 70%, transparent); }
+  .vbar button[aria-pressed="true"] { background: var(--color-ink-contrast); color: var(--color-ink); font-weight: var(--weight-medium); }
+  .vbar .sep { width: 1px; height: 18px; background: color-mix(in srgb, var(--color-ink-contrast) 25%, transparent); margin: 0 var(--space-1); }
+  .vbar .tag { padding: 0 var(--space-2) 0 var(--space-3); font-weight: var(--weight-semibold); letter-spacing: .04em; }
+  .vstate { position: fixed; left: 50%; bottom: 58px; transform: translateX(-50%); z-index: 95; font-family: var(--font-mono); font-size: var(--text-micro); color: var(--color-text-faint); white-space: nowrap; }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" aria-label="Sidebar">
+    <button class="workspace" type="button">
+      <span class="mark"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="3" y="4" width="5" height="16" rx="1.5"/><rect x="10" y="4" width="5" height="11" rx="1.5"/><rect x="17" y="4" width="4" height="7" rx="1.5"/></svg></span>
+      Agent Kanban
+    </button>
+    <div class="side-actions">
+      <label class="gsearch"><span data-icon="search" data-size="sm"></span><input id="gq" type="search" placeholder="Search chats and projects" autocomplete="off" spellcheck="false"><span class="kbd">Ctrl K</span></label>
+    </div>
+    <nav class="navlist" id="nav" aria-label="Main">
+      <span class="cap"></span>
+      <button class="navitem" type="button" aria-current="page"><span data-icon="board"></span>Board</button>
+      <button class="navitem" type="button"><span data-icon="inbox"></span>All chats</button>
+      <button class="navitem" type="button"><span data-icon="projects"></span>Projects</button>
+    </nav>
+    <div class="scroll" id="side"></div>
+
+  </aside>
+  <div class="main">
+    <header class="topbar"><span data-icon="board"></span><h1 class="title">Board</h1><span class="spacer"></span>
+      <button class="btn primary" type="button"><span data-icon="plus"></span>New chat</button></header>
+    <div class="page"><div class="page-inner"><p class="proto-note" id="note"></p></div></div>
+  </div>
+</div>
+<div id="popA"></div>
+<div id="palB"></div>
+<div class="onb" id="onb" data-state="closed">
+  <div class="onb-top"><span class="brand"><span class="mark"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="4" width="5" height="16" rx="1.5"/><rect x="10" y="4" width="5" height="11" rx="1.5"/><rect x="17" y="4" width="4" height="7" rx="1.5"/></svg></span>Agent Kanban</span>
+    <div class="onb-steps"><small>Step 3 of 4</small><div class="onb-bar"><i style="--f:1"></i><i style="--f:1"></i><i style="--f:1"></i><i></i></div></div></div>
+  <div class="onb-stage" id="onbStage"></div>
+</div>
+<div class="vstate" id="vstate"></div>
+<div class="vbar" role="toolbar" aria-label="Prototype variants">
+  <span class="tag">PROTOTYPE</span>
+  <button type="button" data-v="a">A · Tree</button>
+  <button type="button" data-v="b">B · Cards + palette</button>
+  <button type="button" data-v="c">C · Focus rail</button>
+  <span class="sep"></span>
+  <button type="button" id="openOnb">Onboarding step</button>
+  <button type="button" data-mode="picked">Picked</button>
+  <button type="button" data-mode="never">Never picked</button>
+  <button type="button" data-mode="empty">Empty</button>
+</div>
+<script src="components.js"></script>
+<script>
+const { icon, statusIcon, logo, PROVIDERS, bindTooltips } = KB;
+const $ = s => document.querySelector(s);
+const esc = s => String(s).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
+const H = 60, D = 1440;
+const STAR = on => `<svg class="star" viewBox="0 0 24 24" fill="${on ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 3.5l2.6 5.3 5.9.9-4.25 4.1 1 5.8L12 16.9l-5.25 2.7 1-5.8L3.5 9.7l5.9-.9z"/></svg>`;
+
+/* ═════ Fake data, in memory only ═════ */
+const PROJECTS = [
+  ['open-project', '#5b6cf0'], ['LocalFlow', '#16857a'], ['lila-black', '#c8402f'], ['portfolio', '#c98a12'],
+  ['resume-bot', '#8a5bd6'], ['infra-scripts', '#4d7a3a'], ['Claude scratch chats', '#8a8a85'], ['notes-app', '#d2649a'],
+  ['dotfiles', '#3b6fd8'], ['ml-playground', '#6b8e23'], ['old-blog', '#a0522d'], ['chrome-ext-tabs', '#2f8a8a'],
+  ['leetcode', '#b8860b'], ['thesis', '#7a6a5a'], ['i-have-these-three-csv-files', '#999'], ['fpl-helper', '#3a7a6a'],
+  ['agent-kanban-site', '#2c6fb0'], ['figma-tokens', '#b05a8a'],
+].map(([id, colour]) => ({ id, colour }));
+// [title, provider, project, minutes ago, status (null = history only), pinned]
+const CHATS = [
+  ['My projects: decisions grill', 'claude', 'open-project', 2, 'running'],
+  ['Quick fixes #36', 'claude', 'open-project', 25, 'review'],
+  ['Review LocalFlow voice commands', 'codex', 'LocalFlow', 40, 'needs'],
+  ['Hotkey conflicts with Teams', 'claude', 'LocalFlow', 3 * H, 'running'],
+  ['Wake word false positives', 'codex', 'LocalFlow', 9 * H, null],
+  ['Electron auto-update spike', 'codex', 'open-project', 7 * H, 'done'],
+  ['quick regex for ISO dates', 'claude', 'Claude scratch chats', 3 * H, null],
+  ['Map heatmap off by one tile', 'claude', 'lila-black', 5 * H, 'done', true],
+  ['Hero image is 2MB, shrink it', 'antigravity', 'portfolio', 20 * H, null],
+  ['Parse JD into bullet list', 'claude', 'resume-bot', 26 * H, 'review'],
+  ['Storm-runner classifier thresholds', 'codex', 'lila-black', 30 * H, null],
+  ['Kill zone overlay colours', 'antigravity', 'lila-black', 2 * D, 'needs'],
+  ['Player path smoothing', 'claude', 'lila-black', 3 * D, null],
+  ['Rotate Cloudflare token script', 'claude', 'infra-scripts', 2 * D, 'done'],
+  ['Markdown tables overflow the panel', 'codex', 'open-project', 3 * D, 'done'],
+  ['Notes sync conflict on reconnect', 'antigravity', 'notes-app', 4 * D, null],
+  ['Codex history index is stale', 'codex', 'open-project', 5 * D, 'done', true],
+  ['Add case study: Lila Black', 'claude', 'portfolio', 6 * D, null],
+  ['GW10 transfer plan', 'codex', 'fpl-helper', 6 * D, null],
+  ['nvim lsp keymaps', 'claude', 'dotfiles', 9 * D, null],
+  ['Cover letter tone: less formal', 'claude', 'resume-bot', 11 * D, null],
+  ['Merge the three CSVs', 'claude', 'i-have-these-three-csv-files', 12 * D, null],
+  ['Onboarding copy, second pass', 'claude', 'open-project', 17 * D, 'done'],
+  ['Backup script to R2', 'codex', 'infra-scripts', 22 * D, null],
+  ['Fix vite alias on Windows', 'claude', 'agent-kanban-site', 26 * D, null],
+  ['Export tokens to CSS vars', 'antigravity', 'figma-tokens', 33 * D, null],
+  ['Tune learning rate schedule', 'codex', 'ml-playground', 41 * D, null],
+  ['Migrate blog to Astro', 'claude', 'old-blog', 63 * D, null],
+  ['Tab grouping by domain', 'antigravity', 'chrome-ext-tabs', 80 * D, null],
+  ['Two-sum variants explained', 'claude', 'leetcode', 95 * D, null],
+  ['Chapter 3 lit review outline', 'claude', 'thesis', 140 * D, null],
+].map(([title, provider, project, mins, status, pinned], i) => ({ id: i, title, provider, project, mins, status, pinned: !!pinned }));
+const proj = id => PROJECTS.find(p => p.id === id);
+PROJECTS.forEach(p => {
+  const cs = CHATS.filter(c => c.project === p.id);
+  p.mins = Math.min(...cs.map(c => c.mins)); p.older = p.mins > 30 * D; p.n = cs.length;
+  p.providers = [...new Set(cs.map(c => c.provider))];
+});
+PROJECTS.sort((a, b) => a.mins - b.mins);
+function when(m) {
+  if (m < H) return `${Math.max(1, Math.round(m))}m`;
+  if (m < D) return `${Math.round(m / H)}h`;
+  if (m < 2 * D) return 'Yesterday';
+  return `${Math.round(m / D)}d`;
+}
+const glyph = (p, size = 16) => `<span class="folder-glyph" style="background:${p.colour};width:${size}px;height:${size}px;font-size:${Math.round(size * .6)}px">${esc(p.id[0].toUpperCase())}</span>`;
+const mark = c => c.status === 'running' ? statusIcon('running') : c.status === 'needs' ? '<span class="needs-dot" title="Needs you"></span>' : '';
+const needsN = p => CHATS.filter(c => c.project === p.id && (c.status === 'needs' || c.status === 'review')).length;
+const runs = p => CHATS.some(c => c.project === p.id && c.status === 'running');
+// The 3 newest non-pinned chats, plus any running / needs-you chat outside them (decision 3).
+function shown(p) {
+  const list = CHATS.filter(c => c.project === p.id && !c.pinned).sort((a, b) => a.mins - b.mins);
+  const top = list.slice(0, 3), extra = list.slice(3).filter(c => c.status === 'running' || c.status === 'needs');
+  return { rows: [...top, ...extra], more: list.length - top.length - extra.length };
+}
+
+/* ═════ State ═════ */
+const VARIANTS = ['a', 'b', 'c'];
+const qv = new URLSearchParams(location.search).get('v');
+const state = {
+  v: VARIANTS.includes(qv) ? qv : 'a',
+  mode: 'picked',                                  // picked | never (myProjects null) | empty ([])
+  mine: new Set(['open-project', 'LocalFlow', 'lila-black', 'resume-bot']),
+  collapsed: new Set(), open: 'open-project',     // A/B collapse per project; C: the one open project
+  q: '', sel: 0, palProj: null,
+  pick: null, pickQ: '', olderOpen: false,
+};
+const mineList = () => state.mode === 'picked' ? PROJECTS.filter(p => state.mine.has(p.id)) : [];
+// Activity outside the app in a project that isn't in My projects (decision 6).
+const hintProj = () => state.mode === 'picked' ? PROJECTS.find(p => !state.mine.has(p.id) && p.mins < D && p.id !== 'Claude scratch chats') : null;
+
+/* ═════ Sidebar ═════ */
+const chatRow = c => `<div class="chat-row" role="button" tabindex="0" title="${esc(c.title)}">${logo(c.provider, 'sm')}<span class="t">${esc(c.title)}</span>${mark(c)}<span class="when">${when(c.mins)}</span></div>`;
+const moreRow = (p, n) => n > 0 ? `<button class="more-row" type="button">${n} more in All chats</button>` : '';
+function badges(p) {
+  const n = needsN(p);
+  return `${runs(p) ? statusIcon('running') : ''}${n ? `<span class="badge-n" title="${n} need you or to review">${n}</span>` : ''}`;
+}
+function blockA(list) {
+  return list.map(p => {
+    const open = !state.collapsed.has(p.id), { rows, more } = shown(p);
+    return `<button class="ta-proj" type="button" data-collapse="${esc(p.id)}" aria-expanded="${open}">${icon('chevron-down', 'sm chev')}${glyph(p, 16)}<span class="nm">${esc(p.id)}</span>
+      <span class="badges">${badges(p)}</span><span class="rm" data-remove="${esc(p.id)}" title="Remove from My projects">${STAR(true)}</span></button>
+      ${open ? `<div class="ta-kids">${rows.map(chatRow).join('')}${moreRow(p, more)}</div>` : ''}`;
+  }).join('');
+}
+function blockB(list) {
+  return list.map(p => {
+    const open = !state.collapsed.has(p.id), { rows, more } = shown(p), n = needsN(p);
+    const sum = [runs(p) ? `<span class="on">${statusIcon('running')} running</span>` : '', n ? `<span class="on">${n} need you</span>` : '', `<span>${when(p.mins)}</span>`].filter(Boolean).join('·');
+    return `<div class="tb-card"><button class="tb-head" type="button" data-collapse="${esc(p.id)}" aria-expanded="${open}">${glyph(p, 24)}<span class="two"><span class="nm">${esc(p.id)}</span><span class="sum">${sum}</span></span>${icon(open ? 'chevron-down' : 'chevron-right', 'sm')}</button>
+      ${open ? `<div class="tb-body">${rows.map(chatRow).join('')}${moreRow(p, more)}</div>` : ''}</div>`;
+  }).join('');
+}
+function blockC(list) {
+  return list.map(p => {
+    const open = state.open === p.id, { rows, more } = shown(p);
+    return `<button class="tc-proj" type="button" data-open="${esc(p.id)}" aria-expanded="${open}">${glyph(p, 18)}<span class="nm">${esc(p.id)}</span>${badges(p)}</button>
+      ${open ? `<div class="tc-open">${rows.map(chatRow).join('')}${moreRow(p, more)}</div>` : ''}`;
+  }).join('');
+}
+function renderSide() {
+  if (state.v === 'c' && state.q.trim()) { $('#side').innerHTML = `<div class="sres" id="sres">${results()}</div>`; bindResults(); return; }
+  const list = mineList(), h = hintProj();
+  const pinned = CHATS.filter(c => c.pinned).sort((a, b) => a.mins - b.mins);
+  const card = state.mode === 'never' ? `<div class="pick-card"><b>Pick your projects</b>You have ${PROJECTS.length} projects. Choose the ones you work on and the sidebar shows just those.<button class="btn primary" type="button" data-pick-open>Pick projects</button></div>` : '';
+  const empty = state.mode !== 'picked' ? `<div class="side-empty">Pick the projects you work on.<button class="btn" type="button" data-pick-open>Pick</button></div>` : '';
+  const block = state.v === 'a' ? blockA(list) : state.v === 'b' ? blockB(list) : blockC(list);
+  $('#side').innerHTML = `${card}
+    <div class="side-section"><div class="side-title">Providers</div>${Object.keys(PROVIDERS).map(id => `<button class="navitem prov" type="button">${logo(id)}${PROVIDERS[id].name}<span class="meta-r">${CHATS.filter(c => c.provider === id).length}</span></button>`).join('')}</div>
+    <div class="side-section"><div class="side-title">Pinned</div>${pinned.map(chatRow).join('')}</div>
+    <div class="side-section"><div class="side-title">My projects<button class="act" type="button" data-pick-open>Edit</button></div>
+      ${h ? `<div class="hint">New activity in <b>${esc(h.id)}</b><button type="button" data-add="${esc(h.id)}">Add</button></div>` : ''}
+      ${block || empty}</div>`;
+  $('#side').querySelectorAll('[data-collapse]').forEach(b => b.addEventListener('click', e => {
+    if (e.target.closest('[data-remove]')) return;
+    const id = b.dataset.collapse; state.collapsed.has(id) ? state.collapsed.delete(id) : state.collapsed.add(id); render();
+  }));
+  $('#side').querySelectorAll('[data-remove]').forEach(b => b.addEventListener('click', e => { e.stopPropagation(); state.mine.delete(b.dataset.remove); render(); }));
+  $('#side').querySelectorAll('[data-open]').forEach(b => b.addEventListener('click', () => { state.open = state.open === b.dataset.open ? null : b.dataset.open; render(); }));
+  $('#side').querySelectorAll('[data-add]').forEach(b => b.addEventListener('click', () => { state.mine.add(b.dataset.add); render(); }));
+  $('#side').querySelectorAll('[data-pick-open]').forEach(b => b.addEventListener('click', openOnb));
+}
+
+/* ═════ Global search ═════ */
+const hl = s => { const q = state.q.trim(); const i = s.toLowerCase().indexOf(q.toLowerCase()); return !q || i < 0 ? esc(s) : esc(s.slice(0, i)) + `<mark>${esc(s.slice(i, i + q.length))}</mark>` + esc(s.slice(i + q.length)); };
+function matches() {
+  const q = state.q.trim().toLowerCase();
+  return { projects: PROJECTS.filter(p => p.id.toLowerCase().includes(q)).slice(0, 5), chats: CHATS.filter(c => c.title.toLowerCase().includes(q)).sort((a, b) => a.mins - b.mins).slice(0, 8) };
+}
+const chatItem = (c, kid) => `<button class="menu-item ${kid ? 'kid' : ''}" type="button" data-r>${kid ? '' : logo(c.provider, 'sm')}${kid ? logo(c.provider, 'sm') : ''}<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${hl(c.title)}</span>${mark(c)}<span class="m">${kid ? when(c.mins) : esc(c.project)}</span></button>`;
+// A and C: one list, projects with their chats folded out, then chats.
+function results() {
+  const { projects, chats } = matches();
+  if (!projects.length && !chats.length) return `<div class="menu-label">Nothing matches "${esc(state.q)}"</div>`;
+  const pj = projects.map(p => `<button class="menu-item" type="button" data-r>${glyph(p)}<span>${hl(p.id)}</span><span class="m">${state.mine.has(p.id) ? STAR(true) : ''} ${p.n} chats</span></button>
+    ${CHATS.filter(c => c.project === p.id).sort((a, b) => a.mins - b.mins).slice(0, 3).map(c => chatItem(c, true)).join('')}`).join('');
+  return `${projects.length ? `<div class="menu-label">Projects</div>${pj}` : ''}${chats.length ? `<div class="menu-label">Chats</div>${chats.map(c => chatItem(c)).join('')}` : ''}
+    <button class="menu-item see-all" type="button">${icon('search', 'sm')}See all results in All chats</button>`;
+}
+function bindResults() {
+  const items = [...document.querySelectorAll('[data-r]')];
+  items.forEach((b, i) => b.setAttribute('aria-selected', i === state.sel));
+}
+// B: a palette, projects on the left, chats of the hovered project (or matching chats) on the right.
+function palette() {
+  const { projects, chats } = matches();
+  const p = state.palProj && proj(state.palProj);
+  const right = p ? CHATS.filter(c => c.project === p.id).sort((a, b) => a.mins - b.mins) : chats;
+  return `<div class="scrim-b" id="scrimB"></div><div class="pal-b" role="dialog" aria-label="Search">
+    <label class="pal-in">${icon('search')}<input id="palQ" type="search" value="${esc(state.q)}" placeholder="Search chats and projects" autocomplete="off"><span class="kbd">Esc</span></label>
+    <div class="cols"><div class="sres"><div class="menu-label">Projects</div>${projects.map(x => `<button class="menu-item" type="button" data-pal="${esc(x.id)}" aria-selected="${state.palProj === x.id}">${glyph(x)}<span>${hl(x.id)}</span><span class="m">${x.n}</span></button>`).join('') || '<div class="menu-label">None</div>'}</div>
+      <div class="sres"><div class="menu-label">${p ? `Chats in ${esc(p.id)}` : 'Chats'}</div>${right.map(c => `<button class="menu-item" type="button">${logo(c.provider, 'sm')}<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${hl(c.title)}</span>${mark(c)}<span class="m">${p ? when(c.mins) : esc(c.project)}</span></button>`).join('') || '<div class="menu-label">No chats match</div>'}
+      <button class="menu-item see-all" type="button">${icon('search', 'sm')}See all results in All chats</button></div></div></div>`;
+}
+function renderSearch() {
+  const on = !!state.q.trim();
+  $('#popA').innerHTML = state.v === 'a' && on ? `<div class="pop-a sres" role="listbox">${results()}</div>` : '';
+  if (state.v === 'a' && on) bindResults();
+  if (state.v === 'b' && on) {
+    const had = !!$('#palQ');
+    $('#palB').innerHTML = palette();
+    const pq = $('#palQ'); pq.focus(); pq.setSelectionRange(pq.value.length, pq.value.length);
+    pq.addEventListener('input', () => { state.q = pq.value; state.palProj = null; $('#gq').value = state.q; renderSearch(); renderState(); });
+    $('#scrimB').addEventListener('click', closeSearch);
+    document.querySelectorAll('[data-pal]').forEach(b => b.addEventListener('mouseenter', () => { state.palProj = b.dataset.pal; renderSearch(); }));
+    void had;
+  } else $('#palB').innerHTML = '';
+  if (state.v === 'c') renderSide();
+}
+function closeSearch() { state.q = ''; state.palProj = null; $('#gq').value = ''; renderSearch(); renderState(); $('#gq').blur(); }
+$('#gq').addEventListener('input', e => { state.q = e.target.value; state.sel = 0; renderSearch(); renderState(); });
+$('#gq').addEventListener('keydown', e => {
+  const n = document.querySelectorAll('[data-r]').length;
+  if (e.key === 'ArrowDown') { e.preventDefault(); state.sel = Math.min(n - 1, state.sel + 1); bindResults(); }
+  if (e.key === 'ArrowUp') { e.preventDefault(); state.sel = Math.max(0, state.sel - 1); bindResults(); }
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') { closeSearch(); closeOnb(); }
+  if (e.key.toLowerCase() === 'k' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); $('#gq').focus(); }
+});
+
+/* ═════ Onboarding pick step ═════ */
+function openOnb() {
+  state.pick = new Set(state.mode === 'picked' && state.mine.size ? state.mine : PROJECTS.filter(p => p.mins < 14 * D && p.id !== 'Claude scratch chats').slice(0, 5).map(p => p.id));
+  state.pickQ = ''; state.olderOpen = false; $('#onb').dataset.state = 'open'; renderOnb(true);
+}
+function closeOnb() { $('#onb').dataset.state = 'closed'; }
+function pickLists() {
+  const q = state.pickQ.trim().toLowerCase(), m = p => !q || p.id.toLowerCase().includes(q);
+  return { recent: PROJECTS.filter(p => !p.older && m(p)), older: PROJECTS.filter(p => p.older && m(p)), open: state.olderOpen || !!q };
+}
+const sub = p => `${p.n} chat${p.n === 1 ? '' : 's'} · ${when(p.mins)} ago`;
+function pickRow(p) {
+  return `<button class="pk-row ${p.older ? 'dim' : ''}" type="button" role="checkbox" data-tog="${esc(p.id)}" aria-checked="${state.pick.has(p.id)}"><span class="cbox">${icon('check', 'sm')}</span>${glyph(p, 20)}
+    <span class="two"><span>${esc(p.id)}</span><small>${sub(p)}</small></span><span class="logos">${p.providers.map(id => logo(id, 'sm')).join('')}</span></button>`;
+}
+function pickTile(p) {
+  return `<button class="pk-tile ${p.older ? 'dim' : ''}" type="button" role="checkbox" data-tog="${esc(p.id)}" aria-checked="${state.pick.has(p.id)}"><span class="cbox">${icon('check', 'sm')}</span>${glyph(p, 28)}
+    <span class="nm">${esc(p.id)}</span><small>${sub(p)}</small><span class="logos" style="display:flex;gap:4px">${p.providers.map(id => logo(id, 'sm')).join('')}</span></button>`;
+}
+function renderOnb(focus) {
+  const { recent, older, open } = pickLists();
+  const olderBtn = older.length ? `<button class="pk-row pk-older" type="button" id="pkOlder">${icon(open ? 'chevron-down' : 'chevron-right', 'sm')}Older · no activity in 30 days (${older.length})</button>` : '';
+  const search = `<label class="pk-search">${icon('search', 'sm')}<input id="pkQ" type="search" placeholder="Search ${PROJECTS.length} projects" value="${esc(state.pickQ)}" autocomplete="off"></label>`;
+  let body;
+  if (state.v === 'b') body = `${search}<div class="pk-grid">${recent.map(pickTile).join('')}${open ? older.map(pickTile).join('') : ''}</div>${olderBtn ? `<div>${olderBtn}</div>` : ''}`;
+  else {
+    const list = `<div class="pk-list">${recent.map(pickRow).join('')}${olderBtn}${open ? older.map(pickRow).join('') : ''}</div>`;
+    if (state.v === 'c') {
+      const prev = PROJECTS.filter(p => state.pick.has(p.id));
+      body = `<div class="pk-split"><div style="display:flex;flex-direction:column;gap:var(--space-3)">${search}${list}</div>
+        <div class="pk-preview"><div class="side-title">Your sidebar</div>${prev.map(p => `<div class="tc-proj">${glyph(p, 16)}<span class="nm">${esc(p.id)}</span>${badges(p)}</div>`).join('') || '<div class="side-empty">Nothing picked yet</div>'}</div></div>`;
+    } else body = `${search}${list}`;
+  }
+  $('#onbStage').className = 'onb-stage' + (state.v !== 'a' ? ' wide' : '');
+  $('#onbStage').innerHTML = `<div class="onb-pane"><h1>Which projects do you work on?</h1>
+    <p class="lead">We found ${PROJECTS.length} projects. Pick the ones you're working on now; the sidebar shows just these. Everything else stays in All chats and Projects.</p>
+    ${body}
+    <div class="onb-foot"><button class="btn ghost" type="button" id="pkBack">Back</button><span class="grow">${state.pick.size} picked · change any time in the sidebar</span>
+      <button class="btn ghost" type="button" id="pkSkip">Skip</button><button class="btn primary" type="button" id="pkGo">Continue</button></div></div>`;
+  const q = $('#pkQ');
+  q.addEventListener('input', () => { state.pickQ = q.value; renderOnb(true); });
+  if (focus) { q.focus(); q.setSelectionRange(q.value.length, q.value.length); }
+  $('#pkOlder')?.addEventListener('click', () => { state.olderOpen = !state.olderOpen; renderOnb(); });
+  document.querySelectorAll('[data-tog]').forEach(b => b.addEventListener('click', () => { const id = b.dataset.tog; state.pick.has(id) ? state.pick.delete(id) : state.pick.add(id); renderOnb(); renderState(); }));
+  $('#pkGo').addEventListener('click', () => { state.mine = new Set(state.pick); state.mode = state.mine.size ? 'picked' : 'empty'; closeOnb(); render(); });
+  $('#pkSkip').addEventListener('click', () => { state.mine = new Set(state.pick); state.mode = 'picked'; closeOnb(); render(); });
+  $('#pkBack').addEventListener('click', closeOnb);
+}
+$('#openOnb').addEventListener('click', openOnb);
+
+/* ═════ Variants, modes, state readout ═════ */
+const NOTES = {
+  a: 'A · Tree: each project is a collapsible row with its chats indented under it. Badges sit on the row; hover swaps them for a remove star. Search opens a dropdown under the field. The onboarding step is a checklist.',
+  b: 'B · Cards + palette: each project is a small card with a one-line summary ("1 running · 2 need you"). Typing opens a wide palette with projects on the left and that project\'s chats on the right. The onboarding step is a tile grid.',
+  c: 'C · Focus rail: projects are compact rows and only one is open at a time, showing its chats. Search replaces the sidebar list in place (Esc restores it). The onboarding step shows a live preview of your sidebar.',
+};
+function setVariant(v) {
+  state.v = v; closeSearch();
+  const u = new URL(location); u.searchParams.set('v', v); history.replaceState(null, '', u);
+  render(); if ($('#onb').dataset.state === 'open') renderOnb();
+}
+document.querySelectorAll('.vbar [data-v]').forEach(b => b.addEventListener('click', () => setVariant(b.dataset.v)));
+document.querySelectorAll('.vbar [data-mode]').forEach(b => b.addEventListener('click', () => { state.mode = b.dataset.mode; render(); }));
+document.addEventListener('keydown', e => {
+  if (/INPUT|TEXTAREA/.test(document.activeElement.tagName)) return;
+  const i = VARIANTS.indexOf(state.v);
+  if (e.key === ']') setVariant(VARIANTS[(i + 1) % 3]);
+  if (e.key === '[') setVariant(VARIANTS[(i + 2) % 3]);
+});
+function renderState() {
+  document.querySelectorAll('.vbar [data-v]').forEach(b => b.setAttribute('aria-pressed', b.dataset.v === state.v));
+  document.querySelectorAll('.vbar [data-mode]').forEach(b => b.setAttribute('aria-pressed', b.dataset.mode === state.mode));
+  $('#vstate').textContent = `v=${state.v} mode=${state.mode} myProjects=${state.mode === 'never' ? 'null' : state.mode === 'empty' ? '[]' : `[${[...state.mine].join(', ')}]`} q="${state.q}"${state.pick ? ` picking=${state.pick.size}` : ''}`;
+}
+function render() { $('#note').textContent = NOTES[state.v]; renderSide(); renderSearch(); renderState(); bindTooltips($('.sidebar')); }
+document.querySelectorAll('[data-icon]').forEach(el => { el.outerHTML = icon(el.dataset.icon, el.dataset.size || ''); });
+render();
+</script>
+</body>
+</html>
