@@ -79,6 +79,7 @@ export class ChatService {
   /** Errors already reported, per chat: one failed resume is shared by concurrent callers of the SAME chat only. */
   private reported = new WeakMap<object, Set<string>>();
   private historyGates = new Map<string, Promise<void>>();
+  private outgoing: (provider: ProviderId, text: string) => string;
 
   constructor(opts: {
     store: Store;
@@ -87,7 +88,10 @@ export class ChatService {
     broadcast: (e: ServerEvent) => void;
     claudeHome: string;
     now?: () => Date;
+    /** The text an adapter receives for what the user typed (a `/skill` in the provider's own form). */
+    outgoing?: (provider: ProviderId, text: string) => string;
   }) {
+    this.outgoing = opts.outgoing ?? ((_, t) => t);
     this.store = opts.store;
     this.adapters = typeof (opts.adapters as AdapterSource).onAdapter === 'function' ? (opts.adapters as AdapterSource) : AdapterRegistry.of(opts.adapters as Partial<Record<ProviderId, ProviderAdapter>>);
     this.usage = opts.usage;
@@ -114,7 +118,7 @@ export class ChatService {
     // Answer as soon as the card exists (running, "Getting started…"): a cold Antigravity takes a minute or two to
     // open a session. The session arrives by chat.updated; a failure moves the card to Needs you with the error.
     // begin() marks the chat pending synchronously, so a message or answer sent meanwhile waits for it.
-    void this.begin(chat, input.prompt);
+    void this.begin(chat, this.outgoing(chat.provider, input.prompt));
     return chat;
   }
 
@@ -134,8 +138,9 @@ export class ChatService {
     this.userStopped.delete(chatId); // the user moved on: the new turn's events count
     this.addMessage(chatId, 'user', text);
     this.transition(chatId, { type: 'user.message' });
-    if (!chat.sessionRef) await this.begin(chat, text);
-    else await this.deliver(chat, text);
+    const out = this.outgoing(chat.provider, text);
+    if (!chat.sessionRef) await this.begin(chat, out);
+    else await this.deliver(chat, out);
   }
 
   async answer(chatId: string, requestId: string, decision: Decision): Promise<void> {
@@ -253,7 +258,7 @@ export class ChatService {
     this.addMessage(chat.id, 'user', text);
     this.broadcast({ type: 'chat.updated', chat });
     this.replayBuffered(h.provider, h.sessionRef, chat.id);
-    await this.deliver(chat, text);
+    await this.deliver(chat, this.outgoing(chat.provider, text));
     return this.store.getChat(chat.id)!;
   }
 

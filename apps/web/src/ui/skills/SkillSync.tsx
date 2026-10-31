@@ -23,6 +23,12 @@ export function useSkills(): { report: SkillsReport | null; setReport: (r: Skill
   return { report, setReport };
 }
 
+/** Every home provider skill, for the composer's `/` list. */
+export function useSkillNames(): string[] {
+  const { report } = useSkills();
+  return report?.available ?? [];
+}
+
 function useSaveSettings() {
   const store = useStoreInstance();
   return useCallback(async (patch: { homeProvider?: ProviderId; skillSync?: boolean }) => {

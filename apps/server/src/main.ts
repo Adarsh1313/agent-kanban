@@ -20,6 +20,7 @@ import { FolderPicker } from './folder-picker.ts';
 import { FolderOpener } from './folder-opener.ts';
 import { SettingsStore } from './settings.ts';
 import { SkillService } from './skills/service.ts';
+import { skillForm } from './skills/form.ts';
 import { AdapterRegistry } from './adapters/registry.ts';
 import { findBinary } from './binaries.ts';
 import { createApi } from './api.ts';
@@ -84,7 +85,10 @@ for (const id of PROVIDERS) {
 const usage = new UsageService({
   readers, store, onUpdate: (reading) => broadcast({ type: 'usage.updated', reading }),
 });
-const chats = new ChatService({ store, adapters, usage, broadcast: (e) => broadcast(e), claudeHome: join(home, '.claude') });
+// Set once skills exists: a `/skill` the user picked is sent in each provider's own form.
+let skillNames: () => string[] = () => [];
+const chats = new ChatService({ store, adapters, usage, broadcast: (e) => broadcast(e), claudeHome: join(home, '.claude'),
+  outgoing: (provider, text) => skillForm(provider, text, skillNames()) });
 /** Set once ConnectService exists; the monitor's first check runs after that. */
 let connectRef: ConnectService | null = null;
 const connections = new ConnectionMonitor({
@@ -120,6 +124,7 @@ const connect = new ConnectService({
 connectRef = connect;
 // Skill sync writes into the provider homes; AGENT_KANBAN_SKILLS_HOME points it elsewhere for manual tests.
 const skills = new SkillService({ home: process.env.AGENT_KANBAN_SKILLS_HOME ? resolve(process.env.AGENT_KANBAN_SKILLS_HOME) : home, settings: () => settings.get() });
+skillNames = () => skills.names();
 const api = createApi({ chats, usage, history: () => readAllHistory(home), token, connections, adapters, connect, settings, skills, folderPicker: new FolderPicker(), folderOpener: new FolderOpener(),
   transcript: (provider, sessionRef) => readTranscript(home, provider, sessionRef) });
 broadcast = api.broadcast;

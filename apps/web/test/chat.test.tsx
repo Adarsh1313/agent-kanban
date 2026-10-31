@@ -13,12 +13,12 @@ import { Toasts } from '../src/ui/primitives/toast.tsx';
 import { Dialog } from '../src/ui/primitives/Dialog.tsx';
 import { chat, message } from './helpers.ts';
 
-const FNS = ['listMessages', 'listRequests', 'listToolCalls', 'send', 'answer', 'stop', 'done', 'archive', 'patchChat', 'continueHistory', 'historyMessages', 'openFolder'] as const;
+const FNS = ['listMessages', 'listRequests', 'listToolCalls', 'send', 'answer', 'stop', 'done', 'archive', 'patchChat', 'continueHistory', 'historyMessages', 'openFolder', 'skills'] as const;
 type Fn = (typeof FNS)[number];
 
 vi.mock('../src/api/client.ts', async (orig) => {
   const m = await orig<typeof import('../src/api/client.ts')>();
-  const fns = Object.fromEntries(['listMessages', 'listRequests', 'listToolCalls', 'send', 'answer', 'stop', 'done', 'archive', 'patchChat', 'continueHistory', 'historyMessages', 'openFolder'].map((k) => [k, vi.fn()]));
+  const fns = Object.fromEntries(['listMessages', 'listRequests', 'listToolCalls', 'send', 'answer', 'stop', 'done', 'archive', 'patchChat', 'continueHistory', 'historyMessages', 'openFolder', 'skills'].map((k) => [k, vi.fn()]));
   return { ...m, api: { ...m.api, ...fns } };
 });
 
@@ -50,6 +50,7 @@ function thread(messages: Message[] = [], requests: OpenRequest[] = [], calls: T
 beforeEach(() => {
   for (const k of FNS) mocked[k].mockReset();
   mocked.historyMessages.mockResolvedValue({ messages: [], truncated: false, unavailable: true });
+  mocked.skills.mockResolvedValue({ synced: [], skipped: [], available: [] });
   thread();
 });
 afterEach(() => {
@@ -283,6 +284,27 @@ describe('Chat panel: requests and composer', () => {
     fireEvent.keyDown(box, { key: 'Enter' });
     await waitFor(() => expect(screen.getByText('Chat not found.')).toBeTruthy());
     expect(box.value).toBe('again');
+  });
+
+  it('a leading / lists the skills as a listbox; Enter picks one, then sends it as typed', async () => {
+    mocked.skills.mockResolvedValue({ synced: [], skipped: [], available: ['grill', 'tdd', 'triage'] });
+    mocked.send.mockResolvedValue(undefined);
+    mount(seeded([chat({ title: 'Talk', column: 'review' })]));
+    fireEvent.click(card('Talk'));
+    const box = within(panel()).getByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement;
+    await flush();
+    fireEvent.change(box, { target: { value: '/t' } });
+    const list = await within(panel()).findByRole('listbox', { name: 'Skills' });
+    expect(within(list).getAllByRole('option').map((o) => o.textContent)).toEqual(['/tdd', '/triage']);
+    fireEvent.keyDown(box, { key: 'ArrowDown' });
+    expect(within(list).getByRole('option', { name: '/triage' }).getAttribute('aria-selected')).toBe('true');
+    fireEvent.keyDown(box, { key: 'Enter' });
+    expect(box.value).toBe('/triage ');
+    expect(within(panel()).queryByRole('listbox')).toBeNull();
+    expect(mocked.send).not.toHaveBeenCalled();
+    fireEvent.change(box, { target: { value: '/triage the bug' } });
+    fireEvent.keyDown(box, { key: 'Enter' });
+    expect(mocked.send).toHaveBeenCalledWith('c1', '/triage the bug');
   });
 
   it('header shows Stop while running and Mark done in Review', async () => {

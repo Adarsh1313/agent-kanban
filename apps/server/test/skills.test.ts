@@ -98,3 +98,13 @@ test('GET /api/skills reports synced and skipped skills; picking a home provider
     skills.stop(); api.close(); api.server.closeAllConnections(); api.server.close();
   }
 });
+
+test('a picked skill reaches each provider in its own form', async () => {
+  const { skillForm } = await import('../src/skills/form.ts');
+  const names = ['grill'];
+  assert.equal(skillForm('claude', '/grill the plan', names), '/grill the plan');
+  assert.equal(skillForm('codex', '/grill the plan', names), '$grill the plan');
+  assert.match(skillForm('antigravity', '/grill the plan', names), /^Run the "grill" workflow from your skills\.\n\nthe plan$/);
+  assert.equal(skillForm('codex', '/other x', names), '/other x');
+  assert.equal(skillForm('codex', 'see /grill', names), 'see /grill');
+});
