@@ -7,7 +7,7 @@ import { existsSync, realpathSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { timingSafeEqual } from 'node:crypto';
 import { WebSocketServer, WebSocket } from 'ws';
-import type { ConnectionHealth, HistoryChat, ModelOption, ProviderId, ServerEvent } from '@agent-kanban/shared';
+import type { ConnectionHealth, HistoryChat, SkillsReport, ModelOption, ProviderId, ServerEvent } from '@agent-kanban/shared';
 import { ActiveElsewhereError, CantContinueError } from './chats.ts';
 import { ConnectBusyError, ConnectStateError } from './connect/service.ts';
 import { PickerBusyError } from './folder-picker.ts';
@@ -98,6 +98,8 @@ export function createApi(opts: {
   adapters?: { get(id: ProviderId): ProviderAdapter | undefined };
   connect?: Pick<ConnectService, 'states' | 'install' | 'signIn' | 'signOut' | 'update' | 'cancel' | 'openSignInPage'>;
   settings?: SettingsStore;
+  /** Skill sync (#40): the last report, Sync now and the home provider's skill names. */
+  skills?: { report(): SkillsReport; sync(): SkillsReport; names(): string[] };
   /** Past messages of a chat that is only in the provider's history (#16). */
   transcript?: (provider: ProviderId, sessionRef: string) => Promise<Transcript>;
   /** New chat's "Browse…": shows the native folder picker (#24). */
@@ -300,6 +302,14 @@ export function createApi(opts: {
       if (!run) throw new HttpError(404, 'Not found.');
       return { status: 202, body: await run() };
     }
+    if (match('GET', '/api/skills')) {
+      if (!opts.skills) throw new HttpError(404, 'Not found.');
+      return { status: 200, body: { ...opts.skills.report(), available: opts.skills.names() } };
+    }
+    if (match('POST', '/api/skills/sync')) {
+      if (!opts.skills) throw new HttpError(404, 'Not found.');
+      return { status: 200, body: { ...opts.skills.sync(), available: opts.skills.names() } };
+    }
     if (match('GET', '/api/settings')) {
       if (!settings) throw new HttpError(404, 'Not found.');
       return { status: 200, body: settings.get() };
@@ -312,6 +322,8 @@ export function createApi(opts: {
         if (e instanceof SettingsError) throw new HttpError(400, e.message);
         throw e;
       }
+      // A new home provider or the sync switch takes effect at once.
+      if ('homeProvider' in b || 'skillSync' in b) opts.skills?.sync();
       // Other open pages (a second tab) follow the change.
       broadcast({ type: 'settings.updated', settings: next });
       return { status: 200, body: next };

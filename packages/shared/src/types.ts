@@ -138,6 +138,8 @@ export interface Settings {
 export interface SkillsReport {
   synced: string[];
   skipped: { name: string; provider: ProviderId }[];
+  /** Every home provider skill, for the composer's `/` list (sent by GET /api/skills). */
+  available?: string[];
 }
 
 export interface Project {

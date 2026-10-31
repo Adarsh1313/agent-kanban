@@ -70,3 +70,31 @@ test('withBlock removes only the block', () => {
   assert.equal(withBlock(t, null), 'top\n\nbottom-less\n');
   assert.equal(withBlock('a\n' + withBlock('', 'x') + '\nb', null), 'a\n\nb\n');
 });
+
+// ---- HTTP API ----
+
+test('GET /api/skills reports synced and skipped skills; picking a home provider syncs; POST /api/skills/sync reruns', async () => {
+  const { Store } = await import('../src/store.ts');
+  const { SettingsStore } = await import('../src/settings.ts');
+  const { SkillService } = await import('../src/skills/service.ts');
+  const { createApi } = await import('../src/api.ts');
+  const home = tempHome();
+  skill(join(home, '.claude', 'skills'), 'grill');
+  skill(join(home, '.codex', 'skills'), 'grill', 'mine');
+  const settings = new SettingsStore(new Store(join(home, 'ak.db')));
+  const skills = new SkillService({ home, settings: () => settings.get() });
+  const api = createApi({ chats: { listChats: () => [] } as any, usage: { latest: () => [] } as any, history: async () => [], token: 'tok', settings, skills });
+  await new Promise<void>((r) => api.server.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${(api.server.address() as import('node:net').AddressInfo).port}`;
+  const f = (path: string, init: RequestInit = {}) => fetch(base + path, { ...init, headers: { Authorization: 'Bearer tok', 'Content-Type': 'application/json' } }).then((r) => r.json());
+  try {
+    assert.deepEqual(await f('/api/skills'), { synced: [], skipped: [], available: [] });
+    await f('/api/settings', { method: 'PATCH', body: JSON.stringify({ homeProvider: 'claude' }) });
+    assert.deepEqual(await f('/api/skills'), { synced: ['grill'], skipped: [{ name: 'grill', provider: 'codex' }], available: ['grill'] });
+    skill(join(home, '.claude', 'skills'), 'tdd');
+    assert.deepEqual((await f('/api/skills/sync', { method: 'POST' })).synced, ['grill', 'tdd']);
+    assert.ok(existsSync(join(home, '.gemini', 'antigravity', 'skills', 'tdd', MARKER)));
+  } finally {
+    skills.stop(); api.close(); api.server.closeAllConnections(); api.server.close();
+  }
+});

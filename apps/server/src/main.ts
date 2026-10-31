@@ -19,6 +19,7 @@ import { STOP_REQUEST_FILE, watchStopRequest } from './stop-request.ts';
 import { FolderPicker } from './folder-picker.ts';
 import { FolderOpener } from './folder-opener.ts';
 import { SettingsStore } from './settings.ts';
+import { SkillService } from './skills/service.ts';
 import { AdapterRegistry } from './adapters/registry.ts';
 import { findBinary } from './binaries.ts';
 import { createApi } from './api.ts';
@@ -117,11 +118,14 @@ const connect = new ConnectService({
   home: akHome,
 });
 connectRef = connect;
-const api = createApi({ chats, usage, history: () => readAllHistory(home), token, connections, adapters, connect, settings, folderPicker: new FolderPicker(), folderOpener: new FolderOpener(),
+// Skill sync writes into the provider homes; AGENT_KANBAN_SKILLS_HOME points it elsewhere for manual tests.
+const skills = new SkillService({ home: process.env.AGENT_KANBAN_SKILLS_HOME ? resolve(process.env.AGENT_KANBAN_SKILLS_HOME) : home, settings: () => settings.get() });
+const api = createApi({ chats, usage, history: () => readAllHistory(home), token, connections, adapters, connect, settings, skills, folderPicker: new FolderPicker(), folderOpener: new FolderOpener(),
   transcript: (provider, sessionRef) => readTranscript(home, provider, sessionRef) });
 broadcast = api.broadcast;
 
 chats.recoverAfterRestart();
+skills.sync();
 
 const rawPort = process.env.AGENT_KANBAN_PORT;
 let port = 0;
@@ -161,6 +165,7 @@ async function shutdown(): Promise<void> {
   stopping = true;
   usage.stop();
   connections.stop();
+  skills.stop();
   // Installs and sign-ins in progress are cancelled; their process trees are killed before we exit.
   const connectDone = connect.dispose().catch(() => {});
   api.server.close();
