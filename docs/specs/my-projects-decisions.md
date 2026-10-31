@@ -32,7 +32,17 @@ Terms are in `GLOSSARY.md`.
 13. **Claude scratch chats** can be picked as one project. Temp-folder projects never appear in the picker.
 14. **Badges:** a project row shows a running dot and a count of needs-you + review chats.
 15. **Collapsing:** each sidebar project can collapse to its name row. This is remembered per project on this device (browser storage).
-16. **Design:** `/prototype` 2–3 variants of the sidebar project block, the search dropdown and the onboarding pick step, then `/to-spec`.
+16. **Design: prototype verdict, variant B "Cards + palette"** (2026-10-31; the prototype is on branch `prototype/my-projects`, `design/prototype-my-projects.html?v=b`). Variants A (a tree with a dropdown) and C (a one-project-open rail with search shown in place) were rejected.
+   - **Sidebar project block:** each project in My projects is a small card.
+     - The header has the project glyph, the name, and one summary line: running · N need you · last active.
+     - The body lists its chats, then "N more in All chats".
+     - Clicking the header collapses the card (decision 15).
+     - The summary line replaces the separate badges in decision 14.
+   - **Global search is a palette, not a dropdown** (this refines decision 9). Typing in the sidebar field, or pressing `Ctrl+K`, opens a wide palette centred over a dimmed page:
+     - The left column lists matching projects.
+     - The right column lists matching chats, or, when a project is highlighted, that project's chats.
+     - "See all results in All chats" sits at the bottom, and Esc closes the palette.
+   - **Onboarding pick step:** a grid of project tiles (glyph, name, chat count with last active, provider logos, a check in the corner), with search above it and "Older · no activity in 30 days (n)" below it.
 
 ## Implementation notes (not grilled; obvious defaults)
 
