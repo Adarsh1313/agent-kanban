@@ -677,3 +677,25 @@ test('a permission says what it is for: file edits, shell commands, any other to
   for (const n of ['Bash', 'BashOutput', 'KillShell', 'PowerShell']) assert.equal(claudeAction(n), 'command');
   for (const n of ['WebFetch', 'mcp__x__y', 'Read']) assert.equal(claudeAction(n), 'tool');
 });
+
+test('a rejected rate limit that fails the turn is out of usage with its reset time (#39)', async () => {
+  const rejected = { type: 'rate_limit_event', rate_limit_info: { status: 'rejected', resetsAt: 1_793_000_000 }, session_id: 's' };
+  const f = fake(async function* (_o, input) { await input.next(); yield init(); yield rejected; yield result({ is_error: true, result: "You've hit your limit" }); await never(); });
+  const a = new ClaudeAdapter({ claudePath: 'c', query: f.query });
+  const ev = collect(a);
+  await a.startChat({ cwd: '.', prompt: 'go' });
+  await tick();
+  assert.deepEqual(ev.at(-1), { type: 'limit.reached', sessionRef: 'sess-1', resetsAt: new Date(1_793_000_000_000).toISOString() });
+  await a.dispose();
+});
+
+test('a rejection that overage covered still completes the turn', async () => {
+  const rejected = { type: 'rate_limit_event', rate_limit_info: { status: 'rejected', resetsAt: 1_793_000_000 }, session_id: 's' };
+  const f = fake(async function* (_o, input) { await input.next(); yield init(); yield rejected; yield result(); await never(); });
+  const a = new ClaudeAdapter({ claudePath: 'c', query: f.query });
+  const ev = collect(a);
+  await a.startChat({ cwd: '.', prompt: 'go' });
+  await tick();
+  assert.equal(ev.at(-1).type, 'turn.completed');
+  await a.dispose();
+});

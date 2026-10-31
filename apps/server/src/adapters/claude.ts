@@ -228,7 +228,8 @@ export class ClaudeAdapter implements ProviderAdapter {
       this.scheduleIdleClose(chat);
       if (swallow) return;
       const text = typeof m.result === 'string' ? m.result : '';
-      if (limit !== undefined || (m.is_error && LIMIT_TEXT.test(text))) {
+      // A rejection that overage covered still ends the turn normally: only a failed turn is out of usage.
+      if (m.is_error && (limit !== undefined || LIMIT_TEXT.test(text))) {
         this.emit(limit ? { type: 'limit.reached', sessionRef, resetsAt: limit } : { type: 'limit.reached', sessionRef });
       } else if (m.is_error) this.emit({ type: 'error', sessionRef, message: typeof m.result === 'string' && m.result ? m.result : 'Claude Code ran into a problem.' });
       else this.emit({ type: 'turn.completed', sessionRef });
