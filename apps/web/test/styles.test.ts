@@ -12,4 +12,10 @@ describe('global stylesheets', () => {
       expect(bare, rel).toEqual([]);
     }
   });
+
+  it('menus open above the chat panel, so its "…" menu shows (#36)', () => {
+    const css = read('../../../design/components.css');
+    const z = (sel: string) => Number(new RegExp(`^\\${sel} \\{[^}]*?z-index: (\\d+)`, 'm').exec(css)?.[1]);
+    expect(z('.popover')).toBeGreaterThan(z('.panel'));
+  });
 });

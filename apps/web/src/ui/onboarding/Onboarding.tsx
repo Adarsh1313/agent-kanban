@@ -12,7 +12,7 @@ import { chime, desktopSupport, enableDesktop, getPrefs, primeAudio, setPrefs, s
 import { freeze, unfreeze } from '../primitives/Dialog.tsx';
 import { pushLayer } from '../primitives/layers.ts';
 import { cssMs, cssValue, reducedMotion } from '../primitives/motion.ts';
-import { Icon, PROVIDER_IDS, ProviderLogo, providerName, StatusIcon, Switch, toast, type StatusState } from '../primitives/index.ts';
+import { Icon, PROVIDER_IDS, ProviderLogo, providerName, StatusIcon, Switch, toast, Tooltip, type StatusState } from '../primitives/index.ts';
 import { navigate } from '../shell/route.ts';
 
 /* First-run onboarding (design/onboarding.js): Welcome → Connect → Bring in your chats → Notifications → Ready. */
@@ -464,7 +464,10 @@ export function Onboarding() {
               <Switch checked={deskOn} label="Desktop notifications" disabled={support === 'unsupported'} describedBy={reason ? deskNote : undefined} onChange={(v) => void changeDesktop(v)} />
             </div>
             <div className="toggle-row">
-              <span>Sound<small>A soft chime. <button className="link-btn onb-play" type="button" onClick={() => { primeAudio(); chime(false); }}>Play it</button></small></span>
+              <span>Sound<small>A soft chime</small></span>
+              <Tooltip label="Play the chime">
+                <button className="btn icon-only ghost" type="button" aria-label="Play the chime" onClick={() => { primeAudio(); chime(false); }}><Icon name="volume" /></button>
+              </Tooltip>
               <Switch checked={prefs.sound} label="Sound" onChange={(v) => {
                 setPrefs({ sound: v });
                 // The switch is a gesture: create the audio context now and play a preview.

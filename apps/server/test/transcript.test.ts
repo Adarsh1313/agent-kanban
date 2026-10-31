@@ -78,3 +78,16 @@ test('unknown chats, Antigravity and path-like session refs are unavailable, nev
     assert.deepEqual(await readTranscript(h, p, ref), { messages: [], truncated: false, unavailable: true }, `${p} ${ref}`);
   }
 });
+
+test('Codex: an active chat written as a plain .jsonl rollout is read, and wins over a .zst copy (#36)', async () => {
+  const h = mkdtempSync(join(tmpdir(), 'ak-transcript-'));
+  const day = join(h, '.codex', 'sessions', '2026', '10', '31');
+  mkdirSync(day, { recursive: true });
+  const msg = (role: string, type: string, text: string) => ({ type: 'response_item', payload: { type: 'message', role, content: [{ type, text }] } });
+  const base = join(day, `rollout-2026-10-31T13-00-24-${CODEX_ID}.jsonl`);
+  writeFileSync(base, lines([{ type: 'session_meta', payload: { cwd: '/work/app' } }, msg('user', 'input_text', 'Live question'), msg('assistant', 'output_text', 'Live answer')]));
+  writeFileSync(base + '.zst', zstdCompressSync(Buffer.from(lines([msg('user', 'input_text', 'Stale copy')]))));
+  const t = await readTranscript(h, 'codex', CODEX_ID);
+  assert.equal(t.unavailable, false);
+  assert.deepEqual(t.messages.map((m) => m.text), ['Live question', 'Live answer']);
+});
