@@ -3,7 +3,7 @@ import type { ConnectionHealth, ModelOption, Project, ProviderId, UsageReading }
 import { folderKey } from '@agent-kanban/shared';
 import { ApiError, api } from '../../api/client.ts';
 import type { AppState } from '../../state/reducer.ts';
-import { baseName, focusedProvider, suggestFor } from '../../state/selectors.ts';
+import { baseName, focusedProvider, suggestFor, visibleProjects } from '../../state/selectors.ts';
 import { useStore } from '../../state/store.ts';
 import { setNewChatHandler, type NewChatOptions } from '../actions.ts';
 import { Dialog, Icon, Popover, PROVIDER_IDS, ProviderLogo, providerName, toast } from '../primitives/index.ts';
@@ -118,7 +118,7 @@ type Picker = 'project' | 'provider' | 'model' | null;
 /** A known project (by id), or a folder typed by hand. */
 type Where = { kind: 'project'; id: string } | { kind: 'path' };
 
-const pickState = (s: AppState) => ({ projects: s.projects, connections: s.connections, usage: s.usage, suggested: s.suggested, settings: s.settings, focus: focusedProvider(s), loaded: s.loaded });
+const pickState = (s: AppState) => ({ projects: visibleProjects(s), connections: s.connections, usage: s.usage, suggested: s.suggested, settings: s.settings, focus: focusedProvider(s), loaded: s.loaded });
 
 export function NewChatDialog() {
   const st = useStore(pickState);

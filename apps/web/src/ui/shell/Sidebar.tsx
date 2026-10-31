@@ -1,6 +1,7 @@
 import type { ProviderId } from '@agent-kanban/shared';
+import { folderKey } from '@agent-kanban/shared';
 import { useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
-import { focusedProvider, isArchived, isSnoozed, memoState, pinned as pinnedChats, providerCounts, recentChatsByProject, type SidebarChat } from '../../state/selectors.ts';
+import { focusedProvider, hiddenFolders, isArchived, isSnoozed, memoState, pinned as pinnedChats, providerCounts, recentChatsByProject, type SidebarChat } from '../../state/selectors.ts';
 import { openChatIn, type AppState } from '../../state/reducer.ts';
 import { uniqueProjects } from '../projects/model.ts';
 import { useStore, useStoreInstance } from '../../state/store.ts';
@@ -102,7 +103,7 @@ function Recent() {
   // Memoized on the parts it reads, so streaming deltas do not re-sort every history chat.
   const select = useMemo(
     () => memoState(
-      (s) => [s.chats, s.history, s.projects, s.ui.filters, s.ui.archiving, s.now],
+      (s) => [s.chats, s.history, s.projects, s.settings, s.ui.filters, s.ui.archiving, s.now],
       (s) => recentChatsByProject(s, s.now, { projects: PROJECTS_SHOWN + 1, chats: CHATS_SHOWN }, expanded),
     ),
     [expanded],
@@ -171,7 +172,8 @@ const counts = (s: AppState) => {
     (c) => c.column !== null && c.column !== 'done' && !isArchived(s, c) && !isSnoozed(c, now),
   ).length;
   const connected = Object.values(s.connections).filter((c) => c?.status === 'connected' || c?.status === 'update_available').length;
-  return { board, projects: uniqueProjects(s).length, connections: connected };
+  const hidden = hiddenFolders(s);
+  return { board, projects: uniqueProjects(s).filter((p) => !hidden.has(folderKey(p.id))).length, connections: connected };
 };
 
 export function Sidebar() {

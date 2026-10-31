@@ -283,6 +283,14 @@ describe('finish', () => {
     fireEvent.click(primary('Continue'));
   };
 
+  it('leaves hidden projects and their chats out of the summary', () => {
+    const temp: Project = { ...project('/tmp/ak-claude-1', ['claude']), hidden: 'auto' };
+    const store = seeded([conn('claude')], { history: [...hist('claude', 4), ...hist('claude', 3, '/tmp/ak-claude-1').map((h) => ({ ...h, sessionRef: `t${h.sessionRef}` }))], projects: [project('/w/alpha', ['claude']), temp] });
+    mount(store);
+    toReady();
+    expect(screen.getByText('4 chats from 1 projects in the sidebar')).toBeTruthy();
+  });
+
   it('summarises, writes onboarded: true, closes, and opens New chat', async () => {
     mocked.patchSettings.mockResolvedValue(settings({ onboarded: true }));
     let focusAtOpen: Element | null = null;

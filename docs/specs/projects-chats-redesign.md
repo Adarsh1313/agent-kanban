@@ -151,9 +151,9 @@ the same ordering, hiding and naming rules.
 ## Progress
 
 - [x] Slice 1: server marks hidden (auto/manual) and folder-missing projects, groups Claude scratch chats; `hiddenProjects` setting with PATCH + broadcast (API tests)
-- [ ] Slice 2: web hides hidden projects everywhere (sidebar, board, picker, onboarding counts) via one visible-projects selector
+- [x] Slice 2: web hides hidden projects everywhere (sidebar, board, picker, onboarding counts) via one visible-projects selector
 - [ ] Slice 3: Projects page sorted by last activity, Show hidden projects switch, Hide project / Unhide, Folder missing note
 - [ ] Slice 4: Recent chats as a flat list of 10 (variant A rows, date on hover, All chats link)
 - [ ] Slice 5: All chats view: route, nav entry, list, search with highlight, Project/Provider filter menu + chips, sidebar search icon
-- [ ] Slice 6: New chat picker: Older (n) row, search opens it, folder-missing and scratch left out; Older label in the Project filter menu
+- [ ] Slice 6: New chat picker: Older (n) row, search opens it, folder-missing and scratch left out; Project filter menu by project (hidden left out, scratch as one, Older label)
 - [ ] Slice 7: glossary and README check, close #11

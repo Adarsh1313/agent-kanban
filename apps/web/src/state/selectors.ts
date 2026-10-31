@@ -1,5 +1,5 @@
 import type { Chat, Column, ProviderId } from '@agent-kanban/shared';
-import { folderKey } from '@agent-kanban/shared';
+import { folderKey, projectFolder } from '@agent-kanban/shared';
 import type { AppState, Filters } from './reducer.ts';
 
 const MINUTE = 60_000;
@@ -32,6 +32,23 @@ export const isSnoozed = (c: { snoozedUntil: string | null }, now: number) => c.
 /** Archived on the server, or archived here with its Undo toast still showing. */
 export const isArchived = (s: AppState, c: { id: string; archived: boolean }) => c.archived || s.ui.archiving[c.id] === true;
 export const baseName = (p: string) => p.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || p;
+
+/**
+ * Folders (by folderKey) whose chats are kept out of every list: projects the server hid automatically (temp folder),
+ * and the ones in the hiddenProjects setting. The setting wins over the server's 'manual' mark, so Hide and Unhide
+ * take effect before the project list is fetched again; before settings load, the server's mark is used.
+ */
+function buildHidden(s: AppState): ReadonlySet<string> {
+  const out = new Set<string>();
+  for (const p of s.projects) if (p.hidden === 'auto' || (p.hidden === 'manual' && !s.settings)) out.add(folderKey(p.id));
+  for (const f of s.settings?.hiddenProjects ?? []) out.add(folderKey(f));
+  return out;
+}
+export const hiddenFolders = memoState((s) => [s.projects, s.settings], buildHidden);
+/** The server's projects without the hidden ones: what the sidebar, New chat and onboarding count. */
+export const visibleProjects = memoState((s) => [s.projects, s.settings], (s) => s.projects.filter((p) => !hiddenFolders(s).has(folderKey(p.id))));
+/** True when a chat in this folder belongs to a hidden project (Claude scratch chats count as their one project). */
+export const inHiddenProject = (s: AppState, cwd: string) => hiddenFolders(s).has(folderKey(projectFolder(cwd)));
 
 /** A single-provider filter (set from the sidebar's provider rows or the Filter menu) focuses that provider. */
 export function focusedProvider(s: AppState): ProviderId | null {
@@ -68,7 +85,7 @@ const byRecent = (a: { updatedAt: string }, b: { updatedAt: string }) => (a.upda
 /** Board chats that pass the filters; archived and snoozed ones are hidden. */
 export function visibleChats(s: AppState, now: number = Date.now()): Chat[] {
   return Object.values(s.chats)
-    .filter((c) => c.column !== null && !isArchived(s, c) && !isSnoozed(c, now) && passes(c, s.ui.filters, now))
+    .filter((c) => c.column !== null && !isArchived(s, c) && !isSnoozed(c, now) && !inHiddenProject(s, c.cwd) && passes(c, s.ui.filters, now))
     .sort(byRecent);
 }
 
@@ -83,16 +100,16 @@ const toSidebar = (c: Chat): SidebarChat => ({
 });
 
 export function pinned(s: AppState, now: number = Date.now()): Chat[] {
-  return Object.values(s.chats).filter((c) => c.pinned && !isArchived(s, c) && !isSnoozed(c, now)).sort(byRecent);
+  return Object.values(s.chats).filter((c) => c.pinned && !isArchived(s, c) && !isSnoozed(c, now) && !inHiddenProject(s, c.cwd)).sort(byRecent);
 }
 
 function sidebarChats(s: AppState, now: number): SidebarChat[] {
   const known = new Set<string>();
   for (const c of Object.values(s.chats)) if (c.sessionRef) known.add(`${c.provider}\u0000${c.sessionRef}`);
   const f = s.ui.filters;
-  const fromBoard = Object.values(s.chats).filter((c) => !isArchived(s, c) && !c.pinned && !isSnoozed(c, now) && passes(c, f, now)).map(toSidebar);
+  const fromBoard = Object.values(s.chats).filter((c) => !isArchived(s, c) && !c.pinned && !isSnoozed(c, now) && !inHiddenProject(s, c.cwd) && passes(c, f, now)).map(toSidebar);
   const fromHistory: SidebarChat[] = s.history
-    .filter((h) => !known.has(`${h.provider}\u0000${h.sessionRef}`) && passes({ ...h, column: null, model: null, needsReason: null }, f, now))
+    .filter((h) => !known.has(`${h.provider}\u0000${h.sessionRef}`) && !inHiddenProject(s, h.cwd) && passes({ ...h, column: null, model: null, needsReason: null }, f, now))
     .map((h) => ({ key: `h:${h.provider}:${h.sessionRef}`, chatId: null, provider: h.provider, sessionRef: h.sessionRef, title: h.title, cwd: h.cwd, updatedAt: h.updatedAt, column: null, pinned: false }));
   return [...fromBoard, ...fromHistory];
 }
@@ -158,13 +175,13 @@ function countProviders(s: AppState): Record<ProviderId, number> {
   const known = new Set<string>();
   for (const c of Object.values(s.chats)) {
     if (c.sessionRef) known.add(`${c.provider}\u0000${c.sessionRef}`);
-    if (!isArchived(s, c)) counts[c.provider] += 1;
+    if (!isArchived(s, c) && !inHiddenProject(s, c.cwd)) counts[c.provider] += 1;
   }
-  for (const h of s.history) if (!known.has(`${h.provider}\u0000${h.sessionRef}`)) counts[h.provider] += 1;
+  for (const h of s.history) if (!known.has(`${h.provider}\u0000${h.sessionRef}`) && !inHiddenProject(s, h.cwd)) counts[h.provider] += 1;
   return counts;
 }
 
-export const providerCounts = memoState((s) => [s.chats, s.history, s.ui.archiving], countProviders);
+export const providerCounts = memoState((s) => [s.chats, s.history, s.ui.archiving, s.projects, s.settings], countProviders);
 
 /** The name to show for a project folder: the server's project name when known, else the folder's last part. */
 export function projectLabel(s: AppState, projectId: string): string {
