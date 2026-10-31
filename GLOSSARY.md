@@ -18,9 +18,13 @@ _Avoid_: Session, thread, task
 A folder on the user's computer that chats run in.
 _Avoid_: Repo, workspace
 
-**Recent chats**:
-The sidebar's list of the most recently active chats, newest first, each labelled with its project.
-_Avoid_: History, threads
+**My projects**:
+The projects the user picked as the ones they work on; the sidebar lists them, each with its newest chats. A project left out is still everywhere else.
+_Avoid_: Favourite projects, starred projects, Recent chats (replaced)
+
+**Global search**:
+The sidebar's search field that finds projects and chats by name and opens them.
+_Avoid_: Command palette, quick open
 
 **All chats**:
 The view listing every chat, on the board or only in a provider's history, searchable and filterable.
