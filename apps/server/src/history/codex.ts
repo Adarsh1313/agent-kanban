@@ -10,9 +10,10 @@ async function indexRollouts(dir: string, map: Map<string, string>): Promise<voi
   for (const e of entries) {
     const p = join(dir, e.name);
     if (e.isDirectory()) await indexRollouts(p, map);
-    else if (e.name.startsWith('rollout-') && e.name.endsWith('.jsonl.zst')) {
-      const m = /-([0-9a-fA-F-]{36})\.jsonl\.zst$/.exec(e.name);
-      if (m) map.set(m[1], p);
+    else if (e.name.startsWith('rollout-')) {
+      // Codex writes an active chat as plain .jsonl and older ones as .jsonl.zst; the plain file is the live one.
+      const m = /-([0-9a-fA-F-]{36})\.jsonl(\.zst)?$/.exec(e.name);
+      if (m && (!m[2] || !map.get(m[1])?.endsWith('.jsonl'))) map.set(m[1], p);
     }
   }
 }
@@ -24,9 +25,15 @@ export async function findRollout(codexHome: string, id: string): Promise<string
   return map.get(id) ?? null;
 }
 
+/** A rollout's text, from either form: plain .jsonl or zstd-compressed .jsonl.zst. */
+export async function readRollout(path: string): Promise<string> {
+  const buf = await readFile(path);
+  return (path.endsWith('.zst') ? zstdDecompressSync(buf) : buf).toString('utf8');
+}
+
 async function rolloutCwd(path: string): Promise<string> {
   try {
-    const text = zstdDecompressSync(await readFile(path)).toString('utf8');
+    const text = await readRollout(path);
     const line = text.split('\n', 1)[0];
     const rec = JSON.parse(line) as { type?: string; payload?: { cwd?: unknown } };
     return rec.type === 'session_meta' && typeof rec.payload?.cwd === 'string' ? rec.payload.cwd : '';

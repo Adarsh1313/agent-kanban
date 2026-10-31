@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -87,4 +87,15 @@ test('codex: a session listed more than once in the index appears once, with its
   const mine = chats.find((c) => c.sessionRef === id)!;
   assert.equal(mine.title, 'New name');
   assert.equal(mine.updatedAt, '2026-10-03T00:00:00.000Z');
+});
+
+test('codex: a plain .jsonl rollout gives the cwd too (#36)', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'ak-codex-'));
+  const id = '01a190dd-e821-7590-92f2-1ac5c1e9d2aa';
+  const day = join(home, 'sessions', '2026', '10', '31');
+  mkdirSync(day, { recursive: true });
+  writeFileSync(join(day, `rollout-2026-10-31T13-00-24-${id}.jsonl`), JSON.stringify({ type: 'session_meta', payload: { cwd: 'C:\Users\me\local-flow' } }) + '\n');
+  writeFileSync(join(home, 'session_index.jsonl'), JSON.stringify({ id, thread_name: 'Live chat', updated_at: '2026-10-31T07:31:48Z' }) + '\n');
+  const [chat] = await readCodexHistory(home);
+  assert.equal(chat?.cwd, 'C:\Users\me\local-flow');
 });
