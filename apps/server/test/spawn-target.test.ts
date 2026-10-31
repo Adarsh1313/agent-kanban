@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { resolveSpawnTarget } from '../src/adapters/spawn-target.ts';
+import { resolveSpawnTarget, scriptRunner } from '../src/adapters/spawn-target.ts';
 
 const dir = fileURLToPath(new URL('./fixtures/shims', import.meta.url));
 
@@ -24,4 +24,21 @@ test('non-windows, non-shim and unreadable paths pass through', () => {
   assert.deepEqual(resolveSpawnTarget(file, 'linux'), { command: file, args: [] });
   assert.deepEqual(resolveSpawnTarget('C:\\x\\codex.exe', 'win32'), { command: 'C:\\x\\codex.exe', args: [] });
   assert.deepEqual(resolveSpawnTarget('C:\\nope\\missing.cmd', 'win32'), { command: 'C:\\nope\\missing.cmd', args: [] });
+});
+
+test('inside the desktop app, scripts run on a console node.exe from PATH, never on the windowed app itself', () => {
+  const node = String.raw`C:\Program Files\nodejs\node.exe`;
+  const exists = (p: string) => p === node;
+  const PATH = String.raw`C:\Windows;C:\Program Files\nodejs\;C:\Users\a\AppData\Roaming\npm`;
+  assert.equal(scriptRunner({ electron: true, path: PATH, exists, execPath: String.raw`C:\Apps\Agent Kanban.exe` }), node);
+});
+
+test('inside the desktop app with no node.exe on PATH, the app runs scripts itself (last resort)', () => {
+  const app = String.raw`C:\Apps\Agent Kanban.exe`;
+  assert.equal(scriptRunner({ electron: true, path: String.raw`C:\Windows`, exists: () => false, execPath: app }), app);
+});
+
+test('in browser mode the server is plain Node, so scripts run on the same node', () => {
+  const node = String.raw`C:\node\node.exe`;
+  assert.equal(scriptRunner({ electron: false, path: String.raw`C:\Program Files\nodejs`, exists: () => true, execPath: node }), node);
 });

@@ -1,5 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import type { Chat, HistoryChat, Project, ProjectInfo, ProviderId } from '@agent-kanban/shared';
+import type { Chat, HistoryChat, Project, ProjectInfo, ProviderId, Settings } from '@agent-kanban/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError, api } from '../src/api/client.ts';
 import { applySnapshot, initialState } from '../src/state/reducer.ts';
@@ -12,9 +12,9 @@ import { chat } from './helpers.ts';
 
 vi.mock('../src/api/client.ts', async (orig) => {
   const m = await orig<typeof import('../src/api/client.ts')>();
-  return { ...m, api: { ...m.api, projectInfo: vi.fn() } };
+  return { ...m, api: { ...m.api, projectInfo: vi.fn(), patchSettings: vi.fn(), projects: vi.fn(), settings: vi.fn() } };
 });
-const mocked = api as unknown as { projectInfo: ReturnType<typeof vi.fn> };
+const mocked = api as unknown as Record<'projectInfo' | 'patchSettings' | 'projects' | 'settings', ReturnType<typeof vi.fn>>;
 
 const NOW = Date.parse('2026-10-23T12:00:00.000Z');
 const ago = (min: number) => new Date(NOW - min * 60_000).toISOString();
@@ -22,7 +22,7 @@ const ago = (min: number) => new Date(NOW - min * 60_000).toISOString();
 const project = (id: string, providers: ProviderId[], lastActivityAt = ago(60)): Project => ({
   id, name: id.split(/[\\/]/).pop()!, path: id,
   providers: providers.map((provider) => ({ provider, chats: 1, lastUsedAt: lastActivityAt, lastModel: null })),
-  columns: { running: 0, needs_you: 0, review: 0, done: 0 }, historyOnly: 0, lastActivityAt,
+  columns: { running: 0, needs_you: 0, review: 0, done: 0 }, historyOnly: 0, lastActivityAt, hidden: null, folderMissing: false,
 });
 const hist = (over: Partial<HistoryChat> = {}): HistoryChat => ({ provider: 'codex', sessionRef: 'h1', title: 'Old idea', cwd: '/work/beta', updatedAt: ago(3000), ...over });
 
@@ -321,5 +321,106 @@ describe('Project detail', () => {
     writeText.mockRejectedValueOnce(new Error('denied'));
     fireEvent.click(screen.getByRole('button', { name: 'Copy path' }));
     await waitFor(() => expect(screen.getByText('Couldn’t copy')).toBeTruthy());
+  });
+});
+
+describe('Projects: hidden and folder missing', () => {
+  const ON = { claude: true, codex: true, antigravity: true };
+  const settings = (over: Partial<Settings> = {}): Settings => ({ onboarded: true, showChats: ON, suggest: ON, hiddenProjects: [], unhiddenProjects: [], ...over });
+  const TEMP = { ...project('/tmp/ak-claude-1', ['claude'], ago(10)), hidden: 'auto' as const, tempFolder: true };
+  const OLD = { ...project('/work/old', ['codex'], ago(20)), hidden: 'manual' as const };
+  const withSettings = (store: Store, st: Settings) => { store.setState((s) => ({ ...s, settings: st })); return store; };
+  const showHidden = () => fireEvent.click(screen.getByRole('switch', { name: 'Show hidden projects' }));
+
+  beforeEach(() => {
+    mocked.patchSettings.mockReset();
+    mocked.settings.mockReset();
+    mocked.projects.mockReset();
+    mocked.projects.mockResolvedValue([]);
+  });
+
+  it('leaves hidden projects out until "Show hidden projects" is on, then shows them dimmed with Unhide', () => {
+    mount(withSettings(seeded([ALPHA, TEMP, OLD]), settings({ hiddenProjects: ['/work/old'] })));
+    expect(rowNames()).toEqual(['alpha']);
+    expect(screen.getByRole('heading', { name: /Projects/ }).textContent).toBe('Projects 1');
+    showHidden();
+    expect(rowNames()).toEqual(['alpha', 'ak-claude-1', 'old']);
+    const dimmed = rows().filter((r) => r.closest('li')!.classList.contains('hidden-project')).map((r) => r.querySelector('b')!.textContent);
+    expect(dimmed).toEqual(['ak-claude-1', 'old']);
+    expect(screen.getAllByRole('button', { name: /^Unhide/ })).toHaveLength(2);
+  });
+
+  it('Unhide on a hand-hidden project removes it from hiddenProjects; on an auto-hidden one adds it to unhiddenProjects', async () => {
+    const store = withSettings(seeded([ALPHA, TEMP, OLD]), settings({ hiddenProjects: ['/work/old'] }));
+    mount(store);
+    showHidden();
+    mocked.projects.mockResolvedValue([ALPHA, TEMP, { ...OLD, hidden: null }]);
+    mocked.patchSettings.mockResolvedValueOnce(settings());
+    fireEvent.click(screen.getByRole('button', { name: 'Unhide old' }));
+    await waitFor(() => expect(mocked.patchSettings).toHaveBeenCalledWith({ hiddenProjects: [], unhiddenProjects: [] }));
+    await waitFor(() => expect(store.getState().settings?.hiddenProjects).toEqual([]));
+    expect(mocked.projects).toHaveBeenCalled();
+    mocked.patchSettings.mockResolvedValueOnce(settings({ unhiddenProjects: ['/tmp/ak-claude-1'] }));
+    fireEvent.click(screen.getByRole('button', { name: 'Unhide ak-claude-1' }));
+    await waitFor(() => expect(mocked.patchSettings).toHaveBeenLastCalledWith({ hiddenProjects: [], unhiddenProjects: ['/tmp/ak-claude-1'] }));
+  });
+
+  it('Unhide on a temp-folder project the user also hid by hand shows it again (not back to auto-hidden)', async () => {
+    const both = { ...TEMP, hidden: 'manual' as const };
+    const store = withSettings(seeded([ALPHA, both], [], [], both.id), settings({ hiddenProjects: ['/tmp/ak-claude-1'] }));
+    mount(store);
+    mocked.patchSettings.mockResolvedValueOnce(settings({ unhiddenProjects: ['/tmp/ak-claude-1'] }));
+    fireEvent.click(screen.getByRole('button', { name: 'Unhide' }));
+    await waitFor(() => expect(mocked.patchSettings).toHaveBeenCalledWith({ hiddenProjects: [], unhiddenProjects: ['/tmp/ak-claude-1'] }));
+  });
+
+  it('Hide project before settings have loaded reads them first, so the saved lists are kept', async () => {
+    const store = seeded([ALPHA, ZED], [], [], ALPHA.id);
+    mount(store);
+    mocked.settings.mockResolvedValueOnce(settings({ hiddenProjects: ['/work/old'] }));
+    mocked.patchSettings.mockResolvedValueOnce(settings({ hiddenProjects: ['/work/old', '/work/alpha'] }));
+    fireEvent.click(screen.getByRole('button', { name: 'Hide project' }));
+    await waitFor(() => expect(mocked.patchSettings).toHaveBeenCalledWith({ hiddenProjects: ['/work/old', '/work/alpha'], unhiddenProjects: [] }));
+  });
+
+  it("Hide project on a project's page hides it and goes back to the list", async () => {
+    const store = withSettings(seeded([ALPHA, ZED], [], [], ALPHA.id), settings({ unhiddenProjects: ['/work/alpha'] }));
+    mount(store);
+    mocked.patchSettings.mockResolvedValueOnce(settings({ hiddenProjects: ['/work/alpha'] }));
+    fireEvent.click(screen.getByRole('button', { name: 'Hide project' }));
+    await waitFor(() => expect(mocked.patchSettings).toHaveBeenCalledWith({ hiddenProjects: ['/work/alpha'], unhiddenProjects: [] }));
+    await waitFor(() => expect(location.hash).toBe('#/projects'));
+  });
+
+  it("a hidden project's page says it is hidden and offers Unhide instead of Hide", () => {
+    mount(withSettings(seeded([ALPHA, OLD], [], [], OLD.id), settings({ hiddenProjects: ['/work/old'] })));
+    expect(screen.getByText(/Hidden from the sidebar, the board and New chat/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Unhide' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Hide project' })).toBeNull();
+  });
+
+  it('a project whose folder is gone says "Folder missing", keeps its chats readable and can’t start a new chat', () => {
+    const gone = { ...project('/work/gone', ['codex'], ago(5)), folderMissing: true };
+    const store = seeded([ALPHA, gone], [], [hist({ cwd: '/work/gone', title: 'Still readable' })]);
+    mount(store);
+    const row = rows().find((r) => r.querySelector('b')!.textContent === 'gone')!;
+    expect(within(row).getByText('Folder missing')).toBeTruthy();
+    go(store, gone.id);
+    expect(screen.getByText(/Folder missing/)).toBeTruthy();
+    expect(screen.getByText('Still readable')).toBeTruthy();
+    expect((screen.getByRole('button', { name: /New chat/ }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: 'New Codex chat' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("the Claude scratch chats project lists the chats from all its scratch folders", () => {
+    const root = 'C:/Users/me/AppData/Roaming/Claude/scratch-workspaces';
+    const scratch = { ...project(root, ['claude'], ago(5)), name: 'Claude scratch chats' };
+    const store = seeded([scratch], [], [
+      hist({ provider: 'claude', sessionRef: 'a', cwd: `${root}/u1/scratch-aa`, title: 'Regex for dates' }),
+      hist({ provider: 'claude', sessionRef: 'b', cwd: `${root}/u2/scratch-bb`, title: 'Explain zstd' }),
+    ], root);
+    mount(store);
+    expect(screen.getByText('Regex for dates')).toBeTruthy();
+    expect(screen.getByText('Explain zstd')).toBeTruthy();
   });
 });

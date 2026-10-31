@@ -1,4 +1,5 @@
 import { markAllNotificationsRead, markChatNotificationsRead, markNotificationRead, openChatIn, type AppNotification, type AppState } from '../../state/reducer.ts';
+import { desktopBridge } from '../../desktop.ts';
 import type { RequestAction } from '@agent-kanban/shared';
 import type { Store } from '../../state/store.ts';
 import { providerName } from '../primitives/ProviderLogo.tsx';
@@ -31,7 +32,9 @@ export function notificationText(s: AppState, n: AppNotification): string {
 /** Opens the notification's chat in the side panel and marks it read (here and in other tabs). */
 export function openNotification(store: Store, n: AppNotification): void {
   store.setState((s) => markNotificationRead(openChatIn(s, n.chatId), n.id));
-  relay(store, { type: 'read', chatId: n.chatId, until: Date.parse(n.at) + RELAY_SLACK_MS });
+  // An unreadable time must not relay a NaN cut-off (#19): fall back to now.
+  const at = Date.parse(n.at);
+  relay(store, { type: 'read', chatId: n.chatId, until: (Number.isFinite(at) ? at : Date.now()) + RELAY_SLACK_MS });
 }
 
 /** Marks every notification read (here and in other tabs). */
@@ -210,7 +213,9 @@ export const RING_GAP_MS = 600;
 
 function showDesktop(store: Store, s: AppState, n: AppNotification, shown: Map<string, Notification>): void {
   if (!getPrefs().desktop || typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
-  if (document.visibilityState !== 'hidden') return;
+  // In the desktop app a window hidden to the tray still reports "visible": there, away means not focused.
+  const desktop = desktopBridge();
+  if (desktop ? document.hasFocus() : document.visibilityState !== 'hidden') return;
   try {
     const note = new Notification(notificationTitle(s, n), { body: notificationText(s, n), tag: n.chatId });
     // The same tag replaces the chat's previous notification: forget that one.
@@ -221,7 +226,8 @@ function showDesktop(store: Store, s: AppState, n: AppNotification, shown: Map<s
     };
     note.onclick = () => {
       try {
-        window.focus();
+        if (desktop) desktop.show();
+        else window.focus();
       } catch {
         // Focus is best effort.
       }

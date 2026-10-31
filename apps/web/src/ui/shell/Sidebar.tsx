@@ -1,6 +1,7 @@
 import type { ProviderId } from '@agent-kanban/shared';
+import { folderKey } from '@agent-kanban/shared';
 import { useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
-import { focusedProvider, isArchived, isSnoozed, memoState, pinned as pinnedChats, providerCounts, recentChatsByProject, type SidebarChat } from '../../state/selectors.ts';
+import { focusedProvider, hiddenFolders, isArchived, isSnoozed, memoState, pinned as pinnedChats, projectLabel, providerCounts, recentChats, type SidebarChat } from '../../state/selectors.ts';
 import { openChatIn, type AppState } from '../../state/reducer.ts';
 import { uniqueProjects } from '../projects/model.ts';
 import { useStore, useStoreInstance } from '../../state/store.ts';
@@ -9,15 +10,15 @@ import { Icon, Menu, MenuItem, PROVIDER_IDS, ProviderLogo, StatusIcon, Tooltip, 
 import { replayOnboarding } from '../onboarding/Onboarding.tsx';
 import { navigate, hashFor } from './route.ts';
 import { toggleTheme } from './theme.ts';
+import { dateTime, relativeTime } from '../board/format.ts';
 
 const NAV = [
   ['board', 'board', 'Board'],
+  ['chats', 'inbox', 'All chats'],
   ['projects', 'projects', 'Projects'],
   ['connections', 'plug', 'Connections'],
 ] as const;
 
-const PROJECTS_SHOWN = 4;
-const CHATS_SHOWN = 3;
 
 function onActivate(fn: () => void) {
   return (e: KeyboardEvent<HTMLElement>) => {
@@ -40,10 +41,14 @@ function SideSection({ title, children }: { title: string; children: ReactNode }
   );
 }
 
-interface RowChat { key: string; chatId: string | null; provider: ProviderId; sessionRef: string | null; title: string; cwd: string; column: SidebarChat['column'] }
+interface RowChat { key: string; chatId: string | null; provider: ProviderId; sessionRef: string | null; title: string; cwd: string; updatedAt: string; column: SidebarChat['column'] }
 
-function ChatRow({ chat, current }: { chat: RowChat; current: boolean }) {
+function ChatRow({ chat, current, project: given }: { chat: RowChat; current: boolean; project?: string }) {
   const store = useStoreInstance();
+  const now = useStore((s) => s.now);
+  const project = useStore((s) => given ?? projectLabel(s, chat.cwd));
+  // Hover shows the full title plus its project, provider and when it was last active (#23); the row swaps the project label for the date.
+  const when = `${project} · ${providerName(chat.provider)} · ${dateTime(chat.updatedAt, now)}`;
   const open = () => {
     if (chat.chatId) store.setState((s) => openChatIn(s, chat.chatId!));
     else if (chat.sessionRef) openHistoryChat({ provider: chat.provider, sessionRef: chat.sessionRef, cwd: chat.cwd, title: chat.title });
@@ -56,11 +61,13 @@ function ChatRow({ chat, current }: { chat: RowChat; current: boolean }) {
     );
   };
   return (
-    <div className="chat-row" role="button" tabIndex={0} title={chat.title} aria-current={current ? 'true' : undefined} onClick={open} onKeyDown={onActivate(open)}>
+    <div className="chat-row" role="button" tabIndex={0} title={`${chat.title}
+${when}`} aria-description={when} aria-current={current ? 'true' : undefined} onClick={open} onKeyDown={onActivate(open)}>
       <ProviderLogo id={chat.provider} size="sm" />
       <span className="t">{chat.title}</span>
       {chat.column === 'running' && <StatusIcon state="running" />}
       {chat.column === 'needs_you' && <span className="state-dot" title="Needs you" />}
+      <span className="rest" aria-hidden="true"><span className="p">{project}</span><span className="d">{relativeTime(chat.updatedAt, now)}</span></span>
       <Tooltip label="More actions">
         <button className="row-more" type="button" aria-label={`More actions for ${chat.title}`} aria-haspopup="menu" onClick={more}>
           <Icon name="more" size="sm" />
@@ -92,59 +99,27 @@ function Providers() {
 }
 
 function Recent() {
-  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
-  // One more project than shown tells us whether "All projects" is needed.
   // Memoized on the parts it reads, so streaming deltas do not re-sort every history chat.
   const select = useMemo(
-    () => memoState(
-      (s) => [s.chats, s.history, s.projects, s.ui.filters, s.ui.archiving, s.now],
-      (s) => recentChatsByProject(s, s.now, { projects: PROJECTS_SHOWN + 1, chats: CHATS_SHOWN }, expanded),
-    ),
-    [expanded],
+    () => memoState((s) => [s.chats, s.history, s.projects, s.settings, s.ui.filters, s.ui.archiving, s.now], (s) => recentChats(s, s.now)),
+    [],
   );
-  const groups = useStore(select);
+  const list = useStore(select);
   const filtering = useStore((s) => Object.values(s.ui.filters).some((v) => v !== null));
   const openChatId = useStore((s) => s.ui.openChatId);
   const openHistory = useStore((s) => s.ui.openHistory);
-  const toggle = (id: string) =>
-    setExpanded((cur) => {
-      const next = new Set(cur);
-      if (!next.delete(id)) next.add(id);
-      return next;
-    });
   return (
     <SideSection title="Recent chats">
-      {filtering && groups.length === 0 && <p className="empty-note side-empty">No matching chats</p>}
-      {groups.slice(0, PROJECTS_SHOWN).map((g) => {
-        const open = expanded.has(g.projectId);
-        const goProject = () => navigate('projects', g.projectId);
-        return (
-          <div className="proj" key={g.projectId}>
-            <div className="proj-row" role="button" tabIndex={0} title={`Open ${g.name}`} onClick={goProject} onKeyDown={onActivate(goProject)}>
-              <span className="name">{g.name}</span>
-              <Tooltip label={`New chat in ${g.name}`}>
-                <button className="add" type="button" aria-label={`New chat in ${g.name}`} onClick={(e) => { e.stopPropagation(); openNewChat(g.projectId ? { cwd: g.projectId } : undefined); }}>
-                  <Icon name="plus" size="sm" />
-                </button>
-              </Tooltip>
-            </div>
-            {g.chats.map((c) => (
-              <ChatRow key={c.key} chat={c}
-                current={c.chatId !== null ? c.chatId === openChatId : openHistory !== null && openHistory.provider === c.provider && openHistory.sessionRef === c.sessionRef} />
-            ))}
-            {g.total > CHATS_SHOWN && (
-              <button className="show-more-row" type="button" onClick={() => toggle(g.projectId)}>
-                {open ? 'Show less' : `${g.total - CHATS_SHOWN} more`}
-              </button>
-            )}
-          </div>
-        );
-      })}
-      {groups.length > PROJECTS_SHOWN && (
-        <button className="show-more-row all-projects" type="button" onClick={() => navigate('projects')}>
-          All projects<Icon name="chevron-right" size="sm" />
+      <div className="recent">
+        {filtering && list.length === 0 && <p className="empty-note side-empty">No matching chats</p>}
+        {list.map((c) => (
+          <ChatRow key={c.key} chat={c} project={c.projectName}
+            current={c.chatId !== null ? c.chatId === openChatId : openHistory !== null && openHistory.provider === c.provider && openHistory.sessionRef === c.sessionRef} />
+        ))}
+        <button className="show-more-row all-projects" type="button" aria-label="See all chats" onClick={() => navigate('chats')}>
+          All chats<Icon name="chevron-right" size="sm" />
         </button>
-      )}
+      </div>
     </SideSection>
   );
 }
@@ -155,7 +130,7 @@ function Pinned() {
   if (list.length === 0) return null;
   return (
     <SideSection title="Pinned">
-      {list.map((c) => <ChatRow key={c.id} chat={{ key: c.id, chatId: c.id, provider: c.provider, sessionRef: c.sessionRef, title: c.title, cwd: c.cwd, column: c.column }} current={c.id === openChatId} />)}
+      {list.map((c) => <ChatRow key={c.id} chat={{ key: c.id, chatId: c.id, provider: c.provider, sessionRef: c.sessionRef, title: c.title, cwd: c.cwd, updatedAt: c.updatedAt, column: c.column }} current={c.id === openChatId} />)}
     </SideSection>
   );
 }
@@ -166,13 +141,19 @@ const counts = (s: AppState) => {
     (c) => c.column !== null && c.column !== 'done' && !isArchived(s, c) && !isSnoozed(c, now),
   ).length;
   const connected = Object.values(s.connections).filter((c) => c?.status === 'connected' || c?.status === 'update_available').length;
-  return { board, projects: uniqueProjects(s).length, connections: connected };
+  const hidden = hiddenFolders(s);
+  return { board, projects: uniqueProjects(s).filter((p) => !hidden.has(folderKey(p.id))).length, connections: connected };
 };
 
 export function Sidebar() {
   const store = useStoreInstance();
   const view = useStore((s) => s.ui.view);
   const n = useStore(counts);
+  // The search icon opens All chats with its search box focused (the page focuses it when this counter moves).
+  const searchChats = () => {
+    store.setState((s) => ({ ...s, ui: { ...s.ui, chatsSearchFocus: s.ui.chatsSearchFocus + 1 } }));
+    if (location.hash !== hashFor('chats')) navigate('chats');
+  };
   const navRef = useRef<HTMLElement>(null);
   const capRef = useRef<HTMLSpanElement>(null);
   const placed = useRef(false);
@@ -228,13 +209,13 @@ export function Sidebar() {
       </button>
       <div className="side-actions">
         <button className="btn new" type="button" onClick={() => openNewChat()}><Icon name="plus" />New chat <span className="kbd">N</span></button>
-        <Tooltip label="Search chats"><button className="btn icon-only ghost" type="button" aria-label="Search chats"><Icon name="search" /></button></Tooltip>
+        <Tooltip label="Search chats"><button className="btn icon-only ghost" type="button" aria-label="Search chats" onClick={searchChats}><Icon name="search" /></button></Tooltip>
       </div>
       <nav className="navlist" aria-label="Main" ref={navRef}>
         <span className="cap" ref={capRef} />
         {NAV.map(([id, icon, label]) => (
           <button key={id} className="navitem" type="button" aria-current={view === id ? 'page' : undefined} onClick={() => { if (location.hash !== hashFor(id)) navigate(id); }}>
-            <Icon name={icon} />{label} <span className="count">{n[id === 'board' ? 'board' : id]}</span>
+            <Icon name={icon} />{label} {id !== 'chats' && <span className="count">{n[id]}</span>}
           </button>
         ))}
       </nav>

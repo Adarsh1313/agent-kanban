@@ -7,7 +7,7 @@ import type { AddressInfo } from 'node:net';
 import type { ConnectionHealth, ConnectState, ProviderId } from '@agent-kanban/shared';
 import {
   ConnectService, ConnectBusyError, SIGN_IN_TIMEOUT_MS, POLL_MS, SIGN_IN_DIDNT_FINISH, NETWORK_FAILED,
-  ANTIGRAVITY_SIGN_OUT_IN_APP, findHttpsUrl, STEP_SIGN_IN, STEP_STARTING_ANTIGRAVITY, ANTIGRAVITY_DIDNT_START, ANTIGRAVITY_START_TIMEOUT_MS, SIGN_IN_HOSTS, NPM_TIMEOUT_MS, RECYCLE_RETRY_MS, npmFailureMessage,
+  ANTIGRAVITY_SIGN_OUT_IN_APP, findHttpsUrl, STEP_SIGN_IN, STEP_STARTING_ANTIGRAVITY, STEP_OPENING_BROWSER, OPENING_BROWSER_MS, ANTIGRAVITY_DIDNT_START, ANTIGRAVITY_START_TIMEOUT_MS, SIGN_IN_HOSTS, NPM_TIMEOUT_MS, RECYCLE_RETRY_MS, npmFailureMessage,
 } from '../src/connect/service.ts';
 import type { AntigravityAuth, UpdatableAdapter } from '../src/connect/service.ts';
 import type { CommandExit, CommandRunner, RunningCommand } from '../src/connect/run.ts';
@@ -15,7 +15,7 @@ import { commandTarget, spawnCommand } from '../src/connect/run.ts';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { openBrowser, ONLY_HTTPS } from '../src/connect/open-browser.ts';
+import { openBrowser, openLocalApp, ONLY_HTTPS, ONLY_LOCAL_APP } from '../src/connect/open-browser.ts';
 import { DOWNLOAD_FAILED } from '../src/connect/antigravity-install.ts';
 import type { InstallOptions } from '../src/connect/antigravity-install.ts';
 import { createApi } from '../src/api.ts';
@@ -348,7 +348,7 @@ test('sign out: `claude auth logout` / `codex logout`', async () => {
 
 // ---- Antigravity ----
 
-function fakeAdapter(o: { url?: string; signedOut?: boolean; hang?: boolean; slowStart?: Promise<void> } = {}) {
+function fakeAdapter(o: { url?: string; signedOut?: boolean; hang?: boolean; slowStart?: Promise<void>; linkLater?: Promise<void> } = {}) {
   const calls = { signIn: 0, signOut: 0, aborted: false };
   const adapter: AntigravityAuth = {
     signIn: (onUrl, signal, onStarted) => {
@@ -358,7 +358,7 @@ function fakeAdapter(o: { url?: string; signedOut?: boolean; hang?: boolean; slo
         void (o.slowStart ?? Promise.resolve()).then(() => {
           if (signal.aborted) return;
           onStarted?.();
-          if (o.url) onUrl(o.url);
+          if (o.url) void (o.linkLater ?? Promise.resolve()).then(() => { if (!signal.aborted) onUrl(o.url!); });
           if (!o.hang) resolve();
         });
       });
@@ -497,6 +497,18 @@ test('openBrowser: https only, never through a shell, the link is one argument',
     const s = spyOn();
     assert.throws(() => openBrowser(bad, { platform: 'win32', spawn: s.spawn }), new RegExp(ONLY_HTTPS));
     assert.equal(s.calls.length, 0);
+  }
+});
+
+test('openLocalApp: only http://127.0.0.1:<port>, never through a shell', () => {
+  const url = 'http://127.0.0.1:3006/?token=abc123';
+  const s = spyOn();
+  openLocalApp(url, { platform: 'win32', spawn: s.spawn });
+  assert.deepEqual(s.calls.map((c) => [c.cmd, c.args, c.opts.shell]), [['rundll32.exe', ['url.dll,FileProtocolHandler', url], false]]);
+  for (const bad of ['https://127.0.0.1:3006/', 'http://localhost:3006/', 'http://127.0.0.1/', 'http://evil.com:3006/', 'http://u:p@127.0.0.1:3006/', 'nope']) {
+    const b = spyOn();
+    assert.throws(() => openLocalApp(bad, { platform: 'win32', spawn: b.spawn }), new RegExp(ONLY_LOCAL_APP));
+    assert.equal(b.calls.length, 0);
   }
 });
 
@@ -931,4 +943,34 @@ test('the check after an operation is always published, even when only checkedAt
   assert.equal(published[0]!.checkedAt, '2026-10-22T10:05:00.000Z');
   assert.ok(Date.parse(published[0]!.checkedAt) > Date.parse(svc.get('codex').updatedAt), 'newer than the operation');
   assert.equal(svc.get('codex').outcome, 'done');
+});
+
+test('Antigravity sign-in: after the agent starts it says "Opening your browser…" until the link is printed (#13)', async () => {
+  let link!: () => void;
+  const { adapter } = fakeAdapter({ url: GOOGLE, hang: true, linkLater: new Promise<void>((r) => { link = r; }) });
+  const c = make({ script: () => ({}), adapter });
+  c.svc.signIn('antigravity');
+  await flush();
+  assert.equal(c.last('antigravity').step, STEP_OPENING_BROWSER);
+  assert.equal(c.last('antigravity').signInUrl, null);
+  link();
+  await flush();
+  assert.equal(c.last('antigravity').step, STEP_SIGN_IN);
+  assert.equal(c.last('antigravity').signInUrl, GOOGLE);
+  c.svc.cancel('antigravity');
+  await flush();
+});
+
+test('Antigravity sign-in: an agent that never prints its link still moves on to "Finish signing in" after a few seconds (#13 review)', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { adapter } = fakeAdapter({ url: GOOGLE, hang: true, linkLater: new Promise<void>(() => {}) });
+  const c = make({ script: () => ({}), adapter });
+  c.svc.signIn('antigravity');
+  await flush();
+  assert.equal(c.last('antigravity').step, STEP_OPENING_BROWSER);
+  t.mock.timers.tick(OPENING_BROWSER_MS);
+  await flush();
+  assert.equal(c.last('antigravity').step, STEP_SIGN_IN);
+  c.svc.cancel('antigravity');
+  await flush();
 });

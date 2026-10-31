@@ -49,7 +49,7 @@ export interface Filters {
 export interface HistoryRef { provider: ProviderId; sessionRef: string; cwd: string; title: string }
 
 export interface UiState {
-  view: 'board' | 'projects' | 'connections';
+  view: 'board' | 'chats' | 'projects' | 'connections';
   projectId: string | null;
   /** The chat shown in the side panel; mutually exclusive with `openHistory`. */
   openChatId: string | null;
@@ -58,6 +58,10 @@ export interface UiState {
   /** Chats archived here whose Undo toast is still showing: hidden at once, archived on the server when it expires. */
   archiving: Record<string, true>;
   filters: Filters;
+  /** All chats keeps its own Project / Provider filters, apart from the board's. */
+  chatsFilters: Filters;
+  /** Bumped by the sidebar's search icon: All chats focuses its search box. */
+  chatsSearchFocus: number;
 }
 
 export interface SyncState {
@@ -148,6 +152,8 @@ export function initialState(): AppState {
       openHistory: null,
       archiving: {},
       filters: { provider: null, project: null, status: null, model: null, reason: null, activity: null, source: null },
+      chatsFilters: { provider: null, project: null, status: null, model: null, reason: null, activity: null, source: null },
+      chatsSearchFocus: 0,
     },
   };
 }

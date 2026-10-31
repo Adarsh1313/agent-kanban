@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import type { ProviderId } from '@agent-kanban/shared';
 import { api } from '../../api/client.ts';
 import { applySettings, type AppState } from '../../state/reducer.ts';
-import { providerCounts } from '../../state/selectors.ts';
+import { providerCounts, visibleProjects } from '../../state/selectors.ts';
 import { useStore, useStoreInstance, type Store } from '../../state/store.ts';
 import { openNewChat } from '../actions.ts';
 import { ANTIGRAVITY_SLOW, antigravityStarting, cardView, checkConnection, isConnected, retryAction, useConnectRun, useProviderToggle } from '../connections/ConnectionsPage.tsx';
@@ -205,7 +205,7 @@ function AgentRow({ id }: { id: ProviderId }) {
   const slow = id === 'antigravity' && (view === 'installing' || (view === 'signin' && antigravityStarting(id, connect)));
 
   return (
-    <div className="agent" data-agent={id} data-view={view} ref={rowRef} tabIndex={-1} onFocus={() => { focusInside.current = true; }}>
+    <div className="agent-row" data-agent={id} data-view={view} ref={rowRef} tabIndex={-1} onFocus={() => { focusInside.current = true; }}>
       <ProviderLogo id={id} />
       <div className="t">
         <b>{name}</b>
@@ -275,7 +275,7 @@ export function Onboarding() {
   const ids = useStore(connectedIds);
   const showChats = useStore((s) => s.settings?.showChats ?? null);
   const live = useStore(providerCounts);
-  const projects = useStore((s) => s.projects);
+  const projects = useStore(visibleProjects);
   const prefs = useNotifyPrefs();
   const [support, setSupport] = useState<DesktopSupport>(desktopSupport);
   const [phase, setPhase] = useState<Phase>('hidden');
@@ -472,7 +472,7 @@ export function Onboarding() {
               }} />
             </div>
           </div>
-          <div className="onb-foot">{backBtn}<span className="grow">Windows will ask to allow notifications.</span>{next()}</div>
+          <div className="onb-foot">{backBtn}<span className="grow">{support === 'default' ? 'Windows will ask to allow notifications.' : ''}</span>{next()}</div>
         </>
       );
       break;

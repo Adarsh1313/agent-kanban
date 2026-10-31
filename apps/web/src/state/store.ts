@@ -1,5 +1,5 @@
 import type { Chat } from '@agent-kanban/shared';
-import { folderKey } from '@agent-kanban/shared';
+import { folderKey, projectFolder } from '@agent-kanban/shared';
 import { createContext, createElement, useContext, useRef, useSyncExternalStore, type ReactNode } from 'react';
 import type { api as realApi } from '../api/client.ts';
 import { applySnapshot, beginSync, endSync, mergeChats, mergeFetched, missingChats, type AppState, type FetchedThread, type Snapshot } from './reducer.ts';
@@ -183,7 +183,7 @@ export function refreshProjectsSoon(store: Store, api: Api, delayMs = PROJECTS_D
 export function noteChatFolder(store: Store, api: Api, chat: Chat): void {
   const s = store.getState();
   if (!s.loaded || chat.archived) return;
-  const k = folderKey(chat.cwd);
+  const k = folderKey(projectFolder(chat.cwd));
   if (s.projects.some((p) => folderKey(p.id) === k || folderKey(p.path) === k)) return;
   refreshProjectsSoon(store, api);
 }

@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import type { Column, Project, ProviderId } from '@agent-kanban/shared';
 import type { AppState } from '../../state/reducer.ts';
-import { useStore } from '../../state/store.ts';
+import { useStore, useStoreInstance } from '../../state/store.ts';
 import { openNewChat } from '../actions.ts';
-import { Icon, PROVIDER_IDS, ProviderLogo, providerName, StatusIcon, Tooltip } from '../primitives/index.ts';
+import { Icon, PROVIDER_IDS, ProviderLogo, providerName, StatusIcon, Switch, Tooltip } from '../primitives/index.ts';
 import { hashFor } from '../shell/route.ts';
 import { ProjectDetail } from './ProjectDetail.tsx';
-import { agoLabel, chatsByFolder, folderKey, plural, statsOf, uniqueProjects, workedWith, type ProjectStats } from './model.ts';
+import { agoLabel, chatsByFolder, folderKey, plural, setProjectHidden, statsOf, uniqueProjects, workedWith, type ProjectStats } from './model.ts';
+import { hiddenFolders } from '../../state/selectors.ts';
 
 type Sort = 'name' | 'activity';
 
@@ -41,16 +42,17 @@ function StatusBar({ stats }: { stats: ProjectStats }) {
   );
 }
 
-interface Row { project: Project; stats: ProjectStats; lastAt: string; providers: ProviderId[] }
+interface Row { project: Project; stats: ProjectStats; lastAt: string; providers: ProviderId[]; hidden: boolean }
 
 function ProjectRow({ row, now, stagger }: { row: Row; now: number; stagger: number | null }) {
+  const store = useStoreInstance();
   const { project, stats } = row;
   const style: CSSProperties | undefined = stagger === null ? undefined : { animationDelay: `calc(var(--stagger) * ${Math.min(stagger, STAGGER_ROWS)})` };
   return (
-    <li><a className={`prow${stagger === null ? '' : ' stagger'}`} style={style} href={hashFor('projects', project.id)}>
+    <li className={row.hidden ? 'hidden-project' : undefined}><a className={`prow${stagger === null ? '' : ' stagger'}`} style={style} href={hashFor('projects', project.id)}>
       <div className="name">
         <span className="folder-glyph big-glyph proj-glyph" aria-hidden="true">{(project.name || '?')[0]!.toUpperCase()}</span>
-        <span><b>{project.name}</b><small>{project.path}</small></span>
+        <span><b>{project.name}</b><small>{project.folderMissing && <span className="missing-note">Folder missing</span>}{project.path}</small></span>
       </div>
       <div className="who-knows">
         {row.providers.map((id) => {
@@ -65,15 +67,27 @@ function ProjectRow({ row, now, stagger }: { row: Row; now: number; stagger: num
       <StatusBar stats={stats} />
       <div className="when">{agoLabel(row.lastAt, now)}</div>
       <div className="go" aria-hidden="true"><Icon name="chevron-right" /></div>
-    </a></li>
+    </a>
+    {row.hidden && (
+      <Tooltip label="Unhide">
+        <button className="btn icon-only ghost unhide" type="button" aria-label={`Unhide ${project.name}`} onClick={() => void setProjectHidden(store, project, false)}>
+          <Icon name="eye" size="sm" />
+        </button>
+      </Tooltip>
+    )}
+    </li>
   );
 }
 
-const listState = (s: AppState) => ({ projects: uniqueProjects(s), index: chatsByFolder(s), now: s.now, loaded: s.loaded });
+const listState = (s: AppState) => ({ projects: uniqueProjects(s), hidden: hiddenFolders(s), index: chatsByFolder(s), now: s.now, loaded: s.loaded });
 
 function ProjectList() {
-  const { projects, index, now, loaded } = useStore(listState);
+  const { projects: all, hidden, index, now, loaded } = useStore(listState);
   const [q, setQuery] = useState('');
+  const [showHidden, setShowHidden] = useState(false);
+  const isHidden = (p: Project) => hidden.has(folderKey(p.id));
+  const projects = all.filter((p) => !isHidden(p));
+  const listed = showHidden ? all : projects;
   const [sort, setSortKey] = useState<Sort>('activity');
   // Latched at mount so a store update can't cut the rise short; cleared when the last row has risen, or by a sort or search.
   const [stagger, setStagger] = useState(() => !visited);
@@ -82,11 +96,11 @@ function ProjectList() {
   const setSort = (v: Sort) => { setStagger(false); setSortKey(v); };
 
   const needle = q.trim().toLowerCase();
-  const rows: Row[] = projects
+  const rows: Row[] = listed
     .filter((p) => !needle || p.name.toLowerCase().includes(needle) || p.path.toLowerCase().includes(needle))
     .map((project) => {
       const stats = statsOf(index[folderKey(project.id)] ?? []);
-      return { project, stats, lastAt: stats.lastAt > project.lastActivityAt ? stats.lastAt : project.lastActivityAt, providers: workedWith(project, stats, PROVIDER_IDS) };
+      return { project, stats, lastAt: stats.lastAt > project.lastActivityAt ? stats.lastAt : project.lastActivityAt, providers: workedWith(project, stats, PROVIDER_IDS), hidden: isHidden(project) };
     })
     .sort(sort === 'name'
       ? (a, b) => a.project.name.localeCompare(b.project.name, undefined, { sensitivity: 'base' })
@@ -113,7 +127,13 @@ function ProjectList() {
         </label>
         <button className="btn" type="button" onClick={() => openNewChat({ cwd: '' })}><Icon name="folder" size="sm" />Add a folder</button>
       </div>
-      {!loaded ? null : projects.length === 0 ? (
+      {all.length > projects.length && (
+        <label className="show-hidden">
+          <Switch checked={showHidden} label="Show hidden projects" onChange={(on) => { setStagger(false); setShowHidden(on); }} />
+          Show hidden projects <span className="count">{all.length - projects.length}</span>
+        </label>
+      )}
+      {!loaded ? null : listed.length === 0 ? (
         <div className="page-empty">
           <Icon name="projects" />
           <h3>No projects yet</h3>

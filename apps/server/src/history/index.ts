@@ -5,6 +5,7 @@ import { readCodexHistory } from './codex.ts';
 import { readAntigravityHistory } from './antigravity.ts';
 
 export { readClaudeHistory, readCodexHistory, readAntigravityHistory };
+export { readTranscript, type Transcript } from './transcript.ts';
 
 export async function readAllHistory(home: string): Promise<HistoryChat[]> {
   const parts = await Promise.all([

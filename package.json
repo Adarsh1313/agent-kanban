@@ -16,10 +16,14 @@
     "dev:web": "npm run dev -w apps/web",
     "build:web": "npm run build -w apps/web",
     "build": "npm run build:web",
-    "start": "node --disable-warning=ExperimentalWarning apps/server/src/main.ts"
+    "start": "node --disable-warning=ExperimentalWarning apps/server/src/main.ts",
+    "desktop": "npm run build:web && electron apps/desktop",
+    "desktop:icons": "electron apps/desktop/scripts/make-icons.ts",
+    "desktop:dist": "node --disable-warning=ExperimentalWarning apps/desktop/scripts/package.ts"
   },
   "devDependencies": {
     "@types/node": "26.6.5",
+    "electron-builder": "^26.18.0",
     "typescript": "7.0.2"
   }
 }

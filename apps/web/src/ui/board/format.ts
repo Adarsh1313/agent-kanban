@@ -34,6 +34,17 @@ export function clockTime(iso: string, now: number): string {
   return `${d.toLocaleDateString('en-US', { weekday: 'short' })} ${t}`;
 }
 
+/** "Today, 2:40 pm", "Oct 27, 2:40 pm", or "Oct 27, 2025, 2:40 pm" in another year: when a chat was last active. */
+export function dateTime(iso: string, now: number): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const t = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }).toLowerCase();
+  const n = new Date(now);
+  if (d.toDateString() === n.toDateString()) return `Today, ${t}`;
+  const day = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', ...(d.getFullYear() !== n.getFullYear() ? { year: 'numeric' } : {}) });
+  return `${day}, ${t}`;
+}
+
 /** The next reset of an exhausted usage window (or of any window when none reads 0% left). */
 export function limitResetsAt(reading: UsageReading | undefined, now: number): string | null {
   if (!reading) return null;
@@ -58,4 +69,16 @@ export function toolIcon(name: string): IconName {
   if (/grep|glob|search|find|list|ls/.test(n)) return 'search2';
   if (/web|fetch|browse|url/.test(n)) return 'globe';
   return 'terminal';
+}
+
+/**
+ * Shows paths inside the chat's own folder relative to it: "Editing C:\work\app\src\a.ts" in folder C:\work\app reads
+ * "Editing src\a.ts" (#7). Matching ignores case and slash direction; text outside the folder is left as it is.
+ */
+export function inFolder(text: string, cwd: string): string {
+  const root = cwd.replace(/[\\/]+$/, '');
+  if (!root || !text) return text;
+  const sep = String.raw`[\\/]+`;
+  const pattern = root.split(/[\\/]+/).map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`)).join(sep);
+  return text.replace(new RegExp(pattern + sep, 'gi'), '');
 }

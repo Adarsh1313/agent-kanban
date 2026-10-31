@@ -1,14 +1,17 @@
 import http from 'node:http';
 import { statusPageHtml } from './status-page.ts';
 import { DEFAULT_DIST, readStatic, shellFile, staticFile } from './static.ts';
-import { buildProjects, projectInfo } from './projects.ts';
+import { buildProjects, projectInfo, type ProjectRules } from './projects.ts';
 import type { ProviderAdapter } from './adapters/adapter.ts';
-import { statSync } from 'node:fs';
+import { existsSync, realpathSync, statSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { timingSafeEqual } from 'node:crypto';
 import { WebSocketServer, WebSocket } from 'ws';
 import type { ConnectionHealth, HistoryChat, ModelOption, ProviderId, ServerEvent } from '@agent-kanban/shared';
 import { ActiveElsewhereError, CantContinueError } from './chats.ts';
 import { ConnectBusyError, ConnectStateError } from './connect/service.ts';
+import { PickerBusyError } from './folder-picker.ts';
+import type { Transcript } from './history/transcript.ts';
 import type { ConnectService } from './connect/service.ts';
 import { SettingsError } from './settings.ts';
 import type { SettingsStore } from './settings.ts';
@@ -95,6 +98,12 @@ export function createApi(opts: {
   adapters?: { get(id: ProviderId): ProviderAdapter | undefined };
   connect?: Pick<ConnectService, 'states' | 'install' | 'signIn' | 'signOut' | 'update' | 'cancel' | 'openSignInPage'>;
   settings?: SettingsStore;
+  /** Past messages of a chat that is only in the provider's history (#16). */
+  transcript?: (provider: ProviderId, sessionRef: string) => Promise<Transcript>;
+  /** New chat's "Browse…": shows the native folder picker (#24). */
+  folderPicker?: { pick(): Promise<string | null> };
+  /** A chat's "Open folder": shows a project folder in the file manager (#15). */
+  folderOpener?: { open(path: string): Promise<void> };
   /** Folder holding the built web app (default apps/web/dist). */
   webDist?: string;
   token: string;
@@ -132,6 +141,13 @@ export function createApi(opts: {
     const all = await history();
     return settings ? settings.filterHistory(all) : all;
   };
+
+  // The temp folder as Node reports it and as the file system resolves it (8.3 short names, /var vs /private/var).
+  const tempDirs = (): string[] => {
+    const t = tmpdir();
+    try { return [t, realpathSync.native(t)]; } catch { return [t]; }
+  };
+  const projectRules = (): ProjectRules => ({ tempDirs: tempDirs(), hidden: settings?.get().hiddenProjects ?? [], unhidden: settings?.get().unhiddenProjects ?? [], exists: existsSync });
 
   // A provider's model list rarely changes: a non-empty answer is reused for 5 minutes (an empty one is asked again).
   const modelCache = new Map<ProviderId, { at: number; models: ModelOption[] }>();
@@ -187,11 +203,11 @@ export function createApi(opts: {
       }
       return { status: 200, body: chats.patch(m[0]!, patch) };
     }
-    if (match('GET', '/api/projects')) return { status: 200, body: buildProjects(chats.listChats(), await visibleHistory()) };
+    if (match('GET', '/api/projects')) return { status: 200, body: buildProjects(chats.listChats(), await visibleHistory(), projectRules()) };
     if (match('GET', '/api/projects/info')) {
       const path = url.searchParams.get('path');
       const key = path ? folderKey(path) : '';
-      const known = key ? buildProjects(chats.listChats(), await visibleHistory()).find((p) => folderKey(p.id) === key) : undefined;
+      const known = key ? buildProjects(chats.listChats(), await visibleHistory(), projectRules()).find((p) => folderKey(p.id) === key) : undefined;
       if (!known) throw new HttpError(404, 'Not found.');
       return { status: 200, body: await projectInfo(known.path) };
     }
@@ -227,6 +243,12 @@ export function createApi(opts: {
     if ((m = match('POST', '/api/chats/:id/done'))) return { status: 200, body: chats.markDone(m[0]!) };
     if ((m = match('POST', '/api/chats/:id/undone'))) return { status: 200, body: chats.dragOutOfDone(m[0]!) };
     if ((m = match('POST', '/api/chats/:id/archive'))) return { status: 200, body: chats.archive(m[0]!) };
+    if ((m = match('GET', '/api/history/:provider/:ref/messages'))) {
+      const id = m[0] as ProviderId;
+      if (!PROVIDERS.includes(id)) throw new HttpError(400, 'Unknown provider. Use claude, codex or antigravity.');
+      if (!opts.transcript) throw new HttpError(404, 'Not found.');
+      return { status: 200, body: await opts.transcript(id, m[1]!) };
+    }
     if (match('GET', '/api/history')) return { status: 200, body: await visibleHistory() };
     if (match('POST', '/api/history/continue')) {
       const b = await readJson(req);
@@ -245,6 +267,24 @@ export function createApi(opts: {
       const b = await readJson(req);
       const only = b.provider === undefined ? undefined : provider(b);
       return { status: 200, body: (await opts.connections?.check(only)) ?? [] };
+    }
+    if (match('POST', '/api/folders/pick')) {
+      if (!opts.folderPicker) throw new HttpError(404, 'Not found.');
+      return { status: 200, body: { path: await opts.folderPicker.pick() } };
+    }
+    if (match('POST', '/api/folders/open')) {
+      if (!opts.folderOpener) throw new HttpError(404, 'Not found.');
+      const b = await readJson(req);
+      const path = typeof b?.path === 'string' ? b.path : '';
+      if (!path) throw new HttpError(400, 'Say which folder to open.');
+      // Only folders the board already knows: the page can't make us open anything else.
+      const known = buildProjects(chats.listChats(), await visibleHistory(), projectRules()).find((p) => folderKey(p.path) === folderKey(path));
+      if (!known) throw new HttpError(403, "That folder isn't one of your projects.");
+      let isDir = false;
+      try { isDir = statSync(known.path).isDirectory(); } catch { /* moved or deleted */ }
+      if (!isDir) throw new HttpError(404, "That folder isn't there any more. It may have been moved or deleted.");
+      await opts.folderOpener.open(known.path);
+      return { status: 204 };
     }
     if (match('GET', '/api/connect')) return { status: 200, body: opts.connect?.states() ?? [] };
     if ((m = match('POST', '/api/connect/:provider/:action'))) {
@@ -350,7 +390,7 @@ export function createApi(opts: {
           return send(err.status, { error: err.message });
         }
         const msg = err instanceof Error ? err.message : '';
-        if (err instanceof ActiveElsewhereError || err instanceof CantContinueError || err instanceof ConnectBusyError || err instanceof ConnectStateError) return send(409, { error: msg });
+        if (err instanceof ActiveElsewhereError || err instanceof CantContinueError || err instanceof ConnectBusyError || err instanceof ConnectStateError || err instanceof PickerBusyError) return send(409, { error: msg });
         if (msg === 'That request is no longer open.') return send(409, { error: msg });
         if (msg === 'Chat not found.') return send(404, { error: msg });
         console.error(err);

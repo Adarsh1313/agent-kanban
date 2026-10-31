@@ -139,6 +139,29 @@ test('stop before the turn id is known interrupts once it arrives', async () => 
   } finally { await adapter.dispose(); }
 });
 
+test('stop returns only once the interrupted turn has ended, so a message right after starts a fresh turn (#12)', async () => {
+  const { adapter, events, waitFor } = make('hang', { env: { FAKE_INTERRUPT_DELAY_MS: '300' } });
+  try {
+    await adapter.startChat({ cwd, prompt: 'hi' });
+    await waitFor((e) => e.type === 'turn.started');
+    await adapter.stop('thr_1');
+    // The app-server answered the interrupt at once but ended the turn 300 ms later: stop waited for that.
+    assert.ok(events.some((e) => e.type === 'stopped'), 'the turn had ended when stop returned');
+    assert.equal(adapter.isIdle(), true);
+  } finally { await adapter.dispose(); }
+});
+
+test('stop before the turn id is known also waits for the turn to end (#12)', async () => {
+  const { adapter, events, waitFor } = make('slowturn', { env: { FAKE_INTERRUPT_DELAY_MS: '100' } });
+  try {
+    const started = adapter.startChat({ cwd, prompt: 'hi' });
+    await waitFor((e) => e.type === 'session.started');
+    await adapter.stop('thr_1');
+    assert.ok(events.some((e) => e.type === 'stopped'));
+    await started;
+  } finally { await adapter.dispose(); }
+});
+
 test('initialize timeout rejects, kills the process, and a later call spawns again', async () => {
   // The first process never answers initialize, so a short timeout always fires however loaded the machine is.
   const { adapter, procs } = make((n) => (n === 0 ? 'hanginit' : ''), { initializeTimeoutMs: 100 });

@@ -11,13 +11,30 @@ connection is healthy and up to date.
 |---|---|
 | Server (`apps/server`) | Built: Claude Code + Codex chats, board state, usage limits, chat history, connection health, HTTP + WebSocket API |
 | Design (`design/`) | Clickable prototype and design system |
-| Web app (`apps/web`) | Built: board, chat panel, New chat, usage, filters, notifications, Projects and Connections pages |
+| Web app (`apps/web`) | Built: board, chat panel, New chat, usage, filters, notifications, All chats, Projects and Connections pages |
 | Connect and Antigravity | Built: Antigravity chats (Google's official ACP server), install / sign in / sign out / update for all three providers from the app, first-run onboarding |
-| Desktop app | Plan 4 |
+| Desktop app (`apps/desktop`) | Built: Windows app with its own window and tray, per-user installer |
 
 ## Run it
 
 Requires Node 22.18+. Claude Code, Codex and Antigravity can be installed and signed in from the app (Connections page or onboarding).
+
+Everyday use on Windows: install **Agent Kanban** with `apps/desktop/dist/Agent Kanban Setup <version>.exe`
+(no admin rights; Windows may warn that the app is unrecognised because it isn't signed: More info → Run anyway).
+It opens in its own window; closing the window keeps it running in the tray, and **Quit Agent Kanban** in the
+tray menu stops it and every chat. Your chats live in `~/.agent-kanban` and survive reinstalling.
+
+Desktop app commands:
+
+```bash
+npm run desktop        # build the web app and run the desktop app from source
+npm run desktop:dist   # build the installer into apps/desktop/dist
+npm run desktop:icons  # re-render the app and tray icons from design/assets
+```
+
+The desktop app and browser mode (below) share `~/.agent-kanban`; only one runs at a time.
+
+Development (browser mode):
 
 ```bash
 npm install
@@ -41,6 +58,6 @@ Then open http://localhost:3007/board.html.
 
 - Spec: `docs/specs/2026-10-22-agent-kanban-design.md`
 - Roadmap and plans: `docs/superpowers/plans/`
-- Design brief and tokens: `design/design-brief.md`, `design/tokens.css`
+- Design brief and tokens: `design/DESIGN.md`, `design/tokens.css`
 
 Parts of the provider integration logic are ported from [T3 Code](https://github.com/pingdotgg/t3code) (MIT); see `THIRD_PARTY_LICENSES`.

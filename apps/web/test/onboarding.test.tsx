@@ -22,7 +22,7 @@ const mocked = api as unknown as { checkConnections: Fn; connect: Fn; patchSetti
 const NOW = Date.parse('2026-10-23T12:00:00.000Z');
 const ago = (min: number) => new Date(NOW - min * 60_000).toISOString();
 const ON = { claude: true, codex: true, antigravity: true };
-const settings = (over: Partial<Settings> = {}): Settings => ({ onboarded: false, showChats: { ...ON }, suggest: { ...ON }, ...over });
+const settings = (over: Partial<Settings> = {}): Settings => ({ onboarded: false, showChats: { ...ON }, suggest: { ...ON }, hiddenProjects: [], unhiddenProjects: [], ...over });
 
 const conn = (provider: ProviderId, over: Partial<ConnectionHealth> = {}): ConnectionHealth => ({
   provider, installed: true, path: `/bin/${provider}`, version: '1.0.0', latestVersion: '1.0.0', updateAvailable: false,
@@ -255,6 +255,26 @@ describe('chats and notifications steps', () => {
   });
 });
 
+describe('notifications step hint (#6)', () => {
+  const toNotifications = () => {
+    fireEvent.click(primary('Get started'));
+    fireEvent.click(primary('Continue'));
+    fireEvent.click(primary('Continue'));
+  };
+  for (const [permission, shown] of [['default', true], ['denied', false], ['granted', false]] as const) {
+    it(`"Windows will ask" shows only before the browser has asked (${permission})`, () => {
+      vi.stubGlobal('Notification', { permission, requestPermission: async () => permission });
+      try {
+        mount(seeded([conn('claude')]));
+        toNotifications();
+        expect(screen.queryByText('Windows will ask to allow notifications.') !== null).toBe(shown);
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+  }
+});
+
 describe('finish', () => {
   const toReady = () => {
     fireEvent.click(primary('Get started'));
@@ -262,6 +282,14 @@ describe('finish', () => {
     fireEvent.click(primary('Continue'));
     fireEvent.click(primary('Continue'));
   };
+
+  it('leaves hidden projects and their chats out of the summary', () => {
+    const temp: Project = { ...project('/tmp/ak-claude-1', ['claude']), hidden: 'auto' };
+    const store = seeded([conn('claude')], { history: [...hist('claude', 4), ...hist('claude', 3, '/tmp/ak-claude-1').map((h) => ({ ...h, sessionRef: `t${h.sessionRef}` }))], projects: [project('/w/alpha', ['claude']), temp] });
+    mount(store);
+    toReady();
+    expect(screen.getByText('4 chats from 1 projects in the sidebar')).toBeTruthy();
+  });
 
   it('summarises, writes onboarded: true, closes, and opens New chat', async () => {
     mocked.patchSettings.mockResolvedValue(settings({ onboarded: true }));

@@ -13,7 +13,7 @@ type Fn = ReturnType<typeof vi.fn>;
 const mocked = api as unknown as { history: Fn; projects: Fn };
 
 const ON = { claude: true, codex: true, antigravity: true };
-const SETTINGS: Settings = { onboarded: true, showChats: ON, suggest: ON };
+const SETTINGS: Settings = { onboarded: true, showChats: ON, suggest: ON, hiddenProjects: [], unhiddenProjects: [] };
 const seeded = () => createStore(applySnapshot(initialState(), { chats: [], usage: [], suggested: null, connections: [], history: [], projects: [], settings: SETTINGS }));
 const flush = () => new Promise((r) => setTimeout(r, 0));
 

@@ -103,6 +103,14 @@ export interface SettingsPatch {
   onboarded?: boolean;
   showChats?: Partial<Record<ProviderId, boolean>>;
   suggest?: Partial<Record<ProviderId, boolean>>;
+  hiddenProjects?: string[];
+  unhiddenProjects?: string[];
+}
+
+export interface Transcript {
+  messages: { role: 'user' | 'assistant'; text: string; at: string | null }[];
+  truncated: boolean;
+  unavailable: boolean;
 }
 
 export const api = {
@@ -111,6 +119,10 @@ export const api = {
   listRequests: (id: string) => get<OpenRequest[]>(`/api/chats/${enc(id)}/requests`),
   listToolCalls: (id: string) => get<ToolCall[]>(`/api/chats/${enc(id)}/tool-calls`),
   startChat: (body: { provider: ProviderId; cwd: string; prompt: string; model?: string }) => post<Chat>('/api/chats', body),
+  /** Shows the computer's own folder picker; null when it was cancelled (#24). */
+  pickFolder: () => post<{ path: string | null }>('/api/folders/pick'),
+  /** Shows a project folder in the computer's file manager (#15). */
+  openFolder: (path: string) => post<void>('/api/folders/open', { path }),
   send: (id: string, text: string) => post<void>(`/api/chats/${enc(id)}/messages`, { text }),
   answer: (id: string, requestId: string, decision: AnswerDecision) =>
     post<void>(`/api/chats/${enc(id)}/requests/${enc(requestId)}`, { decision }),
@@ -121,6 +133,9 @@ export const api = {
   patchChat: (id: string, patch: ChatPatch) => request<Chat>('PATCH', `/api/chats/${enc(id)}`, patch),
   history: () => get<HistoryChat[]>('/api/history'),
   continueHistory: (body: { provider: ProviderId; sessionRef: string; text: string }) => post<Chat>('/api/history/continue', body),
+  /** Past messages of a history-only chat, read-only (#16). */
+  historyMessages: (provider: ProviderId, sessionRef: string) =>
+    get<Transcript>(`/api/history/${provider}/${encodeURIComponent(sessionRef)}/messages`),
   usage: () => get<UsageResponse>('/api/usage'),
   refreshUsage: () => post<UsageResponse>('/api/usage/refresh'),
   connections: () => get<ConnectionHealth[]>('/api/connections'),

@@ -176,15 +176,14 @@ describe('Board: a chat that is still starting', () => {
 });
 
 describe('Board: card hover actions and long titles', () => {
-  it('while the actions show (hover or focus inside), the title reserves room for them, with tokens only', async () => {
+  it('hover never changes the title layout: the actions float on a fade, titles clamp at 3 lines, tokens only (#9)', async () => {
     const { readFileSync } = await import('node:fs');
     const css = readFileSync('src/styles/app.css', 'utf8'); // vitest runs from apps/web
-    const rule = (sel: RegExp) => new RegExp(sel.source + String.raw`[^{]*\{\s*padding-inline-end: (calc\([^;]*\));\s*\}`).exec(css)?.[1];
-    const icons = rule(/\.card:hover \.card-title, \.card:focus-within \.card-title/);
-    const wide = rule(/\.card:has\(\.card-actions \.btn:not\(\.icon-only\)\):hover \.card-title,\s*\.card:has\(\.card-actions \.btn:not\(\.icon-only\)\):focus-within \.card-title/);
-    expect(icons).toBeDefined();
-    expect(wide).toBeDefined();
-    for (const v of [icons!, wide!]) expect(v.replace(/var\(--space-\d\)/g, '')).not.toMatch(/px|rem|em/);
+    expect(css).not.toMatch(/:hover \.card-title[^{]*\{[^}]*padding-inline-end/);
+    const actions = /\.card-actions \{([^}]*)\}/.exec(css)?.[1] ?? '';
+    expect(actions).toMatch(/background: linear-gradient\(to right, transparent, var\(--color-surface\) var\(--space-6\)\)/);
+    expect(actions.replace(/var\(--[\w-]+\)/g, '')).not.toMatch(/\d(px|rem|em)/);
+    expect(/\.card-title \{([^}]*)\}/.exec(css)?.[1]).toMatch(/-webkit-line-clamp: 3/);
   });
 });
 
@@ -509,5 +508,16 @@ describe('Board: fix round 1', () => {
     act(() => store.setState((s) => applyEvent(s, { type: 'tool.call', chatId: 'c1', toolCall: tool({ id: 'c', summary: 'Third step', status: 'running' }) })));
     expect(now().textContent).toBe('Third step');
     expect(now().className).toBe('now');
+  });
+});
+
+describe('dateTime (#23)', () => {
+  it('says Today for today, the month and day otherwise, and the year only for another year', async () => {
+    const { dateTime } = await import('../src/ui/board/format.ts');
+    const now = new Date('2026-10-30T12:00:00').getTime();
+    expect(dateTime(new Date('2026-10-30T08:15:00').toISOString(), now)).toBe('Today, 8:15 am');
+    expect(dateTime(new Date('2026-10-27T15:01:00').toISOString(), now)).toBe('Oct 27, 3:01 pm');
+    expect(dateTime(new Date('2025-12-31T23:59:00').toISOString(), now)).toBe('Dec 31, 2025, 11:59 pm');
+    expect(dateTime('not a date', now)).toBe('');
   });
 });

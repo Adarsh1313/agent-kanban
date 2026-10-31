@@ -10,7 +10,7 @@ import { Icon, PROVIDER_IDS, ProviderLogo, providerName, StatusIcon } from '../p
 import { cssMs, reducedMotion } from '../primitives/motion.ts';
 import { navigate } from '../shell/route.ts';
 import {
-  agoLabel, cachedProjectInfo, chatsByFolder, findByFolder, folderKey, INSTRUCTION_FILE, loadProjectInfo, plural, statsOf, workedWith,
+  agoLabel, cachedProjectInfo, chatsByFolder, findByFolder, folderKey, INSTRUCTION_FILE, isProjectHidden, loadProjectInfo, plural, setProjectHidden, statsOf, workedWith,
   type ProjectChat, type ProjectStats,
 } from './model.ts';
 
@@ -116,7 +116,7 @@ function ProviderCards({ project, stats, worked, now }: { project: Project; stat
           <div className="know" key={id}>
             <div className="h"><ProviderLogo id={id} />{providerName(id)}<span className="r">{plural(mine?.chats ?? 0, 'chat')}</span></div>
             <p>Last used {agoLabel(lastAt, now)}{model ? ` · ${model}` : ''}</p>
-            <button className="btn" type="button"
+            <button className="btn" type="button" disabled={project.folderMissing}
               onClick={() => openNewChat({ cwd: project.path, provider: id })}>
               <Icon name="plus" size="sm" />New {providerName(id)} chat
             </button>
@@ -227,17 +227,20 @@ function fromChats(chats: ProjectChat[]): Project | undefined {
   return {
     id: first.cwd, name: baseName(first.cwd), path: first.cwd, providers: [],
     columns: { running: 0, needs_you: 0, review: 0, done: 0 }, historyOnly: 0, lastActivityAt: chats.reduce((a, c) => (c.updatedAt > a ? c.updatedAt : a), ''),
+    hidden: null, folderMissing: false,
   };
 }
 
 const detailState = (id: string) => (s: AppState) => {
   const found = findByFolder(s.projects, id);
   const chats = chatsByFolder(s)[folderKey(found?.id ?? id)] ?? [];
-  return { project: found ?? fromChats(chats), chats, now: s.now, loaded: s.loaded };
+  const project = found ?? fromChats(chats);
+  return { project, chats, now: s.now, loaded: s.loaded, hidden: project ? isProjectHidden(s, project) : false };
 };
 
 export function ProjectDetail({ projectId }: { projectId: string }) {
-  const { project, chats, now, loaded } = useStore(detailState(projectId));
+  const store = useStoreInstance();
+  const { project, chats, now, loaded, hidden } = useStore(detailState(projectId));
   const [filter, setFilter] = useState<Filter>('all');
   const [swapped, setSwapped] = useState(0);
   const [showAll, setShowAll] = useState(false);
@@ -282,8 +285,13 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
           <h2 className="page-title"><span className="folder-glyph big-glyph proj-glyph" aria-hidden="true">{(project.name || '?')[0]!.toUpperCase()}</span>{project.name}</h2>
           <p className="mono path-line">{project.path}</p>
         </div>
-        <button className="btn primary" type="button" onClick={() => openNewChat({ cwd: project.path })}><Icon name="plus" size="sm" />New chat</button>
+        {hidden
+          ? <button className="btn" type="button" onClick={() => void setProjectHidden(store, project, false)}>Unhide</button>
+          : <button className="btn ghost" type="button" onClick={() => { void setProjectHidden(store, project, true).then((ok) => { if (ok) navigate('projects'); }); }}>Hide project</button>}
+        <button className="btn primary" type="button" disabled={project.folderMissing} onClick={() => openNewChat({ cwd: project.path })}><Icon name="plus" size="sm" />New chat</button>
       </div>
+      {project.folderMissing && <p className="project-note">Folder missing: it was moved or deleted. Its chats can still be read, but no new chat can start here.</p>}
+      {hidden && <p className="project-note">Hidden from the sidebar, the board and New chat. Its chats are kept.</p>}
       <div className="detail">
         <div>
           <h3 className="section-title">Providers that know this project</h3>

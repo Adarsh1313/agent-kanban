@@ -25,16 +25,17 @@ html, body { overflow: hidden; }
 /* Connection status (Reconnecting… / server restarted) sits under the top bar */
 .conn-banner { flex: none; padding: var(--space-2) var(--space-4); font-size: var(--text-body); color: var(--color-text-muted); background: var(--color-control); border-bottom: 1px solid var(--color-border); }
 .conn-banner[data-state="unauthorized"] { color: var(--color-needs-text); background: var(--color-needs-soft); }
+.app[data-loading] { visibility: hidden; }
+.app-loading { position: fixed; inset: 0; display: grid; place-items: center; margin: 0; font-size: var(--text-body); color: var(--color-text-muted); }
 
 /* Board: each card sits in a stable slot the board moves between columns (FLIP keeps the same node) */
 .col-cards, .card-slot { display: contents; }
 .card[aria-current="true"] { border-color: var(--color-ink); }
 .card-meta .card-proj { display: inline-flex; align-items: center; gap: var(--space-1); min-width: 0; }
-/* The hover actions sit over the end of the title's line: while they show, the title wraps short of them
-   (three 24 px icons, or Resume with text and two icons). */
-.card:hover .card-title, .card:focus-within .card-title { padding-inline-end: calc(var(--space-8) * 2 + var(--space-3)); }
-.card:has(.card-actions .btn:not(.icon-only)):hover .card-title,
-.card:has(.card-actions .btn:not(.icon-only)):focus-within .card-title { padding-inline-end: calc(var(--space-8) * 4 + var(--space-4)); }
+/* The hover actions float over the end of the title on a fade of the card's own colour, so the title never rewraps
+   and the card never changes height under the pointer (#9). Long titles stop at three lines with an ellipsis. */
+.card-actions { padding-left: var(--space-6); background: linear-gradient(to right, transparent, var(--color-surface) var(--space-6)); }
+.card-title { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; overflow-wrap: anywhere; }
 .no-results { flex: 1; display: grid; place-items: center; text-align: center; color: var(--color-text-muted); align-self: stretch; }
 .no-results h3 { margin: var(--space-2) 0 var(--space-1); color: var(--color-text); font-size: var(--text-title); font-weight: var(--weight-semibold); }
 .no-results p { margin: 0 0 var(--space-3); font-size: var(--text-body); }
@@ -43,6 +44,8 @@ html, body { overflow: hidden; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 .panel:focus { outline: none; }
 .panel-head .t small .icon { flex: none; }
+/* The sub-line stays on one line; only the folder name gives way, with an ellipsis (#10). */
+.panel-head .t small { white-space: nowrap; overflow: hidden; }
 .panel-head .panel-proj { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .title-edit { display: block; width: 100%; font: inherit; font-size: var(--text-title); font-weight: var(--weight-semibold); letter-spacing: var(--tracking-tight);
   color: var(--color-text); background: var(--color-surface); border: 1px solid var(--color-border-strong); border-radius: var(--radius-control); padding: 0 var(--space-1); outline: 0; }
@@ -51,6 +54,21 @@ html, body { overflow: hidden; }
 .thread .turn { display: flex; flex-direction: column; gap: var(--space-4); }
 .thread .msg.agent { width: 100%; }
 .msg-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+/* Agent replies render markdown (#4): block spacing comes from the elements, not from pre-wrap. */
+.msg-text.md { white-space: normal; }
+.md > :first-child { margin-top: 0; }
+.md > :last-child { margin-bottom: 0; }
+.md-p, .md-list, .md-code, .md-quote { margin: 0 0 var(--space-2); }
+.md-h { margin: var(--space-3) 0 var(--space-1); font-weight: var(--weight-semibold); }
+.md-h1 { font-size: var(--text-heading); }
+.md-list { padding-left: var(--space-5); }
+.md-list li + li { margin-top: var(--space-1); }
+.md-inline, .md-code { font-family: var(--font-mono); font-size: var(--text-caption); background: var(--color-control); border-radius: var(--radius-badge); }
+.md-inline { padding: 0 var(--space-1); }
+.md-code { padding: var(--space-2) var(--space-3); overflow-x: auto; white-space: pre; border: 1px solid var(--color-border); border-radius: var(--radius-control); }
+.md-code code { font: inherit; background: none; }
+.md-quote { padding-left: var(--space-3); border-left: 2px solid var(--color-border-strong); color: var(--color-text-muted); }
+.md a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
 .msg.agent .work + .msg-text, .msg.agent .msg-text + .msg-text, .msg.agent .work + .thread-note { margin-top: var(--space-3); }
 .msg-time { font-size: var(--text-caption); color: var(--color-text-faint); font-variant-numeric: tabular-nums; }
 .msg.user .msg-time { display: block; text-align: right; margin-top: var(--space-1); }
@@ -73,7 +91,8 @@ html, body { overflow: hidden; }
 .dlg-note .icon { flex: none; }
 .dlg-hint { color: var(--color-text-faint); font-size: var(--text-caption); font-variant-numeric: tabular-nums; }
 .dlg-hint.warn { color: var(--color-needs-text); }
-.dlg-path { display: flex; flex-direction: column; gap: var(--space-1); }
+.dlg-path { display: grid; grid-template-columns: 1fr auto; gap: var(--space-1) var(--space-2); align-items: center; }
+.dlg-path .dlg-path-error { grid-column: 1 / -1; }
 .dlg-path-input { width: 100%; height: calc(var(--space-6) + var(--space-2)); padding: 0 var(--space-2); font: inherit; font-family: var(--font-mono); font-size: var(--text-caption);
   color: var(--color-text); background: var(--color-surface); border: 1px solid var(--color-border-strong); border-radius: var(--radius-control); outline: 0; }
 .dlg-path-input:focus-visible { box-shadow: 0 0 0 calc(var(--space-1) * .75) color-mix(in srgb, var(--color-focus) 15%, transparent); }
@@ -137,6 +156,16 @@ a.prow { color: inherit; text-decoration: none; }
 .plist-rows li:first-child .prow { border-top: 0; }
 .prow .go { display: grid; place-items: center; }
 .plist-head button[aria-pressed="true"] { color: var(--color-text); }
+/* Hidden projects (Show hidden projects on): dimmed, with Unhide over the row's arrow. */
+.show-hidden { display: inline-flex; align-items: center; gap: var(--space-2); margin: 0 0 var(--space-3); font-size: var(--text-caption); color: var(--color-text-muted); }
+.show-hidden .count { color: var(--color-text-faint); font-variant-numeric: tabular-nums; }
+.plist-rows li.hidden-project { position: relative; }
+.plist-rows li.hidden-project .prow > :not(.go) { opacity: .55; }
+.plist-rows li.hidden-project .go { visibility: hidden; }
+/* Unhide takes the arrow's place: the same column, centred in it. */
+.plist-rows .unhide { position: absolute; right: calc(var(--space-3) + var(--space-1) * 1.5); top: 0; bottom: 0; margin: auto 0; width: var(--control-height-sm); height: var(--control-height-sm); }
+.missing-note { color: var(--color-needs-text); margin-right: var(--space-2); }
+.project-note { margin: 0 0 var(--space-4); font-size: var(--text-caption); color: var(--color-text-muted); }
 .know .btn:disabled { opacity: .5; cursor: not-allowed; }
 .about .copy-path { align-self: flex-start; margin-left: calc(var(--space-2) * -1); }
 .about .v.muted { color: var(--color-text-muted); }
@@ -172,5 +201,52 @@ body:has(> .onb[data-state="open"]) > .toasts { z-index: 91; }
 .onb .found .onb-show { margin-top: calc(var(--space-1) * 1.5); }
 .onb-k { font-size: var(--text-micro); color: var(--color-text-faint); font-weight: var(--weight-medium); margin-bottom: calc(var(--space-1) * 1.5); }
 .onb .onb-play { height: auto; padding: 0 calc(var(--space-1) / 2); display: inline; }
-.onb .agent .t small + small { color: var(--color-text-faint); }
+.onb .agent-row .t small + small { color: var(--color-text-faint); }
 .onb h1:focus { outline: none; }
+
+/* Desktop app: the window has no system title bar (design/DESIGN.md). A strip across the top of every screen
+   (board, onboarding) drags the window, controls in it stay clickable, and the top bar leaves room at its right
+   end for the caption buttons Windows draws there. */
+.desktop body::before { content: ""; position: fixed; inset: 0 0 auto 0; height: var(--titlebar-height); -webkit-app-region: drag; pointer-events: none; }
+.desktop :is(button, a, input, select, textarea, [role="button"], [tabindex], .popover, .dialog, .panel) { -webkit-app-region: no-drag; }
+/* The chat panel runs to the top edge too: its header keeps its buttons clear of the caption buttons. */
+.desktop :is(.topbar, .panel-head) { padding-right: calc(var(--titlebar-controls-width) + var(--space-2)); }
+
+/* Recent chats (prototype variant A): the project label sits muted on the right; hovering swaps it for the date. */
+.chat-row .rest { flex: none; max-width: 34%; color: var(--color-text-faint); font-size: var(--text-caption); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chat-row .rest .d { display: none; }
+/* The "…" button floats over the row's right edge, so while hidden it takes no width from the title; the label makes
+   room for it only when it shows. */
+.chat-row .row-more { position: absolute; right: var(--space-1); top: 0; bottom: 0; margin: auto 0; }
+.chat-row:hover .rest, .chat-row:focus-within .rest, .chat-row[aria-current] .rest { margin-right: calc(var(--space-6) + var(--space-1)); }
+@media (hover: hover) and (pointer: fine) {
+  .chat-row:hover .rest .p { display: none; }
+  .chat-row:hover .rest .d { display: inline; }
+}
+.chat-row:focus-visible .rest .p { display: none; }
+.chat-row:focus-visible .rest .d { display: inline; }
+
+/* All chats: the Projects page head (title, count, one line, search + Filter), then a plain list (prototype variant A). */
+.all-chats-page .page-head .search input { width: var(--search-width); }
+.all-chats-page .filterbar { padding: 0 0 var(--space-3); border-bottom: 0; }
+.all-chats-page .crow .proj { flex: none; display: inline-flex; align-items: center; gap: calc(var(--space-1) * 1.5); width: var(--column-project); min-width: 0; color: var(--color-text-muted); font-size: var(--text-caption); white-space: nowrap; overflow: hidden; }
+.all-chats-page .crow .proj > span:last-child { overflow: hidden; text-overflow: ellipsis; }
+.all-chats-page .crow .proj .folder-glyph { width: var(--glyph-sm); height: var(--glyph-sm); font-size: calc(var(--glyph-sm) * .6); }
+.all-chats-page .crow .when { flex: none; width: var(--column-when); text-align: right; color: var(--color-text-faint); font-size: var(--text-caption); font-variant-numeric: tabular-nums; }
+.all-chats-page mark { background: var(--color-needs-soft); color: inherit; border-radius: var(--radius-badge); }
+.all-chats-page .show-more-row { margin-top: var(--space-2); }
+@media (max-width: 640px) {
+  /* Phone: the title keeps most of the row; the project name shrinks first and the time column fits its text. */
+  .all-chats-page .crow .proj { width: auto; max-width: 30%; }
+  .all-chats-page .crow .proj .folder-glyph { display: none; }
+  .all-chats-page .crow .when { width: auto; }
+  .all-chats-page .page-head .search, .all-chats-page .page-head .search input { width: 100%; }
+}
+
+/* New chat picker: older projects wait behind one "Older (n)" row and show dimmed when it opens. */
+.dlg-pop-project .menu-search { border-bottom: 1px solid var(--color-border); }
+.dlg-pop .older-row { color: var(--color-text-muted); }
+.dlg-pop .older-row .icon { transition: transform var(--duration-pop) var(--ease-out); }
+.dlg-pop .older-row[aria-expanded="true"] .icon { transform: rotate(90deg); }
+@media (prefers-reduced-motion: reduce) { .dlg-pop .older-row .icon { transition: none; } }
+.dlg-pop .menu-item.dim { color: var(--color-text-muted); }

@@ -5,17 +5,17 @@ import { ApiError, api } from '../src/api/client.ts';
 import { applySnapshot, initialState, type AppState } from '../src/state/reducer.ts';
 import { createStore, StoreProvider, type Store } from '../src/state/store.ts';
 import { openNewChat } from '../src/ui/actions.ts';
-import { allowedProviders, findProject, NewChatDialog, resetModelsCache } from '../src/ui/newchat/NewChatDialog.tsx';
+import { allowedProviders, findProject, knownProviders, NewChatDialog, resetModelsCache } from '../src/ui/newchat/NewChatDialog.tsx';
 import { Toasts } from '../src/ui/primitives/toast.tsx';
 import { Shell } from '../src/ui/shell/Shell.tsx';
 import { chat } from './helpers.ts';
 
 vi.mock('../src/api/client.ts', async (orig) => {
   const m = await orig<typeof import('../src/api/client.ts')>();
-  return { ...m, api: { ...m.api, startChat: vi.fn(), models: vi.fn() } };
+  return { ...m, api: { ...m.api, startChat: vi.fn(), models: vi.fn(), pickFolder: vi.fn() } };
 });
 
-const mocked = api as unknown as { startChat: ReturnType<typeof vi.fn>; models: ReturnType<typeof vi.fn> };
+const mocked = api as unknown as { startChat: ReturnType<typeof vi.fn>; models: ReturnType<typeof vi.fn>; pickFolder: ReturnType<typeof vi.fn> };
 const NOW = Date.parse('2026-10-23T12:00:00.000Z');
 
 const conn = (provider: ProviderId, status: ConnectionHealth['status'] = 'connected'): ConnectionHealth => ({
@@ -25,7 +25,7 @@ const conn = (provider: ProviderId, status: ConnectionHealth['status'] = 'connec
 const project = (id: string, providers: ProviderId[], lastActivityAt = '2026-10-23T10:00:00.000Z'): Project => ({
   id, name: id.split('/').pop()!, path: id,
   providers: providers.map((provider) => ({ provider, chats: 1, lastUsedAt: lastActivityAt, lastModel: null })),
-  columns: { running: 0, needs_you: 0, review: 0, done: 0 }, historyOnly: 0, lastActivityAt,
+  columns: { running: 0, needs_you: 0, review: 0, done: 0 }, historyOnly: 0, lastActivityAt, hidden: null, folderMissing: false,
 });
 const reading = (provider: ProviderId, five: number, week: number): UsageReading => ({
   provider, status: 'ok', readAt: '2026-10-23T11:00:00.000Z',
@@ -56,20 +56,23 @@ const flush = () => act(async () => { await Promise.resolve(); await Promise.res
 beforeEach(() => {
   mocked.startChat.mockReset();
   mocked.models.mockReset();
+  mocked.pickFolder.mockReset();
+  mocked.pickFolder.mockResolvedValue({ path: null });
   mocked.models.mockResolvedValue({ claude: [{ id: 'opus', label: 'Opus', isDefault: true }, { id: 'sonnet', label: 'Sonnet', isDefault: false }], codex: [{ id: 'gpt-5', label: 'GPT-5', isDefault: true }], antigravity: [] });
   resetModelsCache();
 });
 afterEach(() => cleanup());
 
 describe('allowedProviders', () => {
-  it('a known project allows the connected providers that worked in it', () => {
-    const s = seeded().getState();
-    expect(allowedProviders(s, PROJECTS[0])).toEqual(['claude']);
-    expect(allowedProviders(s, PROJECTS[1])).toEqual(['claude', 'codex']);
-  });
-  it('a new folder allows any connected provider, Antigravity included; update_available counts as connected', () => {
+  it('any connected provider can start in any folder, Antigravity included; update_available counts as connected (#22)', () => {
     const s = seeded({ connections: [conn('claude', 'update_available'), conn('codex', 'degraded'), conn('antigravity')] }).getState();
-    expect(allowedProviders(s, undefined)).toEqual(['claude', 'antigravity']);
+    expect(allowedProviders(s)).toEqual(['claude', 'antigravity']);
+  });
+  it('knownProviders: the allowed providers that already worked in the project (none for a new folder)', () => {
+    const allowed = ['claude', 'codex', 'antigravity'] as const;
+    expect(knownProviders([...allowed], PROJECTS[0])).toEqual(['claude']);
+    expect(knownProviders([...allowed], PROJECTS[1])).toEqual(['claude', 'codex']);
+    expect(knownProviders([...allowed], undefined)).toEqual([]);
   });
 });
 
@@ -84,7 +87,7 @@ describe('findProject', () => {
 });
 
 describe('New chat dialog', () => {
-  it('opens on the latest project; the provider picker disables providers that have not worked there or are not connected', async () => {
+  it('opens on the latest project; its own provider is the default, other connected providers can be picked, unconnected ones cannot', async () => {
     mount(seeded());
     act(() => openNewChat());
     expect(dialog().dataset.state).toBe('open');
@@ -95,14 +98,15 @@ describe('New chat dialog', () => {
     expect(row('Claude Code').getAttribute('aria-disabled')).toBeNull();
     expect(row('Claude Code').getAttribute('aria-selected')).toBe('true');
     expect(within(row('Claude Code')).getByText('82% of 5-hour · 64% of weekly left')).toBeTruthy();
-    expect(row('Codex').getAttribute('aria-disabled')).toBe('true');
-    expect(within(row('Codex')).getByText('Hasn’t worked on alpha yet')).toBeTruthy();
+    expect(row('Codex').getAttribute('aria-disabled')).toBeNull();
     expect(row('Antigravity').getAttribute('aria-disabled')).toBe('true');
     expect(within(row('Antigravity')).getByText('Not signed in')).toBeTruthy();
-    // A disabled row does nothing.
-    fireEvent.click(row('Codex'));
+    expect(within(dialog()).getByText('alpha has been worked on with Claude Code, so that’s picked first. Any connected provider can work here.')).toBeTruthy();
+    // A disabled row does nothing; another connected provider can be picked for this project.
+    fireEvent.click(row('Antigravity'));
     expect(chip(/^Provider: Claude Code$/)).toBeTruthy();
-    expect(within(dialog()).getByText(/alpha has been worked on with Claude Code/)).toBeTruthy();
+    fireEvent.click(row('Codex'));
+    expect(chip(/^Provider: Codex$/)).toBeTruthy();
   });
 
   it('openNewChat({ cwd }) preselects that folder and allows its providers; usage with no reading shows —', () => {
@@ -133,9 +137,9 @@ describe('New chat dialog', () => {
     expect(chip(/^Project: beta$/)).toBeTruthy();
     expect(chip(/^Provider: Codex$/)).toBeTruthy();
     fireEvent.click(within(dialog()).getByRole('button', { name: 'Cancel' }));
-    // Codex hasn't worked in alpha, and Antigravity isn't connected: the usual pick stands.
+    // Codex hasn't worked in alpha but is connected, so it may start there (#22); Antigravity isn't connected.
     act(() => openNewChat({ cwd: '/work/alpha', provider: 'codex' }));
-    expect(chip(/^Provider: Claude Code/)).toBeTruthy();
+    expect(chip(/^Provider: Codex$/)).toBeTruthy();
     act(() => openNewChat({ cwd: '/work/beta', provider: 'antigravity' }));
     expect(chip(/^Provider: Claude Code/)).toBeTruthy();
   });
@@ -147,7 +151,7 @@ describe('New chat dialog', () => {
     expect((screen.getByRole('textbox', { name: 'Folder path' }) as HTMLInputElement).value).toBe('');
   });
 
-  it('switching project keeps an allowed provider and drops one that is not', () => {
+  it('switching project keeps the picked provider: every connected one may start anywhere (#22)', () => {
     mount(seeded());
     act(() => openNewChat({ cwd: '/work/beta' }));
     fireEvent.click(chip(/^Provider:/));
@@ -156,7 +160,7 @@ describe('New chat dialog', () => {
     fireEvent.click(chip(/^Project:/));
     fireEvent.click(within(listbox('Project')).getByRole('option', { name: /alpha/ }));
     expect(chip(/^Project: alpha$/)).toBeTruthy();
-    expect(chip(/^Provider: Claude Code$/)).toBeTruthy();
+    expect(chip(/^Provider: Codex$/)).toBeTruthy();
   });
 
   it('start sends { provider, cwd, prompt } with Default omitted, and closes on success', async () => {
@@ -254,6 +258,23 @@ describe('New chat dialog', () => {
     expect(dialog().dataset.state).toBe('closed');
   });
 
+  it('Choose another folder… opens the system folder picker and fills the chosen folder; cancelling keeps the typed field (#24)', async () => {
+    mocked.pickFolder.mockResolvedValueOnce({ path: String.raw`C:\Work\my-app` });
+    mount(seeded());
+    act(() => openNewChat());
+    fireEvent.click(chip(/^Project:/));
+    fireEvent.click(within(listbox('Project')).getByRole('option', { name: /Choose another folder/ }));
+    expect(mocked.pickFolder).toHaveBeenCalledTimes(1);
+    await flush();
+    const field = screen.getByRole('textbox', { name: 'Folder path' }) as HTMLInputElement;
+    expect(field.value).toBe(String.raw`C:\Work\my-app`);
+    // Browse… again, cancelled: the field keeps its value.
+    fireEvent.click(within(dialog()).getByRole('button', { name: /Browse/ }));
+    await flush();
+    expect(mocked.pickFolder).toHaveBeenCalledTimes(2);
+    expect(field.value).toBe(String.raw`C:\Work\my-app`);
+  });
+
   it("Choose another folder…: the server's 400 shows inline under the path field and nothing else changes", async () => {
     mocked.startChat.mockRejectedValue(new ApiError("That folder doesn't exist.", 400));
     mount(seeded({ connections: [conn('claude'), conn('codex'), conn('antigravity', 'not_installed')] }));
@@ -305,7 +326,7 @@ describe('New chat dialog', () => {
     mount(seeded({ connections: [conn('claude', 'signed_out')] }));
     act(() => openNewChat());
     expect((start() as HTMLButtonElement).disabled).toBe(true);
-    expect(within(dialog()).getByText(/None of your connected providers has worked on alpha yet/)).toBeTruthy();
+    expect(within(dialog()).getByText('No provider is connected yet. Connect one on the Connections page.')).toBeTruthy();
   });
 });
 
@@ -337,6 +358,18 @@ describe('New chat: loading and odd data', () => {
     act(() => store.setState((s) => ({ ...s, projects: PROJECTS })));
     expect(chip(/^Project: alpha$/)).toBeTruthy();
     expect(screen.queryByRole('textbox', { name: 'Folder path' })).toBeNull();
+  });
+
+  it('the project picker lists the most recently active projects first', () => {
+    mount(seeded({ projects: [
+      project('/work/old', ['claude'], '2026-09-28T10:00:00.000Z'),
+      project('/work/newest', ['codex'], '2026-10-23T11:00:00.000Z'),
+      project('/work/middle', ['claude'], '2026-10-01T10:00:00.000Z'),
+    ] }));
+    act(() => openNewChat());
+    fireEvent.click(chip(/^Project:/));
+    const names = within(listbox('Project')).getAllByRole('option').flatMap((o) => o.querySelector('.grow-text')?.textContent ?? []);
+    expect(names.slice(0, 3)).toEqual(['newest', 'middle', 'old']);
   });
 
   it('a project with no folder is never offered or matched by an empty path', () => {
@@ -496,5 +529,49 @@ describe('New chat: fix round 1', () => {
     act(() => openNewChat());
     await flush();
     expect(mocked.models).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe('New chat: project picker (Older, missing folders, scratch)', () => {
+  const days = (n: number) => new Date(NOW - n * 86_400_000).toISOString();
+  const RECENT = project('/work/alpha', ['claude'], days(1));
+  const MID = project('/work/beta', ['codex'], days(10));
+  const OLD1 = project('/work/thesis', ['claude'], days(45));
+  const OLD2 = project('/work/old-blog', ['claude'], days(90));
+  const GONE = { ...project('/work/gone', ['claude'], days(2)), folderMissing: true };
+  const SCRATCH = { ...project('C:/Users/me/AppData/Roaming/Claude/scratch-workspaces', ['claude'], days(0)), name: 'Claude scratch chats' };
+  const open = () => {
+    mount(seeded({ projects: [RECENT, MID, OLD1, OLD2, GONE, SCRATCH] }));
+    act(() => openNewChat());
+    fireEvent.click(chip(/^Project:/));
+    return listbox('Project');
+  };
+  const names = (pop: HTMLElement) => within(pop).queryAllByRole('option').map((o) => o.textContent?.trim()).filter((t) => t !== 'Choose another folder…');
+
+  it('lists recent projects newest first, then one "Older" row with the count; missing folders and Claude scratch chats are left out', () => {
+    const pop = open();
+    expect(names(pop)).toEqual(['alpha', 'beta']);
+    const older = within(pop).getByRole('button', { name: /Older/ });
+    expect(older.textContent).toContain('2');
+    expect(older.getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('the Older row unfolds the older projects, dimmed, in place', () => {
+    const pop = open();
+    fireEvent.click(within(pop).getByRole('button', { name: /Older/ }));
+    expect(names(pop)).toEqual(['alpha', 'beta', 'thesis', 'old-blog']);
+    expect(within(pop).getByRole('option', { name: /thesis/ }).classList.contains('dim')).toBe(true);
+  });
+
+  it('typing in the search filters every project, older ones included', () => {
+    const pop = open();
+    fireEvent.change(within(pop).getByRole('searchbox', { name: 'Search projects' }), { target: { value: 'th' } });
+    expect(names(pop)).toEqual(['thesis']);
+  });
+
+  it('the dialog does not open on a project whose folder is missing', () => {
+    mount(seeded({ projects: [GONE, MID] }));
+    act(() => openNewChat());
+    expect(chip(/^Project: beta$/)).toBeTruthy();
   });
 });

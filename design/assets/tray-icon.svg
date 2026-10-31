@@ -1,0 +1,9 @@
+<!-- Agent Kanban tray icon, 16px grid. currentColor is tray-on-dark or tray-on-light (tokens.css);
+     the dot (tray-dot) shows only when a chat needs you. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor">
+  <rect x="1" y="2" width="3.5" height="12" rx="1"/>
+  <rect x="6.25" y="2" width="3.5" height="7.5" rx="1"/>
+  <rect x="11.5" y="2" width="3.5" height="5" rx="1"/>
+  <rect x="5.5" y="11" width="5" height="3" rx="1" class="card"/>
+  <circle cx="13.5" cy="12.5" r="2.5" fill="#e0a43a" class="needs-dot"/>
+</svg>

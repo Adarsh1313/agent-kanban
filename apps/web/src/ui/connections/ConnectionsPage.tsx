@@ -20,6 +20,8 @@ const NOTE: Partial<Record<ProviderId, string>> = {
 const ANTIGRAVITY_SERVER = 'Uses Google’s official Antigravity server.';
 /** Antigravity's agent takes minutes to start the first time (shown while it installs or starts for a sign-in). */
 export const ANTIGRAVITY_SLOW = 'This can take a couple of minutes the first time.';
+/** The server's step while Antigravity's agent starts (STEP_STARTING_ANTIGRAVITY); the slow note goes with it only. */
+const STARTING_ANTIGRAVITY = 'Starting Antigravity…';
 
 /**
  * Antigravity's sign-in before the agent printed its link (it is still starting): the server's step is shown,
@@ -391,8 +393,8 @@ function ConnectionCard({ id }: { id: ProviderId }) {
     case 'signin':
       body = antigravityStarting(id, connect) ? (
         <>
-          <span className="step-text"><StatusIcon state="running" />{connect?.step ?? 'Starting Antigravity…'}</span>
-          <span>{ANTIGRAVITY_SLOW}</span>
+          <span className="step-text"><StatusIcon state="running" />{connect?.step ?? STARTING_ANTIGRAVITY}</span>
+          {(connect?.step ?? STARTING_ANTIGRAVITY) === STARTING_ANTIGRAVITY && <span>{ANTIGRAVITY_SLOW}</span>}
         </>
       ) : (
         <>

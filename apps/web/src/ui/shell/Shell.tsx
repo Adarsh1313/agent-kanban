@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef } from 'react';
 import type { AppState } from '../../state/reducer.ts';
 import { useStore, useStoreInstance, type Store } from '../../state/store.ts';
+import { closePanelIn } from '../../state/reducer.ts';
 import { openFilter, openNewChat } from '../actions.ts';
 import { Board } from '../board/Board.tsx';
 import { ConnectionsPage } from '../connections/ConnectionsPage.tsx';
@@ -8,6 +9,7 @@ import { ChatPanel } from '../chat/ChatPanel.tsx';
 import { FilterBar } from '../filters/FilterBar.tsx';
 import { NewChatDialog } from '../newchat/NewChatDialog.tsx';
 import { ProjectsPage } from '../projects/ProjectsPage.tsx';
+import { AllChatsPage } from '../chats/AllChatsPage.tsx';
 import { hasOpenLayer } from '../primitives/layers.ts';
 import { Toasts } from '../primitives/index.ts';
 import { Sidebar } from './Sidebar.tsx';
@@ -35,7 +37,12 @@ function useHashRoute(store: Store) {
   useLayoutEffect(() => {
     const sync = () => {
       const r = parseHash(location.hash);
-      store.setState((s) => (s.ui.view === r.view && s.ui.projectId === r.projectId ? s : { ...s, ui: { ...s.ui, view: r.view, projectId: r.projectId } }));
+      store.setState((s) => {
+        if (s.ui.view === r.view && s.ui.projectId === r.projectId) return s;
+        // Switching pages closes an open chat panel, so it never covers Connections or Projects (#8).
+        const base = s.ui.view !== r.view ? closePanelIn(s) : s;
+        return { ...base, ui: { ...base.ui, view: r.view, projectId: r.projectId } };
+      });
     };
     sync();
     window.addEventListener('hashchange', sync);
@@ -51,10 +58,11 @@ function useClock(store: Store) {
   }, [store]);
 }
 
-function useShortcuts() {
+function useShortcuts(store: Store) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.ctrlKey || e.metaKey || e.altKey || hasOpenLayer()) return;
+      // Nothing opens before the first load: onboarding may still need to come first (#5).
+      if (e.ctrlKey || e.metaKey || e.altKey || hasOpenLayer() || !store.getState().loaded) return;
       const t = e.target;
       if (t instanceof Element && t.closest('input, textarea, select, [contenteditable]')) return;
       if (e.key === 'n' || e.key === 'N') {
@@ -67,7 +75,7 @@ function useShortcuts() {
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, []);
+  }, [store]);
 }
 
 export function Shell() {
@@ -80,20 +88,24 @@ export function Shell() {
 
   useHashRoute(store);
   useClock(store);
-  useShortcuts();
+  useShortcuts(store);
+  const loaded = useStore((s) => s.loaded);
   useEffect(() => applySavedTheme(), []);
 
   const banner = bannerText(socket);
   return (
     <>
       <a className="skip" href="#/board" onClick={(e) => { e.preventDefault(); document.getElementById('main')?.focus(); }}>Skip to the content</a>
-      <div className="app">
+      {/* Until the first load the app is hidden and inert: no empty board to click, and onboarding (if due) comes first (#5). */}
+      {!loaded && <p className="app-loading" role="status">{banner ?? 'Loading your chats…'}</p>}
+      <div className="app" data-loading={!loaded || undefined} inert={!loaded || undefined}>
         <Sidebar />
         <div className="main">
           <TopBar />
           {banner && <p className="conn-banner" role="status" data-state={socket}>{banner}</p>}
           <main className={`view main-view${entering ? ' entering' : ''}`} key={view} id="main" tabIndex={-1} data-view={view}>
             {view === 'board' && <><FilterBar /><Board /></>}
+            {view === 'chats' && <AllChatsPage />}
             {view === 'projects' && <ProjectsPage />}
             {view === 'connections' && <ConnectionsPage />}
           </main>

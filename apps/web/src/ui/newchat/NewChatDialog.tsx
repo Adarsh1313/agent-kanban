@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import type { ConnectionHealth, ModelOption, Project, ProviderId, UsageReading } from '@agent-kanban/shared';
-import { folderKey } from '@agent-kanban/shared';
+import { folderKey, isClaudeScratch } from '@agent-kanban/shared';
 import { ApiError, api } from '../../api/client.ts';
 import type { AppState } from '../../state/reducer.ts';
-import { baseName, focusedProvider, suggestFor } from '../../state/selectors.ts';
+import { baseName, focusedProvider, OLDER_MS, suggestFor, visibleProjects } from '../../state/selectors.ts';
 import { useStore } from '../../state/store.ts';
 import { setNewChatHandler, type NewChatOptions } from '../actions.ts';
 import { Dialog, Icon, Popover, PROVIDER_IDS, ProviderLogo, providerName, toast } from '../primitives/index.ts';
@@ -48,12 +48,34 @@ export const isConnected = (c: ConnectionHealth | undefined) => c?.status === 'c
 export const findProject = (projects: Project[], path: string) =>
   path.trim() ? projects.find((p) => p.id.trim() !== '' && (folderKey(p.id) === folderKey(path) || folderKey(p.path) === folderKey(path))) : undefined;
 
-/** Folders a chat can start in (history can carry chats with no folder). */
-const usable = (projects: Project[]) => projects.filter((p) => p.id.trim() !== '');
+/**
+ * Folders a chat can start in, most recently active first: not the empty folder history can carry, not a folder that
+ * is missing, and not Claude scratch chats (many folders, not one).
+ */
+const usable = (projects: Project[]) => projects.filter((p) => p.id.trim() !== '' && !p.folderMissing && !isClaudeScratch(p.id))
+  .sort((a, b) => (a.lastActivityAt < b.lastActivityAt ? 1 : a.lastActivityAt > b.lastActivityAt ? -1 : 0));
+
+const isOlder = (p: Project, now: number) => !p.lastActivityAt || Date.parse(p.lastActivityAt) < now - OLDER_MS;
+
+/**
+ * The project picker's rows: recent projects, then (null) the "Older" row, then older projects (dim) once it is open.
+ * Searching matches name or path across every project and shows older matches without the row.
+ */
+function pickerRows(projects: Project[], now: number, query: string, olderOpen: boolean): ({ p: Project; dim: boolean } | null)[] {
+  const q = query.trim().toLowerCase();
+  const all = usable(projects).filter((p) => !q || p.name.toLowerCase().includes(q) || p.path.toLowerCase().includes(q));
+  const recent = all.filter((p) => !isOlder(p, now));
+  const older = all.filter((p) => isOlder(p, now));
+  return [
+    ...recent.map((p) => ({ p, dim: false })),
+    ...(older.length > 0 && !q ? [null] : []),
+    ...(olderOpen || q ? older.map((p) => ({ p, dim: true })) : []),
+  ];
+}
 
 /** The focused provider's latest project, else the latest project. */
 function latestProject(projects: Project[], focus: ProviderId | null): Project | undefined {
-  const sorted = usable(projects).sort((a, b) => (a.lastActivityAt < b.lastActivityAt ? 1 : a.lastActivityAt > b.lastActivityAt ? -1 : 0));
+  const sorted = usable(projects);
   return (focus && sorted.find((p) => p.providers.some((x) => x.provider === focus))) || sorted[0];
 }
 
@@ -64,15 +86,16 @@ function defaultHint(list: ModelOption[], provider: ProviderId | null): string {
   return d ? `Uses ${d.label}` : `Uses ${provider ? providerName(provider) : 'the provider'}'s own default`;
 }
 
-/**
- * Providers New chat can start on for a folder: connected ones that have worked in it (any connected one for a
- * new folder).
- */
-export function allowedProviders(s: Pick<AppState, 'connections'>, project: Project | undefined): ProviderId[] {
-  const connected = PROVIDER_IDS.filter((id) => isConnected(s.connections[id]));
-  if (!project) return connected;
+/** Providers New chat can start on: every connected one, in any folder (#22). */
+export function allowedProviders(s: Pick<AppState, 'connections'>): ProviderId[] {
+  return PROVIDER_IDS.filter((id) => isConnected(s.connections[id]));
+}
+
+/** The allowed providers that already have chats in this project: the default comes from these when there are any. */
+export function knownProviders(allowed: ProviderId[], project: Project | undefined): ProviderId[] {
+  if (!project) return [];
   const worked = new Set(project.providers.map((p) => p.provider));
-  return connected.filter((id) => worked.has(id));
+  return allowed.filter((id) => worked.has(id));
 }
 
 const levelOf = (left: number) => (left < 5 ? 'out' : left < 25 ? 'low' : 'ok');
@@ -87,7 +110,8 @@ export function usageText(r: UsageReading | undefined): string {
 
 /** Up/Down move between a picker's options (skipping disabled ones), Home/End jump to the ends. */
 function onListKey(e: KeyboardEvent<HTMLElement>) {
-  if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) return;
+  const inField = e.target instanceof HTMLInputElement;
+  if (!['ArrowDown', 'ArrowUp', ...(inField ? [] : ['Home', 'End'])].includes(e.key)) return;
   const items = [...e.currentTarget.querySelectorAll<HTMLElement>('[role="option"]:not([aria-disabled="true"])')];
   if (items.length === 0) return;
   e.preventDefault();
@@ -116,7 +140,7 @@ type Picker = 'project' | 'provider' | 'model' | null;
 /** A known project (by id), or a folder typed by hand. */
 type Where = { kind: 'project'; id: string } | { kind: 'path' };
 
-const pickState = (s: AppState) => ({ projects: s.projects, connections: s.connections, usage: s.usage, suggested: s.suggested, settings: s.settings, focus: focusedProvider(s), loaded: s.loaded });
+const pickState = (s: AppState) => ({ now: s.now, projects: visibleProjects(s), connections: s.connections, usage: s.usage, suggested: s.suggested, settings: s.settings, focus: focusedProvider(s), loaded: s.loaded });
 
 export function NewChatDialog() {
   const st = useStore(pickState);
@@ -133,10 +157,15 @@ export function NewChatDialog() {
   /** Ctrl+Enter with no provider: the footer says why (the same reason the note gives). */
   const [noProviderHint, setNoProviderHint] = useState(false);
   const [busy, setBusy] = useState(false);
+  /** The native folder picker is open (Browse…). */
+  const [browsing, setBrowsing] = useState(false);
   const busyRef = useRef(false);
   /** Bumped on every opening, so a late response from an earlier opening never closes or clears a newer one. */
   const session = useRef(0);
   const [picker, setPicker] = useState<Picker>(null);
+  /** The project picker's search and whether its Older row is open; both start empty and closed each time it opens. */
+  const [projectQuery, setProjectQuery] = useState('');
+  const [olderOpen, setOlderOpen] = useState(false);
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const [models, setModels] = useState<ModelList | null>(null);
   const promptRef = useRef<HTMLTextAreaElement>(null);
@@ -182,7 +211,7 @@ export function NewChatDialog() {
         setPath(opts?.cwd ?? '');
       }
       // A provider asked for (a project's "New Codex chat") wins over the focused one, when it may start there.
-      const ok = allowedProviders({ connections }, target);
+      const ok = allowedProviders({ connections });
       const preset = [opts?.provider, focus].find((p): p is ProviderId => !!p && ok.includes(p)) ?? null;
       setChosen(preset);
       setModel(null);
@@ -204,8 +233,10 @@ export function NewChatDialog() {
   }, [open]);
 
   const project = where.kind === 'project' ? st.projects.find((p) => p.id === where.id) : findProject(st.projects, path);
-  const allowed = allowedProviders(st, project);
-  const suggestion = suggestFor(st, allowed);
+  const allowed = allowedProviders(st);
+  const known = knownProviders(allowed, project);
+  // A project's own provider is the default; the others can still be picked.
+  const suggestion = suggestFor(st, known.length > 0 ? known : allowed);
   const provider: ProviderId | null = chosen && allowed.includes(chosen) ? chosen : suggestion?.provider ?? null;
   const modelId = model && model.provider === provider ? model.id : null;
   // Any provider change (picked, or forced by a project switch) goes back to Default for good.
@@ -226,6 +257,25 @@ export function NewChatDialog() {
   const projectName = where.kind === 'project' ? project?.name ?? baseName(where.id) : project?.name ?? (path.trim() ? baseName(path.trim()) : 'Another folder');
   const showSuggested = (id: ProviderId) => suggestion?.suggested === true && suggestion.provider === id && allowed.length > 1;
 
+  /** Asks the local server to show the native folder picker and puts the chosen folder in the path field. */
+  const browse = async () => {
+    if (browsing) return;
+    setBrowsing(true);
+    const opening = session.current;
+    try {
+      const { path: chosen } = await api.pickFolder();
+      if (!chosen || opening !== session.current) return;
+      autoPick.current = false;
+      setPath(chosen);
+      setPathError(null);
+      focusNext.current = 'prompt';
+    } catch (e) {
+      toast(e instanceof Error && e.message ? e.message : "Couldn't open the folder picker. Type the folder path instead.");
+    } finally {
+      setBrowsing(false);
+    }
+  };
+
   const openRef = useRef(open);
   openRef.current = open;
   const close = () => { autoPick.current = false; setOpen(false); setPicker(null); };
@@ -240,6 +290,7 @@ export function NewChatDialog() {
   }, [picker]);
   const openPicker = (kind: Exclude<Picker, null>, el: HTMLElement) => {
     if (picker === kind) { setPicker(null); return; }
+    if (kind === 'project') { setProjectQuery(''); setOlderOpen(false); }
     setAnchor(el);
     setPicker(kind);
   };
@@ -304,15 +355,9 @@ export function NewChatDialog() {
 
   let note: string | null = null;
   if (!st.loaded) note = null; // connections and projects are still loading
-  else if (allowed.length === 0) {
-    note = project
-      ? `None of your connected providers has worked on ${projectName} yet. Choose another folder to start fresh.`
-      : 'No provider is connected yet. Connect one on the Connections page.';
-  } else if (project && allowed.length < PROVIDER_IDS.length) {
-    const worked = PROVIDER_IDS.filter((id) => project.providers.some((p) => p.provider === id));
-    if (worked.length < PROVIDER_IDS.length) {
-      note = `${projectName} has been worked on with ${joinNames(worked)}, so ${worked.length > 1 ? 'those are the providers that know' : 'that’s the provider that knows'} it.`;
-    }
+  else if (allowed.length === 0) note = 'No provider is connected yet. Connect one on the Connections page.';
+  else if (known.length > 0 && known.length < allowed.length) {
+    note = `${projectName} has been worked on with ${joinNames(known)}, so that’s picked first. Any connected provider can work here.`;
   }
 
   // The server answers as soon as the card exists, so the dialog closes at once for every provider; the card says
@@ -363,6 +408,9 @@ export function NewChatDialog() {
               onChange={(e) => { autoPick.current = false; setPath(e.target.value); setPathError(null); }}
               onKeyDown={onKey}
             />
+            <button className="btn" type="button" disabled={browsing} aria-busy={browsing || undefined} onClick={() => void browse()}>
+              <Icon name="folder" size="sm" />{browsing ? 'Choosing…' : 'Browse…'}
+            </button>
             {pathError && <p className="dlg-path-error" id="dlg-path-error" role="alert">{pathError}</p>}
           </div>
         )}
@@ -383,13 +431,26 @@ export function NewChatDialog() {
 
       <Popover anchor={anchor} open={open && picker === 'project'} onClose={() => setPicker(null)} label="Project" className="menu dlg-pop dlg-pop-project" role="listbox">
         <div className="pane" onKeyDown={onListKey}>
+          <input className="menu-search" name="project-search" type="search" autoComplete="off" spellCheck={false} placeholder="Search projects…" aria-label="Search projects"
+            value={projectQuery} onChange={(e) => setProjectQuery(e.target.value)} />
           <div className="menu-label" role="presentation">Projects found on this computer</div>
           {usable(st.projects).length === 0 && <div className="menu-label" role="presentation">None yet</div>}
           <div className="dlg-scroll" role="presentation">
-            {usable(st.projects).map((p) => {
+            {pickerRows(st.projects, st.now, projectQuery, olderOpen).map((row) => {
+              if (row === null) {
+                const n = usable(st.projects).filter((p) => isOlder(p, st.now)).length;
+                return (
+                  <button key="older" className="menu-item older-row" type="button" aria-expanded={olderOpen} onClick={() => setOlderOpen((o) => !o)}>
+                    <Icon name="chevron-right" size="sm" />
+                    <span className="grow-text">Older</span>
+                    <span className="r">{n}</span>
+                  </button>
+                );
+              }
+              const { p, dim } = row;
               const selected = where.kind === 'project' && where.id === p.id;
               return (
-                <button key={p.id} className="menu-item" type="button" role="option" aria-selected={selected} title={p.path}
+                <button key={p.id} className={`menu-item${dim ? ' dim' : ''}`} type="button" role="option" aria-selected={selected} title={p.path}
                   onClick={() => { setWhere({ kind: 'project', id: p.id }); setPathError(null); setPicker(null); promptRef.current?.focus(); }}>
                   <Icon name="folder" size="sm" />
                   <span className="grow-text">{p.name}</span>
@@ -408,6 +469,8 @@ export function NewChatDialog() {
               setWhere({ kind: 'path' });
               setPicker(null);
               focusNext.current = 'path';
+              // Straight to the computer's own folder picker; cancelling it leaves the typed path field (#24).
+              void browse();
             }}>
             <Icon name="folder" />Choose another folder…
           </button>
@@ -420,7 +483,7 @@ export function NewChatDialog() {
           {PROVIDER_IDS.map((id) => {
             const conn = st.connections[id];
             const ok = allowed.includes(id);
-            const reason = !isConnected(conn) ? (conn ? STATUS_TEXT[conn.status] : 'Not connected') : `Hasn’t worked on ${projectName} yet`;
+            const reason = conn ? STATUS_TEXT[conn.status] : 'Not connected';
             return (
               <button key={id} className="pick-row" type="button" role="option" aria-selected={provider === id} aria-disabled={ok ? undefined : true}
                 onClick={() => { if (!ok) return; setChosen(id); setPicker(null); promptRef.current?.focus(); }}>

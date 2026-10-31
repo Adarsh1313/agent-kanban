@@ -1,3 +1,4 @@
+import { PickerBusyError } from '../src/folder-picker.ts';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { AddressInfo } from 'node:net';
@@ -363,4 +364,63 @@ test('PATCH /api/chats/:id trims the title before checking it, normalises snooze
     assert.equal(bad.status, 400);
     assert.equal(((await bad.json()) as { error: string }).error, 'Snooze time must be a date.');
   } finally { s.close(); }
+});
+
+test('POST /api/folders/pick returns the chosen folder (null when cancelled); a second picker is 409; none wired is 404 (#24)', async () => {
+  const answers: (string | null)[] = ['C:\Work\my-app', null];
+  const s = await setup({}, undefined, { folderPicker: { pick: async () => answers.shift() ?? null } });
+  try {
+    assert.deepEqual(await (await s.f('/api/folders/pick', { method: 'POST' })).json(), { path: 'C:\Work\my-app' });
+    assert.deepEqual(await (await s.f('/api/folders/pick', { method: 'POST' })).json(), { path: null });
+    assert.equal((await s.f('/api/folders/pick', { method: 'POST' }, null)).status, 401);
+  } finally { s.close(); }
+  const busy = await setup({}, undefined, { folderPicker: { pick: async () => { throw new PickerBusyError(); } } });
+  try {
+    const r = await busy.f('/api/folders/pick', { method: 'POST' });
+    assert.equal(r.status, 409);
+    assert.match((await r.json()).error, /already open/);
+  } finally { busy.close(); }
+  const none = await setup();
+  try { assert.equal((await none.f('/api/folders/pick', { method: 'POST' })).status, 404); } finally { none.close(); }
+});
+
+test('POST /api/folders/open opens a known project folder; unknown or missing folders are refused (#15)', async () => {
+  const opened: string[] = [];
+  const gone = join(dir, 'moved-away');
+  const s = await setup(
+    { listChats: () => [{ ...chat('c1'), cwd: dir }, { ...chat('c2'), cwd: gone }] },
+    undefined, { history: async () => [], folderOpener: { open: async (p: string) => { opened.push(p); } } });
+  const post = (body: unknown, token: string | null = 'tok') =>
+    s.f('/api/folders/open', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }, token);
+  try {
+    assert.equal((await post({ path: dir })).status, 204);
+    assert.deepEqual(opened, [dir]);
+    const unknown = await post({ path: tmpdir() });
+    assert.equal(unknown.status, 403);
+    assert.match((await unknown.json()).error, /isn.t one of your projects/);
+    const missing = await post({ path: gone });
+    assert.equal(missing.status, 404);
+    assert.match((await missing.json()).error, /isn.t there any more/);
+    assert.equal((await post({})).status, 400);
+    assert.equal((await post({ path: dir }, null)).status, 401);
+    assert.deepEqual(opened, [dir]);
+  } finally { s.close(); }
+  const none = await setup();
+  try { assert.equal((await none.f('/api/folders/open', { method: 'POST', body: JSON.stringify({ path: dir }) })).status, 404); } finally { none.close(); }
+});
+
+test('GET /api/history/:provider/:ref/messages returns the transcript; unknown provider 400; none wired 404 (#16)', async () => {
+  const asked: string[] = [];
+  const s = await setup({}, undefined, { transcript: async (p: string, ref: string) => { asked.push(`${p}:${ref}`); return { messages: [{ role: 'user', text: 'hi', at: null }], truncated: false, unavailable: false }; } });
+  try {
+    const r = await s.f('/api/history/claude/abc-123/messages');
+    assert.equal(r.status, 200);
+    assert.deepEqual((await r.json()).messages, [{ role: 'user', text: 'hi', at: null }]);
+    assert.equal((await s.f('/api/history/gemini/abc/messages')).status, 400);
+    assert.equal((await s.f('/api/history/claude/abc/messages', {}, null)).status, 401);
+    await s.f('/api/history/codex/..%2F..%2Fx/messages');
+    assert.deepEqual(asked, ['claude:abc-123', 'codex:../../x']); // the reader refuses path-like refs (transcript.test.ts)
+  } finally { s.close(); }
+  const none = await setup();
+  try { assert.equal((await none.f('/api/history/claude/abc/messages')).status, 404); } finally { none.close(); }
 });

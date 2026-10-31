@@ -17,7 +17,7 @@ export const COLUMNS: ColumnId[] = ['running', 'needs_you', 'review', 'done'];
 const FRESH_MS = 15_000;
 
 /** Card ids per column, in board order (only recomputed when chats, filters or the clock change). */
-const selectLayout = memoState((s) => [s.chats, s.ui.filters, s.ui.archiving, s.now], (s): Layout => {
+const selectLayout = memoState((s) => [s.chats, s.projects, s.settings, s.ui.filters, s.ui.archiving, s.now], (s): Layout => {
   const cols = boardColumns(s, s.now);
   return { running: cols.running.map((c) => c.id), needs_you: cols.needs_you.map((c) => c.id), review: cols.review.map((c) => c.id), done: cols.done.map((c) => c.id) };
 });

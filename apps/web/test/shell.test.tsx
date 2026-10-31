@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { HistoryChat } from '@agent-kanban/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { recentChatsByProject } from '../src/state/selectors.ts';
+import { recentChats } from '../src/state/selectors.ts';
 import { applySnapshot, initialState, type AppState } from '../src/state/reducer.ts';
 import { createStore, StoreProvider, type Store } from '../src/state/store.ts';
 import { Shell } from '../src/ui/shell/Shell.tsx';
@@ -11,7 +11,7 @@ import { chat } from './helpers.ts';
 
 vi.mock('../src/state/selectors.ts', async (orig) => {
   const m = await orig<typeof import('../src/state/selectors.ts')>();
-  return { ...m, recentChatsByProject: vi.fn(m.recentChatsByProject) };
+  return { ...m, recentChats: vi.fn(m.recentChats) };
 });
 
 const NOW = Date.parse('2026-10-23T12:00:00.000Z');
@@ -82,41 +82,40 @@ describe('Sidebar: pinned and recent', () => {
     expect(screen.getByText('Keep me')).toBeTruthy();
   });
 
-  it('shows the 4 most recent projects with 3 chats each, "N more" and "All projects"', () => {
-    const chats = Array.from({ length: 6 }, (_, p) => Array.from({ length: 5 }, (_, i) =>
-      chat({ id: `c${p}-${i}`, sessionRef: `r${p}-${i}`, cwd: `/work/proj${p}`, title: `Chat ${p}-${i}`, updatedAt: new Date(NOW - (p * 100 + i) * 60_000).toISOString() }))).flat();
+  it('Recent chats lists the 10 most recent chats, newest first, each labelled with its project; no project groups', () => {
+    const chats = Array.from({ length: 3 }, (_, p) => Array.from({ length: 5 }, (_, i) =>
+      chat({ id: `c${p}-${i}`, sessionRef: `r${p}-${i}`, cwd: `/work/proj${p}`, title: `Chat ${p}-${i}`, updatedAt: new Date(NOW - (i * 10 + p) * 60_000).toISOString() }))).flat();
     mount(seeded(chats));
-    expect(document.querySelectorAll('.proj').length).toBe(4);
-    expect(document.querySelectorAll('.proj .chat-row').length).toBe(12);
-    expect(screen.getAllByRole('button', { name: '2 more' }).length).toBe(4);
-    expect(screen.getByRole('button', { name: /All projects/ })).toBeTruthy();
-    expect(screen.queryByText('proj4')).toBeNull();
+    const rows = [...document.querySelectorAll('.recent .chat-row')];
+    expect(rows.map((r) => r.querySelector('.t')!.textContent)).toEqual(['Chat 0-0', 'Chat 1-0', 'Chat 2-0', 'Chat 0-1', 'Chat 1-1', 'Chat 2-1', 'Chat 0-2', 'Chat 1-2', 'Chat 2-2', 'Chat 0-3']);
+    expect(rows.map((r) => r.querySelector('.rest .p')!.textContent).slice(0, 3)).toEqual(['proj0', 'proj1', 'proj2']);
+    expect(document.querySelector('.proj')).toBeNull();
+    expect(screen.queryByRole('button', { name: /more$/ })).toBeNull();
   });
 
-  it('"N more" expands inside that project and "Show less" collapses it', () => {
-    const chats = Array.from({ length: 5 }, (_, i) => chat({ id: `c${i}`, sessionRef: `r${i}`, title: `Chat ${i}`, updatedAt: new Date(NOW - i * 60_000).toISOString() }));
-    mount(seeded(chats));
-    expect(document.querySelectorAll('.proj .chat-row').length).toBe(3);
-    fireEvent.click(screen.getByRole('button', { name: '2 more' }));
-    expect(document.querySelectorAll('.proj .chat-row').length).toBe(5);
-    fireEvent.click(screen.getByRole('button', { name: 'Show less' }));
-    expect(document.querySelectorAll('.proj .chat-row').length).toBe(3);
+  it("a Recent chats row has the date ready to replace the project label on hover", () => {
+    mount(seeded([chat({ id: 'a', title: 'Fix login', cwd: '/work/alpha', updatedAt: new Date(NOW - 3 * 3600_000).toISOString() })]));
+    const row = document.querySelector('.recent .chat-row')!;
+    expect(row.querySelector('.rest .p')!.textContent).toBe('alpha');
+    expect(row.querySelector('.rest .d')!.textContent).toBe('3h');
   });
 
-  it('All projects goes to the Projects page', () => {
-    const chats = Array.from({ length: 5 }, (_, p) => chat({ id: `c${p}`, sessionRef: `r${p}`, cwd: `/work/proj${p}`, updatedAt: new Date(NOW - p * 60_000).toISOString() }));
-    mount(seeded(chats));
-    fireEvent.click(screen.getByRole('button', { name: /All projects/ }));
-    expect(location.hash).toBe('#/projects');
+  it('hovering a chat (board or history-only) shows its title, provider and when it was last active (#23)', () => {
+    const at = (iso: string) => new Date(iso).toISOString();
+    const board = chat({ id: 'b1', provider: 'claude', title: 'Board chat', cwd: '/work/a', updatedAt: at('2026-10-23T09:05:00') });
+    const old: HistoryChat = { provider: 'codex', sessionRef: 'h1', title: 'Old codex chat', cwd: '/work/a', updatedAt: at('2026-10-20T15:30:00') };
+    mount(seeded([board], [old]));
+    const row = (name: string) => [...document.querySelectorAll('.chat-row')].find((r) => r.textContent?.includes(name))!;
+    expect(row('Board chat').getAttribute('title')).toBe('Board chat\na · Claude Code · Today, 9:05 am');
+    expect(row('Board chat').getAttribute('aria-description')).toBe('a · Claude Code · Today, 9:05 am');
+    expect(row('Old codex chat').getAttribute('title')).toBe('Old codex chat\na · Codex · Oct 20, 3:30 pm');
   });
 
-  it('a project label opens that project; a chat row opens the chat', () => {
+  it('a chat row opens the chat', () => {
     const store = seeded([chat({ id: 'c9', cwd: '/work/alpha', title: 'Fix login' })]);
     mount(store);
     fireEvent.click(screen.getByText('Fix login'));
     expect(store.getState().ui.openChatId).toBe('c9');
-    fireEvent.click(screen.getByText('alpha'));
-    expect(location.hash).toBe(`#/projects/${encodeURIComponent('/work/alpha')}`);
   });
 
   it('respects the provider focus', () => {
@@ -137,7 +136,7 @@ describe('Sidebar: pinned and recent', () => {
   it('streaming deltas do not recompute the recent list; a chat change does', () => {
     const store = seeded([chat({ id: 'c1', updatedAt: new Date(NOW + 60_000).toISOString() })], hist(300));
     mount(store);
-    const spy = vi.mocked(recentChatsByProject);
+    const spy = vi.mocked(recentChats);
     spy.mockClear();
     act(() => { store.setState((s) => ({ ...s, streaming: { ...s.streaming, c1: { m1: 'x' } } })); });
     expect(spy).not.toHaveBeenCalled();
@@ -167,25 +166,6 @@ describe('Sidebar: pinned and recent', () => {
     Reflect.deleteProperty(HTMLElement.prototype, 'offsetParent');
   });
 
-  it('the + on a group with no folder opens New chat without one', () => {
-    const handler = vi.fn();
-    setNewChatHandler(handler);
-    mount(seeded([chat({ cwd: '' })]));
-    fireEvent.click(screen.getByRole('button', { name: /^New chat in/ }));
-    expect(handler).toHaveBeenCalledWith(undefined);
-    setNewChatHandler(null);
-  });
-
-  it('the + on a project row opens New chat for that project', () => {
-    const handler = vi.fn();
-    setNewChatHandler(handler);
-    mount(seeded([chat({ cwd: '/work/alpha' })]));
-    fireEvent.click(screen.getByRole('button', { name: 'New chat in alpha' }));
-    expect(handler).toHaveBeenCalledWith({ cwd: '/work/alpha' });
-    expect(location.hash).toBe('');
-    setNewChatHandler(null);
-  });
-
   it('snoozed chats return on the next clock tick without any user action', () => {
     vi.useFakeTimers({ now: NOW });
     const store = seeded([chat({ id: 'z', title: 'Sleepy', snoozedUntil: new Date(NOW + 20_000).toISOString() })]);
@@ -204,9 +184,25 @@ describe('Sidebar: pinned and recent', () => {
     const t0 = performance.now();
     mount(store);
     const took = performance.now() - t0;
-    expect(document.querySelectorAll('.proj').length).toBe(4);
-    expect(document.querySelectorAll('.proj .chat-row').length).toBe(12);
+    expect(document.querySelectorAll('.recent .chat-row').length).toBe(10);
     expect(took).toBeLessThan(1000);
+  });
+});
+
+describe('Shell: before the first load (#5)', () => {
+  it('shows "Loading your chats…" instead of an empty board; N does nothing until loaded', () => {
+    const store = createStore({ ...initialState(), now: NOW });
+    mount(store, <Shell />);
+    const newChat = () => document.querySelector<HTMLElement>('.dialog')?.dataset.state;
+    expect(document.querySelector('.app-loading')?.textContent).toBe('Loading your chats…');
+    expect(document.querySelector('.app')!.hasAttribute('inert')).toBe(true);
+    fireEvent.keyDown(document.body, { key: 'n' });
+    expect(newChat()).toBe('closed');
+    act(() => store.setState((s) => applySnapshot(s, { chats: [chat()], usage: [], suggested: null, connections: [], history: [], projects: [] })));
+    expect(document.querySelector('.app-loading')).toBeNull();
+    expect(document.querySelector('.app')!.hasAttribute('inert')).toBe(false);
+    fireEvent.keyDown(document.body, { key: 'n' });
+    expect(newChat()).toBe('open');
   });
 });
 
@@ -235,6 +231,21 @@ describe('Shell: routes', () => {
     expect(screen.getByRole('button', { name: 'Filter' })).toBeTruthy();
   });
 
+  it('switching pages closes an open chat panel; a project change within Projects keeps it (#8)', async () => {
+    const store = seeded([chat({ id: 'c1' })]);
+    mount(store, <Shell />);
+    act(() => store.setState((s) => ({ ...s, ui: { ...s.ui, openChatId: 'c1' } })));
+    act(() => { location.hash = '#/connections'; });
+    await waitFor(() => expect(store.getState().ui.view).toBe('connections'));
+    expect(store.getState().ui.openChatId).toBeNull();
+    act(() => { location.hash = '#/projects'; });
+    await waitFor(() => expect(store.getState().ui.view).toBe('projects'));
+    act(() => store.setState((s) => ({ ...s, ui: { ...s.ui, openChatId: 'c1' } })));
+    act(() => { location.hash = '#/projects/' + encodeURIComponent('/work/a'); });
+    await waitFor(() => expect(store.getState().ui.projectId).toBe('/work/a'));
+    expect(store.getState().ui.openChatId).toBe('c1');
+  });
+
   it('#/projects shows Projects, hides Filter, and the store follows', async () => {
     const store = seeded();
     mount(store, <Shell />);
@@ -248,7 +259,7 @@ describe('Shell: routes', () => {
   it('#/projects/<path>: the top bar says just "Projects"; the page\'s own breadcrumb and title name the project', async () => {
     const path = 'C:\\Users\\me\\open-project';
     const base = seeded().getState();
-    const store = createStore({ ...base, projects: [{ id: path, name: 'open-project', path, providers: [], columns: { running: 0, needs_you: 0, review: 0, done: 0 }, historyOnly: 0, lastActivityAt: '' }] });
+    const store = createStore({ ...base, projects: [{ id: path, name: 'open-project', path, providers: [], columns: { running: 0, needs_you: 0, review: 0, done: 0 }, historyOnly: 0, lastActivityAt: '', hidden: null, folderMissing: false }] });
     mount(store, <Shell />);
     act(() => { location.hash = `#/projects/${encodeURIComponent(path)}`; });
     await waitFor(() => expect(screen.getByRole('heading', { level: 2, name: 'open-project' }).textContent).toContain('open-project'));

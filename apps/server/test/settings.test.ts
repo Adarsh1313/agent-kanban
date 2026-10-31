@@ -17,6 +17,8 @@ test('defaults: not onboarded, every provider shown and suggested', () => {
     onboarded: false,
     showChats: { claude: true, codex: true, antigravity: true },
     suggest: { claude: true, codex: true, antigravity: true },
+    hiddenProjects: [],
+    unhiddenProjects: [],
   });
   assert.deepEqual(s.get(), defaultSettings());
 });
@@ -26,11 +28,14 @@ test('patch round-trips through the store (partial per-provider updates) and sur
   const s = new SettingsStore(new Store(join(dir, 'ak.db')));
   s.patch({ onboarded: true });
   s.patch({ suggest: { codex: false } });
-  const out = s.patch({ showChats: { antigravity: false } });
+  s.patch({ showChats: { antigravity: false } });
+  const out = s.patch({ hiddenProjects: ['/work/old'] });
   const want: Settings = {
     onboarded: true,
     showChats: { claude: true, codex: true, antigravity: false },
     suggest: { claude: true, codex: false, antigravity: true },
+    hiddenProjects: ['/work/old'],
+    unhiddenProjects: [],
   };
   assert.deepEqual(out, want);
   assert.deepEqual(new SettingsStore(new Store(join(dir, 'ak.db'))).get(), want);

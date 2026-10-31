@@ -13,6 +13,9 @@ const AUTO_MODE = { sandbox: 'workspace-write', approvalPolicy: 'on-request' } a
 const GAVE_UP = 'Codex keeps stopping. Use Check now to try again.';
 type Approval = { threadId: string; resolve: (decision: 'accept' | 'decline') => void };
 
+/** How long stop() waits for an interrupted turn to end before giving up waiting. */
+const STOP_WAIT_MS = 10_000;
+
 /**
  * Signals Task 8 can rely on when the app-server dies:
  * - A chat that has a turn in progress gets an `error` event ("Codex stopped unexpectedly.").
@@ -312,10 +315,21 @@ export class CodexAdapter implements ProviderAdapter {
     if (!turnId) {
       // The turn id isn't known yet; interrupt as soon as it arrives.
       this.pendingStops.add(sessionRef);
-      return;
+    } else {
+      const p = await this.ensureProcess();
+      await p.request('turn/interrupt', { threadId: sessionRef, turnId });
     }
-    const p = await this.ensureProcess();
-    await p.request('turn/interrupt', { threadId: sessionRef, turnId });
+    // The app-server answers the interrupt before the turn has ended. A message sent before turn/completed would start
+    // a turn the old one's completion then clears, so stop returns only once the turn is gone (or after 10 s) (#12).
+    await this.turnGone(sessionRef, STOP_WAIT_MS);
+  }
+
+  /** Resolves once the thread has no active turn (ended, failed, or the process went away), or after timeoutMs. */
+  private async turnGone(sessionRef: string, timeoutMs: number): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (this.activeTurns.has(sessionRef) && Date.now() < deadline) {
+      await new Promise<void>((r) => setTimeout(r, 25).unref());
+    }
   }
 
   async resume(sessionRef: string, cwd: string): Promise<void> {

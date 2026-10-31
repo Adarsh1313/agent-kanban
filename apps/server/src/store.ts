@@ -26,6 +26,14 @@ function requestKey(chatId: string, requestId: string): string {
   return `${chatId}:${requestId}`;
 }
 
+/** A chat's title from its first line: at most 60 characters, cut at a word with "…" rather than mid-word (#9). */
+export function chatTitle(line: string, max = 60): string {
+  if (line.length <= max) return line;
+  const room = line.slice(0, max - 1);
+  const space = room.lastIndexOf(' ');
+  return (space >= max / 2 ? room.slice(0, space) : room).trimEnd() + '…';
+}
+
 export class Store {
   private db: DatabaseSync;
   private lastStamp = 0;
@@ -77,7 +85,7 @@ export class Store {
   createChat(input: { provider: ProviderId; cwd: string; title: string; model?: string | null; sessionRef?: string | null }): Chat {
     const id = randomUUID();
     const now = this.now();
-    const title = (input.title.split(/\r?\n/).map((l) => l.trim()).find((l) => l !== '') ?? 'Untitled chat').slice(0, 60).trim();
+    const title = chatTitle(input.title.split(/\r?\n/).map((l) => l.trim()).find((l) => l !== '') ?? 'Untitled chat');
     this.db.prepare(
       `INSERT INTO chats (id, provider, session_ref, cwd, title, model, column_name, needs_reason, created_at, updated_at, archived, pinned)
        VALUES (?, ?, ?, ?, ?, ?, 'running', NULL, ?, ?, 0, 0)`,

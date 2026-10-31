@@ -12,6 +12,7 @@ import { pushLayer } from '../primitives/layers.ts';
 import { ChatActionsMenu, runAction, type ChatActionsTarget } from './ChatActionsMenu.tsx';
 import { Composer } from './Composer.tsx';
 import { Thread } from './Thread.tsx';
+import { HistoryThread } from './HistoryThread.tsx';
 
 const STATE_TEXT: Record<Column, string> = { running: 'Running', needs_you: 'Needs you', review: 'Ready for review', done: 'Done' };
 const HINT = 'Enter to send · Shift+Enter for a new line';
@@ -244,9 +245,7 @@ export function ChatPanel() {
           </>
         ) : (
           <>
-            <div className="thread">
-              <div className="thread-note center">Earlier messages are in {app}. Send a message to carry on here.</div>
-            </div>
+            <HistoryThread historyRef={s.ref} app={app} key={`ht:${s.ref.provider}:${s.ref.sessionRef}`} />
             <Composer key={`h:${s.ref.provider}:${s.ref.sessionRef}`} ref={composerRef} onSend={continueHistory(s.ref)}
               hint="Sending puts this chat on the board" placeholder={`Continue this ${app} chat`} />
           </>

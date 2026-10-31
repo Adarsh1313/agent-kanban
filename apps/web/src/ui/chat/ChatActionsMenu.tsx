@@ -23,6 +23,15 @@ export async function runAction(store: Store, run: () => Promise<Chat | void>): 
   }
 }
 
+/** Shows the project folder in the file manager; a failure (moved, deleted) toasts the server's reason. */
+export async function openFolder(path: string): Promise<void> {
+  try {
+    await api.openFolder(path);
+  } catch (err) {
+    toast(errorText(err));
+  }
+}
+
 export async function copyText(text: string): Promise<void> {
   try {
     await navigator.clipboard.writeText(text);
@@ -168,6 +177,7 @@ export function ChatActionsMenu({ anchor, open: wanted, target, onClose, onRenam
             <MenuItem icon="snooze" right={<Icon name="chevron-right" size="sm" />} onSelect={() => nav.go('snooze')}>Snooze</MenuItem>
           )}
           <MenuItem icon="rename" onSelect={pick(() => onRename(chat.id))}>Rename</MenuItem>
+          <MenuItem icon="folder" onSelect={pick(() => void openFolder(chat.cwd))}>Open folder</MenuItem>
           <MenuItem icon="copy" onSelect={pick(() => void copyText(chat.cwd))}>Copy project path</MenuItem>
           {cmd && <MenuItem icon="terminal" onSelect={pick(() => void copyText(cmd))}>Copy resume command</MenuItem>}
           {onBoard && (
@@ -184,6 +194,7 @@ export function ChatActionsMenu({ anchor, open: wanted, target, onClose, onRenam
     return (
       <>
         <MenuItem icon="resume" onSelect={pick(() => store.setState((s) => openHistoryIn(s, history)))}>Continue here</MenuItem>
+        <MenuItem icon="folder" onSelect={pick(() => void openFolder(history.cwd))}>Open folder</MenuItem>
         <MenuItem icon="copy" onSelect={pick(() => void copyText(history.cwd))}>Copy project path</MenuItem>
         {cmd && <MenuItem icon="terminal" onSelect={pick(() => void copyText(cmd))}>Copy resume command</MenuItem>}
       </>
