@@ -8,6 +8,7 @@ import { ConnectionsPage } from '../connections/ConnectionsPage.tsx';
 import { ChatPanel } from '../chat/ChatPanel.tsx';
 import { FilterBar } from '../filters/FilterBar.tsx';
 import { NewChatDialog } from '../newchat/NewChatDialog.tsx';
+import { PickProjectsDialog } from '../myprojects/PickProjects.tsx';
 import { ProjectsPage } from '../projects/ProjectsPage.tsx';
 import { AllChatsPage } from '../chats/AllChatsPage.tsx';
 import { hasOpenLayer } from '../primitives/layers.ts';
@@ -113,6 +114,7 @@ export function Shell() {
       </div>
       <ChatPanel />
       <NewChatDialog />
+      <PickProjectsDialog />
       <Toasts />
     </>
   );

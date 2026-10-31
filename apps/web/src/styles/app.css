@@ -272,3 +272,25 @@ body:has(> .onb[data-state="open"]) > .toasts { z-index: 91; }
 .pc-sum .on { color: var(--color-text-muted); }
 .pc-body { border-top: 1px solid var(--color-border); padding: calc(var(--space-1) / 2) var(--space-1) var(--space-1); }
 .pc-body .chat-row { font-size: var(--text-caption); }
+
+/* My projects picker: project tiles (onboarding step and the sidebar's dialog) */
+.picker-wrap { display: flex; flex-direction: column; gap: var(--space-3); }
+.pick-search input { width: 100%; }
+.pick-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-2); max-height: 46vh; overflow-y: auto; padding: calc(var(--space-1) / 2); }
+.pick-tile { position: relative; display: flex; flex-direction: column; gap: var(--space-1); padding: var(--space-3); text-align: left; min-width: 0;
+  border: 1px solid var(--color-border); border-radius: var(--radius-card); background: var(--color-surface);
+  transition: border-color var(--duration-pop) var(--ease-colour), box-shadow var(--duration-pop) var(--ease-colour); }
+@media (hover: hover) and (pointer: fine) { .pick-tile:hover { border-color: var(--color-border-strong); } }
+.pick-tile[aria-checked="true"] { border-color: var(--color-ink); box-shadow: inset 0 0 0 1px var(--color-ink); }
+.pick-tile.dim { color: var(--color-text-muted); }
+.pick-tile.dim .folder-glyph { opacity: .6; }
+.pick-tile .folder-glyph { width: var(--space-6); height: var(--space-6); font-size: var(--text-caption); }
+.pick-tile .pt-name { font-weight: var(--weight-semibold); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: var(--space-5); }
+.pick-tile small { color: var(--color-text-faint); font-size: var(--text-caption); }
+.pick-tile .pt-logos { display: flex; gap: var(--space-1); }
+.pick-tile .cbox { position: absolute; top: var(--space-2); right: var(--space-2); width: var(--space-4); height: var(--space-4); border-radius: var(--radius-badge);
+  border: 1px solid var(--color-border-strong); display: grid; place-items: center; color: transparent; }
+.pick-tile[aria-checked="true"] .cbox { background: var(--color-ink); border-color: var(--color-ink); color: var(--color-ink-contrast); }
+.pick-older { display: flex; align-items: center; gap: var(--space-1); padding-left: var(--space-2); }
+.pick-count { color: var(--color-text-faint); font-size: var(--text-caption); }
+@media (max-width: 640px) { .pick-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
