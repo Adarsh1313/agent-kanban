@@ -139,6 +139,8 @@ export interface Project {
   lastActivityAt: string;
   /** Kept out of the sidebar, board and New chat: 'auto' for a folder under the temp folder, 'manual' when the user hid it. */
   hidden: 'auto' | 'manual' | null;
+  /** The folder is under the temp folder, so it is hidden automatically unless the user unhid it. */
+  tempFolder?: boolean;
   /** The folder was moved or deleted: its chats can be read, but no new chat can start there. */
   folderMissing: boolean;
 }

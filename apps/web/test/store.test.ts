@@ -231,6 +231,18 @@ describe('stale projects and history (final review)', () => {
     } finally { vi.useRealTimers(); }
   });
 
+  it('a Claude scratch chat belongs to the known Claude scratch chats project, so it does not refetch', async () => {
+    vi.useFakeTimers();
+    try {
+      const root = 'C:/Users/me/AppData/Roaming/Claude/scratch-workspaces';
+      const store = storeWith({ loaded: true, projects: [project(root)] });
+      const projects = vi.fn(async () => []);
+      noteChatFolder(store, fakeApi({ projects }), chat({ cwd: `${root}/u1/scratch-aa` }));
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(projects).not.toHaveBeenCalled();
+    } finally { vi.useRealTimers(); }
+  });
+
   it('refreshHistory replaces the history list (after a history chat is continued)', async () => {
     const store = storeWith({ history: [{ provider: 'claude', sessionRef: 'old', title: 't', cwd: '/x', updatedAt: 'x' }] });
     await refreshHistory(store, fakeApi({ history: async () => [] }));

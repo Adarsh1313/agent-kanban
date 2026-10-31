@@ -18,12 +18,13 @@ export const CLAUDE_SCRATCH_NAME = 'Claude scratch chats';
  * (`…/Claude/scratch-workspaces/<id>/scratch-*`), else null.
  */
 export function claudeScratchRoot(path: string): string | null {
-  const m = /^(.*[\\/]claude[\\/]scratch-workspaces)[\\/]/i.exec(path.trim());
+  const m = /^(.*[\\/]claude[\\/]scratch-workspaces)[\\/][^\\/]+[\\/]scratch-[^\\/]*(?:[\\/]|$)/i.exec(path.trim());
   return m ? m[1]! : null;
 }
 
 /** The folder of the project a chat belongs to: its own folder, or the scratch root for Claude scratch chats. */
 export const projectFolder = (cwd: string): string => claudeScratchRoot(cwd) ?? cwd;
 
-/** True for the Claude app's scratch-workspaces folder itself or any scratch folder inside it. */
-export const isClaudeScratch = (path: string): boolean => claudeScratchRoot(path.trim().replace(/[\\/]*$/, '/')) !== null;
+/** True for the Claude app's scratch-workspaces folder itself (the Claude scratch chats project) or a scratch chat folder in it. */
+export const isClaudeScratch = (path: string): boolean =>
+  claudeScratchRoot(path) !== null || /[\\/]claude[\\/]scratch-workspaces[\\/]*$/i.test(path.trim());

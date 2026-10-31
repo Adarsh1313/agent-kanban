@@ -18,8 +18,8 @@ function isInside(path: string, folder: string): boolean {
 
 /** What decides a project's visibility; the API passes the real ones, tests may leave them out. */
 export interface ProjectRules {
-  /** The computer's temp folder: projects inside it (our test runs, scratchpads) are hidden automatically. */
-  tempDir?: string;
+  /** The computer's temp folder, under each spelling it has (short name, symlink target): projects inside it (our test runs, scratchpads) are hidden automatically. */
+  tempDirs?: string[];
   /** Folders the user hid by hand. */
   hidden?: string[];
   /** Folders under the temp folder the user chose to show again. */
@@ -33,8 +33,9 @@ export function buildProjects(chats: Chat[], history: HistoryChat[], rules: Proj
   const map = new Map<string, Project & { models: Map<ProviderId, { at: string; model: string }> }>();
   const manual = new Set((rules.hidden ?? []).map(folderKey));
   const shown = new Set((rules.unhidden ?? []).map(folderKey));
+  const inTemp = (cwd: string) => (rules.tempDirs ?? []).some((t) => isInside(cwd, t));
   const hiddenFor = (cwd: string): Project['hidden'] =>
-    manual.has(folderKey(cwd)) ? 'manual' : rules.tempDir && isInside(cwd, rules.tempDir) && !shown.has(folderKey(cwd)) ? 'auto' : null;
+    manual.has(folderKey(cwd)) ? 'manual' : inTemp(cwd) && !shown.has(folderKey(cwd)) ? 'auto' : null;
   const get = (chatCwd: string) => {
     // The Claude app's scratch chats each have their own folder; they are one project, named for what they are.
     const scratch = claudeScratchRoot(chatCwd);
@@ -43,7 +44,7 @@ export function buildProjects(chats: Chat[], history: HistoryChat[], rules: Proj
     let p = map.get(k);
     if (!p) {
       const folderMissing = !scratch && rules.exists ? !rules.exists(cwd) : false;
-      p = { id: cwd, name: scratch ? CLAUDE_SCRATCH_NAME : folderName(cwd), path: cwd, providers: [], columns: { running: 0, needs_you: 0, review: 0, done: 0 }, historyOnly: 0, lastActivityAt: '', hidden: hiddenFor(cwd), folderMissing, models: new Map() };
+      p = { id: cwd, name: scratch ? CLAUDE_SCRATCH_NAME : folderName(cwd), path: cwd, providers: [], columns: { running: 0, needs_you: 0, review: 0, done: 0 }, historyOnly: 0, lastActivityAt: '', hidden: hiddenFor(cwd), tempFolder: inTemp(cwd), folderMissing, models: new Map() };
       map.set(k, p);
     }
     return p;

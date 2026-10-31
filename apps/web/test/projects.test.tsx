@@ -12,9 +12,9 @@ import { chat } from './helpers.ts';
 
 vi.mock('../src/api/client.ts', async (orig) => {
   const m = await orig<typeof import('../src/api/client.ts')>();
-  return { ...m, api: { ...m.api, projectInfo: vi.fn(), patchSettings: vi.fn(), projects: vi.fn() } };
+  return { ...m, api: { ...m.api, projectInfo: vi.fn(), patchSettings: vi.fn(), projects: vi.fn(), settings: vi.fn() } };
 });
-const mocked = api as unknown as Record<'projectInfo' | 'patchSettings' | 'projects', ReturnType<typeof vi.fn>>;
+const mocked = api as unknown as Record<'projectInfo' | 'patchSettings' | 'projects' | 'settings', ReturnType<typeof vi.fn>>;
 
 const NOW = Date.parse('2026-10-23T12:00:00.000Z');
 const ago = (min: number) => new Date(NOW - min * 60_000).toISOString();
@@ -327,13 +327,14 @@ describe('Project detail', () => {
 describe('Projects: hidden and folder missing', () => {
   const ON = { claude: true, codex: true, antigravity: true };
   const settings = (over: Partial<Settings> = {}): Settings => ({ onboarded: true, showChats: ON, suggest: ON, hiddenProjects: [], unhiddenProjects: [], ...over });
-  const TEMP = { ...project('/tmp/ak-claude-1', ['claude'], ago(10)), hidden: 'auto' as const };
+  const TEMP = { ...project('/tmp/ak-claude-1', ['claude'], ago(10)), hidden: 'auto' as const, tempFolder: true };
   const OLD = { ...project('/work/old', ['codex'], ago(20)), hidden: 'manual' as const };
   const withSettings = (store: Store, st: Settings) => { store.setState((s) => ({ ...s, settings: st })); return store; };
   const showHidden = () => fireEvent.click(screen.getByRole('switch', { name: 'Show hidden projects' }));
 
   beforeEach(() => {
     mocked.patchSettings.mockReset();
+    mocked.settings.mockReset();
     mocked.projects.mockReset();
     mocked.projects.mockResolvedValue([]);
   });
@@ -362,6 +363,24 @@ describe('Projects: hidden and folder missing', () => {
     mocked.patchSettings.mockResolvedValueOnce(settings({ unhiddenProjects: ['/tmp/ak-claude-1'] }));
     fireEvent.click(screen.getByRole('button', { name: 'Unhide ak-claude-1' }));
     await waitFor(() => expect(mocked.patchSettings).toHaveBeenLastCalledWith({ hiddenProjects: [], unhiddenProjects: ['/tmp/ak-claude-1'] }));
+  });
+
+  it('Unhide on a temp-folder project the user also hid by hand shows it again (not back to auto-hidden)', async () => {
+    const both = { ...TEMP, hidden: 'manual' as const };
+    const store = withSettings(seeded([ALPHA, both], [], [], both.id), settings({ hiddenProjects: ['/tmp/ak-claude-1'] }));
+    mount(store);
+    mocked.patchSettings.mockResolvedValueOnce(settings({ unhiddenProjects: ['/tmp/ak-claude-1'] }));
+    fireEvent.click(screen.getByRole('button', { name: 'Unhide' }));
+    await waitFor(() => expect(mocked.patchSettings).toHaveBeenCalledWith({ hiddenProjects: [], unhiddenProjects: ['/tmp/ak-claude-1'] }));
+  });
+
+  it('Hide project before settings have loaded reads them first, so the saved lists are kept', async () => {
+    const store = seeded([ALPHA, ZED], [], [], ALPHA.id);
+    mount(store);
+    mocked.settings.mockResolvedValueOnce(settings({ hiddenProjects: ['/work/old'] }));
+    mocked.patchSettings.mockResolvedValueOnce(settings({ hiddenProjects: ['/work/old', '/work/alpha'] }));
+    fireEvent.click(screen.getByRole('button', { name: 'Hide project' }));
+    await waitFor(() => expect(mocked.patchSettings).toHaveBeenCalledWith({ hiddenProjects: ['/work/old', '/work/alpha'], unhiddenProjects: [] }));
   });
 
   it("Hide project on a project's page hides it and goes back to the list", async () => {

@@ -31,7 +31,9 @@ const byPath = (ps: Project[], path: string) => ps.find((p) => p.path === path);
 test('a project under the temp folder is hidden automatically; a normal one is not', async () => {
   const ps = await projectsFor([h(temp, 't1'), h(real, 'r1')]);
   assert.equal(byPath(ps, temp)?.hidden, 'auto');
+  assert.equal(byPath(ps, temp)?.tempFolder, true);
   assert.equal(byPath(ps, real)?.hidden, null);
+  assert.equal(byPath(ps, real)?.tempFolder, false);
 });
 
 test('a project the user hid is hidden "manual", however its folder is spelled', async () => {
@@ -82,4 +84,12 @@ test('an auto-hidden project the user unhid is shown, and hiding it again wins',
   assert.equal(byPath(ps, temp)?.hidden, null);
   ps = await projectsFor([h(temp, 't1')], { unhiddenProjects: [temp], hiddenProjects: [temp] });
   assert.equal(byPath(ps, temp)?.hidden, 'manual');
+});
+
+test('only scratch-* folders under scratch-workspaces count as Claude scratch chats', async () => {
+  const root = join(real, 'AppData', 'Roaming', 'Claude', 'scratch-workspaces');
+  const other = join(root, 'u1', 'not-a-scratch');
+  const ps = await projectsFor([h(join(root, 'u1', 'scratch-aa'), 's1'), h(other, 'o1')]);
+  assert.equal(ps.filter((p) => p.name === 'Claude scratch chats').length, 1);
+  assert.ok(byPath(ps, other));
 });

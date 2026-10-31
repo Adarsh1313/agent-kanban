@@ -3,7 +3,7 @@ import { statusPageHtml } from './status-page.ts';
 import { DEFAULT_DIST, readStatic, shellFile, staticFile } from './static.ts';
 import { buildProjects, projectInfo, type ProjectRules } from './projects.ts';
 import type { ProviderAdapter } from './adapters/adapter.ts';
-import { existsSync, statSync } from 'node:fs';
+import { existsSync, realpathSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { timingSafeEqual } from 'node:crypto';
 import { WebSocketServer, WebSocket } from 'ws';
@@ -142,7 +142,12 @@ export function createApi(opts: {
     return settings ? settings.filterHistory(all) : all;
   };
 
-  const projectRules = (): ProjectRules => ({ tempDir: tmpdir(), hidden: settings?.get().hiddenProjects ?? [], unhidden: settings?.get().unhiddenProjects ?? [], exists: existsSync });
+  // The temp folder as Node reports it and as the file system resolves it (8.3 short names, /var vs /private/var).
+  const tempDirs = (): string[] => {
+    const t = tmpdir();
+    try { return [t, realpathSync.native(t)]; } catch { return [t]; }
+  };
+  const projectRules = (): ProjectRules => ({ tempDirs: tempDirs(), hidden: settings?.get().hiddenProjects ?? [], unhidden: settings?.get().unhiddenProjects ?? [], exists: existsSync });
 
   // A provider's model list rarely changes: a non-empty answer is reused for 5 minutes (an empty one is asked again).
   const modelCache = new Map<ProviderId, { at: number; models: ModelOption[] }>();

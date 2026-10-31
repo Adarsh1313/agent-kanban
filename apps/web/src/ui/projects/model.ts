@@ -154,18 +154,25 @@ export const resetProjectInfoCache = () => { infoCache.clear(); infoDone.clear()
 export const isProjectHidden = (s: AppState, p: Project) => hiddenFolders(s).has(folderKey(p.id));
 
 /**
- * Hide project / Unhide. Hiding lists the folder in hiddenProjects; unhiding takes it off, and for a project hidden
- * automatically (temp folder) also lists it in unhiddenProjects. The project list is fetched again so the server's
- * marks follow. False (with a toast) when the setting couldn't be saved.
+ * Hide project / Unhide. Hiding lists the folder in hiddenProjects; unhiding takes it off, and for a folder under the
+ * temp folder (hidden automatically otherwise) also lists it in unhiddenProjects. The lists are read from the server
+ * first if settings haven't loaded, so a patch never drops what is saved. The project list is fetched again so the
+ * server's marks follow. False (with a toast) when the setting couldn't be saved.
  */
 export async function setProjectHidden(store: Store, project: Project, hide: boolean): Promise<boolean> {
-  const cur = store.getState().settings;
   const k = folderKey(project.id);
-  const without = (list: string[] | undefined) => (list ?? []).filter((f) => folderKey(f) !== k);
-  const patch = hide
-    ? { hiddenProjects: [...without(cur?.hiddenProjects), project.path], unhiddenProjects: without(cur?.unhiddenProjects) }
-    : { hiddenProjects: without(cur?.hiddenProjects), unhiddenProjects: project.hidden === 'auto' ? [...without(cur?.unhiddenProjects), project.path] : without(cur?.unhiddenProjects) };
+  const without = (list: string[]) => list.filter((f) => folderKey(f) !== k);
   try {
+    let cur = store.getState().settings;
+    if (!cur) {
+      cur = await api.settings();
+      const loaded = cur;
+      store.setState((s) => applySettings(s, loaded));
+    }
+    const auto = project.hidden === 'auto' || project.tempFolder === true;
+    const patch = hide
+      ? { hiddenProjects: [...without(cur.hiddenProjects), project.path], unhiddenProjects: without(cur.unhiddenProjects) }
+      : { hiddenProjects: without(cur.hiddenProjects), unhiddenProjects: auto ? [...without(cur.unhiddenProjects), project.path] : without(cur.unhiddenProjects) };
     const settings = await api.patchSettings(patch);
     store.setState((s) => applySettings(s, settings));
     void refreshProjects(store, api).catch(() => { /* the next resync fetches them */ });
