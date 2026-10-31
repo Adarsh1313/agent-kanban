@@ -1,12 +1,12 @@
 import type { Chat, Column, ProviderId } from '@agent-kanban/shared';
-import { folderKey, projectFolder } from '@agent-kanban/shared';
+import { CLAUDE_SCRATCH_NAME, claudeScratchRoot, folderKey, projectFolder } from '@agent-kanban/shared';
 import type { AppState, Filters } from './reducer.ts';
 
 const MINUTE = 60_000;
 const ACTIVITY_LIMIT_MIN = { hour: 60, today: 1440, week: 10080 } as const;
 
-export const MAX_SIDEBAR_PROJECTS = 4;
-export const MAX_SIDEBAR_CHATS = 3;
+/** How many chats the sidebar's Recent chats lists; All chats has the rest. */
+export const RECENT_CHATS = 10;
 
 /** A sidebar row: a board chat, or a history-only chat from the provider's own app (chatId null). */
 export interface SidebarChat {
@@ -21,12 +21,6 @@ export interface SidebarChat {
   pinned: boolean;
 }
 
-export interface ProjectGroup {
-  projectId: string;
-  name: string;
-  chats: SidebarChat[];
-  total: number;
-}
 
 export const isSnoozed = (c: { snoozedUntil: string | null }, now: number) => c.snoozedUntil !== null && Date.parse(c.snoozedUntil) > now;
 /** Archived on the server, or archived here with its Undo toast still showing. */
@@ -118,32 +112,18 @@ function sidebarChats(s: AppState, now: number): SidebarChat[] {
   return [...fromBoard, ...fromHistory];
 }
 
-/** Sidebar "Recent chats": the most recently active projects, each with its latest chats (design: 4 x 3); the Filter applies here too. */
-export function recentChatsByProject(
-  s: AppState,
-  now: number = Date.now(),
-  limits: { projects: number; chats: number } = { projects: MAX_SIDEBAR_PROJECTS, chats: MAX_SIDEBAR_CHATS },
-  /** Projects whose chats are all listed (the sidebar's "N more"). */
-  expanded: ReadonlySet<string> = new Set(),
-): ProjectGroup[] {
-  // One group per folder however it is spelled; named and linked by the server's project when there is one.
-  const known = new Map<string, { id: string; name: string }>();
-  for (const p of s.projects) if (!known.has(folderKey(p.id))) known.set(folderKey(p.id), { id: p.id, name: p.name });
-  const byProject = new Map<string, { projectId: string; name: string; list: SidebarChat[] }>();
-  for (const c of sidebarChats(s, now)) {
-    const k = folderKey(c.cwd);
-    const g = byProject.get(k);
-    if (g) g.list.push(c);
-    else {
-      const p = known.get(k);
-      byProject.set(k, { projectId: p?.id ?? c.cwd, name: p?.name ?? baseName(c.cwd), list: [c] });
-    }
-  }
-  return [...byProject.values()]
-    .map(({ projectId, name, list }) => ({ projectId, name, list: list.sort(byRecent) }))
-    .sort((a, b) => byRecent(a.list[0]!, b.list[0]!))
-    .slice(0, limits.projects)
-    .map(({ projectId, name, list }) => ({ projectId, name, chats: expanded.has(projectId) ? list : list.slice(0, limits.chats), total: list.length }));
+/** A Recent chats row: a sidebar chat with the project it belongs to. */
+export interface RecentChat extends SidebarChat {
+  projectId: string;
+  projectName: string;
+}
+
+/** Sidebar "Recent chats": the most recently active chats across projects, newest first, each named by its project; the Filter applies here too. */
+export function recentChats(s: AppState, now: number = Date.now(), limit: number = RECENT_CHATS): RecentChat[] {
+  return sidebarChats(s, now)
+    .sort(byRecent)
+    .slice(0, limit)
+    .map((c) => ({ ...c, projectId: findProjectFor(s, c.cwd)?.id ?? projectFolder(c.cwd), projectName: projectLabel(s, c.cwd) }));
 }
 
 /**
@@ -187,8 +167,14 @@ function countProviders(s: AppState): Record<ProviderId, number> {
 
 export const providerCounts = memoState((s) => [s.chats, s.history, s.ui.archiving, s.projects, s.settings], countProviders);
 
-/** The name to show for a project folder: the server's project name when known, else the folder's last part. */
-export function projectLabel(s: AppState, projectId: string): string {
-  const k = folderKey(projectId);
-  return (s.projects.find((p) => p.id === projectId) ?? s.projects.find((p) => folderKey(p.id) === k))?.name ?? baseName(projectId);
+/** The server's project a chat's folder belongs to (Claude scratch chats belong to their one project), if it knows one. */
+function findProjectFor(s: AppState, cwd: string) {
+  const folder = projectFolder(cwd);
+  const k = folderKey(folder);
+  return s.projects.find((p) => p.id === folder) ?? s.projects.find((p) => folderKey(p.id) === k);
+}
+
+/** The name to show for a chat's or project's folder: the server's project name when known, else the folder's last part. */
+export function projectLabel(s: AppState, cwd: string): string {
+  return findProjectFor(s, cwd)?.name ?? (claudeScratchRoot(cwd) ? CLAUDE_SCRATCH_NAME : baseName(cwd));
 }

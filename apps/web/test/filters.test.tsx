@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, within } from '@testing-librar
 import type { Chat, HistoryChat } from '@agent-kanban/shared';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { applySnapshot, initialState, type AppState, type Filters } from '../src/state/reducer.ts';
-import { recentChatsByProject } from '../src/state/selectors.ts';
+import { recentChats } from '../src/state/selectors.ts';
 import { createStore, StoreProvider, type Store } from '../src/state/store.ts';
 import { Board } from '../src/ui/board/Board.tsx';
 import { FilterBar } from '../src/ui/filters/FilterBar.tsx';
@@ -194,7 +194,7 @@ describe('Shell: F key and the sidebar', () => {
 
   it('the sidebar\'s recent chats follow the filters (history-only chats are "the provider\'s own app")', () => {
     const s = seeded().getState();
-    const titles = (st: AppState) => recentChatsByProject(st, NOW).flatMap((g) => g.chats.map((c) => c.title)).sort();
+    const titles = (st: AppState) => recentChats(st, NOW).map((c) => c.title).sort();
     const w = (f: Partial<Filters>): AppState => ({ ...s, ui: { ...s.ui, filters: { ...s.ui.filters, ...f } } });
     expect(titles(s)).toEqual(['Add tests', 'Fix login', 'Old idea', 'Write docs']);
     expect(titles(w({ source: ['native'] }))).toEqual(['Old idea']);

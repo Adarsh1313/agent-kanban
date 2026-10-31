@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { folderKey } from '@agent-kanban/shared';
 import { applySnapshot, initialState, type AppState, type Filters } from '../src/state/reducer.ts';
-import { boardColumns, focusedProvider, pinned, projectLabel, providerCounts, recentChatsByProject, suggestFor, unreadCount, visibleChats } from '../src/state/selectors.ts';
+import { boardColumns, focusedProvider, pinned, projectLabel, providerCounts, recentChats, suggestFor, unreadCount, visibleChats } from '../src/state/selectors.ts';
 import { filterOptions } from '../src/ui/filters/model.ts';
 import { chat } from './helpers.ts';
 
@@ -61,7 +62,7 @@ describe('snooze', () => {
     const s = state([chat({ id: 'z', pinned: true, snoozedUntil: '2026-10-23T13:00:00.000Z' })]);
     expect(ids(s)).toEqual([]);
     expect(pinned(s, NOW)).toEqual([]);
-    expect(recentChatsByProject(s, NOW)).toEqual([]);
+    expect(recentChats(s, NOW)).toEqual([]);
     const later = Date.parse('2026-10-23T13:00:01.000Z');
     expect(visibleChats(s, later)).toHaveLength(1);
     expect(pinned(s, later)).toHaveLength(1);
@@ -83,17 +84,19 @@ describe('boardColumns', () => {
   });
 });
 
-describe('recentChatsByProject', () => {
-  it('shows 4 projects x 3 chats, most recent project first, pinned excluded', () => {
+describe('recentChats', () => {
+  it('lists the 10 most recent chats across projects, newest first, pinned excluded, each with its project name', () => {
     const list = [];
-    for (let p = 0; p < 6; p++) for (let i = 0; i < 5; i++) {
-      list.push(chat({ id: `p${p}c${i}`, cwd: `/w/proj${p}`, updatedAt: new Date(NOW - (p * 10 + i) * 60000).toISOString(), pinned: p === 0 && i === 0 }));
+    for (let p = 0; p < 3; p++) for (let i = 0; i < 5; i++) {
+      list.push(chat({ id: `p${p}c${i}`, cwd: `/w/proj${p}`, updatedAt: new Date(NOW - (i * 10 + p) * 60000).toISOString(), pinned: p === 0 && i === 0 }));
     }
-    const groups = recentChatsByProject(state(list), NOW);
-    expect(groups).toHaveLength(4);
-    expect(groups.map((g) => g.name)).toEqual(['proj0', 'proj1', 'proj2', 'proj3']);
-    expect(groups[0]!.chats.map((c) => c.chatId)).toEqual(['p0c1', 'p0c2', 'p0c3']);
-    expect(groups[0]!.total).toBe(4);
+    const recent = recentChats(state(list), NOW);
+    expect(recent.map((c) => c.chatId)).toEqual(['p1c0', 'p2c0', 'p0c1', 'p1c1', 'p2c1', 'p0c2', 'p1c2', 'p2c2', 'p0c3', 'p1c3']);
+    expect(recent.map((c) => c.projectName).slice(0, 3)).toEqual(['proj1', 'proj2', 'proj0']);
+  });
+  it('names a Claude scratch chat by its one project', () => {
+    const s = state([chat({ id: 's', cwd: String.raw`C:\Users\me\AppData\Roaming\Claude\scratch-workspaces\u1\scratch-aa` })]);
+    expect(recentChats(s, NOW)[0]!.projectName).toBe('Claude scratch chats');
   });
   it('includes history-only chats without a matching board chat, and honors provider focus', () => {
     const s = state(
@@ -104,10 +107,10 @@ describe('recentChatsByProject', () => {
         { provider: 'codex', sessionRef: 'S2', title: 'native one', cwd: '/w/x', updatedAt: '2026-10-23T08:00:00.000Z' },
       ],
     );
-    const all = recentChatsByProject(s, NOW)[0]!.chats;
+    const all = recentChats(s, NOW);
     expect(all.map((c) => c.title)).toEqual(['A chat', 'native one']);
-    expect(all[1]).toMatchObject({ chatId: null, sessionRef: 'S2', provider: 'codex' });
-    expect(recentChatsByProject(withFilters(s, { provider: ['claude'] }), NOW)[0]!.chats).toHaveLength(1);
+    expect(all[1]).toMatchObject({ chatId: null, sessionRef: 'S2', provider: 'codex', projectName: 'x' });
+    expect(recentChats(withFilters(s, { provider: ['claude'] }), NOW)).toHaveLength(1);
   });
 });
 
@@ -143,11 +146,6 @@ describe('sidebar helpers', () => {
     ]);
     expect(providerCounts(s)).toEqual({ claude: 2, codex: 0, antigravity: 0 });
   });
-  it('recentChatsByProject lists every chat of an expanded project', () => {
-    const s = state(Array.from({ length: 5 }, (_, i) => chat({ id: `c${i}`, sessionRef: `r${i}`, updatedAt: `2026-10-23T10:0${i}:00.000Z` })));
-    expect(recentChatsByProject(s, NOW)[0]!.chats).toHaveLength(3);
-    expect(recentChatsByProject(s, NOW, undefined, new Set(['/work/alpha']))[0]!.chats).toHaveLength(5);
-  });
   it('projectLabel falls back to the folder name', () => {
     expect(projectLabel(state(), String.raw`C:\Users\me\open-project`)).toBe('open-project');
   });
@@ -162,10 +160,9 @@ describe('sidebar helpers', () => {
 describe('one folder, however it is spelled', () => {
   const spellings = [String.raw`C:\a`, String.raw`c:\a\ `.trim(), 'C:/a'];
   const s = state(spellings.map((cwd, i) => chat({ id: `c${i}`, sessionRef: `r${i}`, cwd, updatedAt: `2026-10-23T10:0${i}:00.000Z` })));
-  it('the sidebar shows one group', () => {
-    const groups = recentChatsByProject(s, NOW);
-    expect(groups).toHaveLength(1);
-    expect(groups[0]!.total).toBe(3);
+  it('the sidebar labels every spelling with one project', () => {
+    expect(new Set(recentChats(s, NOW).map((c) => folderKey(c.projectId))).size).toBe(1);
+    expect(new Set(recentChats(s, NOW).map((c) => c.projectName))).toEqual(new Set(['a']));
   });
   it('filtering by any spelling matches every spelling', () => {
     for (const p of spellings) expect(ids(withFilters(s, { project: [p] }))).toEqual(['c0', 'c1', 'c2']);
