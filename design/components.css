@@ -112,7 +112,7 @@ p { text-wrap: pretty; }
 [data-level="out"] { --fill-colour: var(--color-meter-out); }
 
 /* Popover: scales from its trigger, never from centre */
-.popover { position: absolute; z-index: 30; background: var(--color-surface); border-radius: var(--radius-card); box-shadow: var(--shadow-pop);
+.popover { position: absolute; z-index: 45; background: var(--color-surface); border-radius: var(--radius-card); box-shadow: var(--shadow-pop);
   transform-origin: var(--origin, top right); transition: opacity var(--duration-pop) var(--ease-out), transform var(--duration-pop) var(--ease-out); }
 .popover[data-state="closed"] { opacity: 0; transform: scale(.97) translateY(-4px); pointer-events: none; transition-duration: var(--duration-exit); }
 .usage-pop { width: 340px; padding: var(--space-2); max-height: calc(100vh - var(--topbar-height) - var(--space-6)); overflow-y: auto; overscroll-behavior: contain; }

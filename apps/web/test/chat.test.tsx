@@ -481,6 +481,25 @@ describe('Chat panel: history-only chats', () => {
     expect(within(panel()).getByPlaceholderText('Continue this Claude Code chat')).toBeTruthy();
   });
 
+  it('opens scrolled to the newest message (#36)', async () => {
+    mocked.historyMessages.mockResolvedValue({ truncated: false, unavailable: false, messages: [
+      { role: 'user', text: 'First', at: null },
+      { role: 'assistant', text: 'Newest', at: null },
+    ] });
+    const tops = new WeakMap<Element, number>();
+    const height = vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockReturnValue(900);
+    const top = vi.spyOn(HTMLElement.prototype, 'scrollTop', 'set').mockImplementation(function (this: HTMLElement, v: number) { tops.set(this, v); });
+    try {
+      mount(seeded([]));
+      act(() => openHistoryChat(ref));
+      await waitFor(() => expect(within(panel()).getByText('Newest')).toBeTruthy());
+      expect(tops.get(panel().querySelector('.history-thread')!)).toBe(900);
+    } finally {
+      height.mockRestore();
+      top.mockRestore();
+    }
+  });
+
   it("when the history can't be read (Antigravity, or an error) it says the messages are in the app", async () => {
     mocked.historyMessages.mockResolvedValueOnce({ truncated: false, unavailable: true, messages: [] });
     mount(seeded([]));
@@ -547,6 +566,15 @@ describe('Chat panel: history-only chats', () => {
     expect(items).toEqual(['Continue here', 'Open folder', 'Copy project path', 'Copy resume command']);
     fireEvent.click(screen.getByRole('menuitem', { name: 'Continue here' }));
     expect(store.getState().ui.openHistory).toEqual(ref);
+  });
+
+  it('the panel "…" menu of an open history chat leaves out Continue here, which would do nothing (#36)', async () => {
+    mocked.historyMessages.mockResolvedValue({ truncated: false, unavailable: false, messages: [{ role: 'user', text: 'Hi', at: null }] });
+    mount(seeded([]));
+    act(() => openHistoryChat(ref));
+    fireEvent.click(within(panel()).getByRole('button', { name: 'More actions' }));
+    expect(screen.getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Open folder', 'Copy project path', 'Copy resume command']);
+    await waitFor(() => expect(within(panel()).getByText('Hi')).toBeTruthy());
   });
 });
 
