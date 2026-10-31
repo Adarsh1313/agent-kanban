@@ -50,6 +50,33 @@ export interface Chat {
   archived: boolean;
   pinned: boolean;
   snoozedUntil: string | null;
+  /** The routine that started this chat, if any (#45). */
+  routineId?: string | null;
+}
+
+/** Composer effort (#42). Routines store it now; adapters map it once effort is built. */
+export type Effort = 'quick' | 'normal' | 'thorough';
+/** Days are 0 (Sunday) to 6; time is 'HH:MM' in the machine's local time. Daily is all 7 days, Weekdays 1 to 5. */
+export interface RoutineSchedule { days: number[]; time: string }
+/** How the last run went: started on time, ran late (caught up on open), skipped while the last run was still going, or the folder was missing. */
+export type RoutineResult = 'ran' | 'ran_late' | 'skipped_running' | 'folder_missing';
+export interface Routine {
+  id: string;
+  name: string;
+  cwd: string;
+  provider: ProviderId;
+  effort: Effort;
+  kind: 'skill' | 'prompt';
+  text: string;
+  schedule: RoutineSchedule;
+  paused: boolean;
+  chime: boolean;
+  lastRunAt: string | null;
+  lastResult: RoutineResult | null;
+  lastChatId: string | null;
+  /** When the next run is due (null while paused). */
+  nextRunAt: string | null;
+  createdAt: string;
 }
 
 export interface Message { id: string; chatId: string; role: 'user' | 'assistant'; text: string; createdAt: string }
@@ -90,6 +117,7 @@ export type ServerEvent =
   | { type: 'connection.updated'; health: ConnectionHealth }
   | { type: 'connect.updated'; state: ConnectState }
   | { type: 'settings.updated'; settings: Settings }
+  | { type: 'routines.updated'; routines: Routine[] }
   | { type: 'notification'; chatId: string; kind: 'permission' | 'question' | 'finished' | 'limit' | 'error'; action?: RequestAction };
 
 export type ConnectPhase = 'idle' | 'installing' | 'signing_in' | 'signing_out' | 'updating' | 'error';

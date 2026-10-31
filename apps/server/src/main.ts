@@ -19,6 +19,7 @@ import { STOP_REQUEST_FILE, watchStopRequest } from './stop-request.ts';
 import { FolderPicker } from './folder-picker.ts';
 import { FolderOpener } from './folder-opener.ts';
 import { SettingsStore } from './settings.ts';
+import { RoutineService } from './routines.ts';
 import { AdapterRegistry } from './adapters/registry.ts';
 import { findBinary } from './binaries.ts';
 import { createApi } from './api.ts';
@@ -97,6 +98,7 @@ const connections = new ConnectionMonitor({
   },
 });
 const settings = new SettingsStore(store);
+const routines = new RoutineService({ store, chats, broadcast: (e) => broadcast(e) });
 const connect = new ConnectService({
   run: spawnCommand,
   npmPath: () => findBinary('npm'),
@@ -117,7 +119,7 @@ const connect = new ConnectService({
   home: akHome,
 });
 connectRef = connect;
-const api = createApi({ chats, usage, history: () => readAllHistory(home), token, connections, adapters, connect, settings, folderPicker: new FolderPicker(), folderOpener: new FolderOpener(),
+const api = createApi({ chats, usage, history: () => readAllHistory(home), token, connections, adapters, connect, settings, routines, folderPicker: new FolderPicker(), folderOpener: new FolderOpener(),
   transcript: (provider, sessionRef) => readTranscript(home, provider, sessionRef) });
 broadcast = api.broadcast;
 
@@ -154,6 +156,8 @@ if (process.env.AGENT_KANBAN_OPEN_BROWSER === '1') {
 }
 usage.start();
 connections.start();
+// Catches up runs missed in the past 12 hours, then keeps the timer for the next one.
+void routines.start().catch((e) => console.error('Routines failed to start:', e));
 
 let stopping = false;
 async function shutdown(): Promise<void> {
@@ -161,6 +165,7 @@ async function shutdown(): Promise<void> {
   stopping = true;
   usage.stop();
   connections.stop();
+  routines.stop();
   // Installs and sign-ins in progress are cancelled; their process trees are killed before we exit.
   const connectDone = connect.dispose().catch(() => {});
   api.server.close();

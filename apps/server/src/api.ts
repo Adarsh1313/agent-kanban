@@ -14,6 +14,8 @@ import { PickerBusyError } from './folder-picker.ts';
 import type { Transcript } from './history/transcript.ts';
 import type { ConnectService } from './connect/service.ts';
 import { SettingsError } from './settings.ts';
+import { RoutineError, RoutineNotFoundError } from './routines.ts';
+import type { RoutineService } from './routines.ts';
 import type { SettingsStore } from './settings.ts';
 import type { ChatService } from './chats.ts';
 import type { UsageService } from './usage/service.ts';
@@ -98,6 +100,8 @@ export function createApi(opts: {
   adapters?: { get(id: ProviderId): ProviderAdapter | undefined };
   connect?: Pick<ConnectService, 'states' | 'install' | 'signIn' | 'signOut' | 'update' | 'cancel' | 'openSignInPage'>;
   settings?: SettingsStore;
+  /** Routines and their scheduler (#45). */
+  routines?: RoutineService;
   /** Past messages of a chat that is only in the provider's history (#16). */
   transcript?: (provider: ProviderId, sessionRef: string) => Promise<Transcript>;
   /** New chat's "Browse…": shows the native folder picker (#24). */
@@ -300,6 +304,16 @@ export function createApi(opts: {
       if (!run) throw new HttpError(404, 'Not found.');
       return { status: 202, body: await run() };
     }
+    if (url.pathname === '/api/routines' || url.pathname.startsWith('/api/routines/')) {
+      const r = opts.routines;
+      if (!r) throw new HttpError(404, 'Not found.');
+      if (match('GET', '/api/routines')) return { status: 200, body: r.list() };
+      if (match('POST', '/api/routines')) return { status: 201, body: r.create(await readJson(req)) };
+      if ((m = match('PATCH', '/api/routines/:id'))) return { status: 200, body: r.update(m[0]!, await readJson(req)) };
+      if ((m = match('DELETE', '/api/routines/:id'))) { r.remove(m[0]!); return { status: 204 }; }
+      if ((m = match('POST', '/api/routines/:id/run'))) return { status: 200, body: await r.runNow(m[0]!) };
+      throw new HttpError(404, 'Not found.');
+    }
     if (match('GET', '/api/settings')) {
       if (!settings) throw new HttpError(404, 'Not found.');
       return { status: 200, body: settings.get() };
@@ -325,7 +339,7 @@ export function createApi(opts: {
       res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Vary', 'Origin');
       res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
-      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, OPTIONS');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
     }
     const send = (status: number, body?: unknown) => {
       if (body === undefined) { res.writeHead(status); res.end(); return; }
@@ -390,6 +404,8 @@ export function createApi(opts: {
           return send(err.status, { error: err.message });
         }
         const msg = err instanceof Error ? err.message : '';
+        if (err instanceof RoutineError) return send(400, { error: msg });
+        if (err instanceof RoutineNotFoundError) return send(404, { error: msg });
         if (err instanceof ActiveElsewhereError || err instanceof CantContinueError || err instanceof ConnectBusyError || err instanceof ConnectStateError || err instanceof PickerBusyError) return send(409, { error: msg });
         if (msg === 'That request is no longer open.') return send(409, { error: msg });
         if (msg === 'Chat not found.') return send(404, { error: msg });
