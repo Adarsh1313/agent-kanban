@@ -57,6 +57,22 @@ const usable = (projects: Project[]) => projects.filter((p) => p.id.trim() !== '
 
 const isOlder = (p: Project, now: number) => !p.lastActivityAt || Date.parse(p.lastActivityAt) < now - OLDER_MS;
 
+/**
+ * The project picker's rows: recent projects, then (null) the "Older" row, then older projects (dim) once it is open.
+ * Searching matches name or path across every project and shows older matches without the row.
+ */
+function pickerRows(projects: Project[], now: number, query: string, olderOpen: boolean): ({ p: Project; dim: boolean } | null)[] {
+  const q = query.trim().toLowerCase();
+  const all = usable(projects).filter((p) => !q || p.name.toLowerCase().includes(q) || p.path.toLowerCase().includes(q));
+  const recent = all.filter((p) => !isOlder(p, now));
+  const older = all.filter((p) => isOlder(p, now));
+  return [
+    ...recent.map((p) => ({ p, dim: false })),
+    ...(older.length > 0 && !q ? [null] : []),
+    ...(olderOpen || q ? older.map((p) => ({ p, dim: true })) : []),
+  ];
+}
+
 /** The focused provider's latest project, else the latest project. */
 function latestProject(projects: Project[], focus: ProviderId | null): Project | undefined {
   const sorted = usable(projects);
@@ -420,19 +436,7 @@ export function NewChatDialog() {
           <div className="menu-label" role="presentation">Projects found on this computer</div>
           {usable(st.projects).length === 0 && <div className="menu-label" role="presentation">None yet</div>}
           <div className="dlg-scroll" role="presentation">
-            {(() => {
-              const q = projectQuery.trim().toLowerCase();
-              const all = usable(st.projects).filter((p) => !q || p.name.toLowerCase().includes(q) || p.path.toLowerCase().includes(q));
-              const recent = all.filter((p) => !isOlder(p, st.now));
-              const older = all.filter((p) => isOlder(p, st.now));
-              // Searching shows every match; otherwise older projects wait behind one "Older" row.
-              const showOlder = olderOpen || q !== '';
-              return [
-                ...recent.map((p) => ({ p, dim: false })),
-                ...(older.length > 0 && !q ? [null] : []),
-                ...(showOlder ? older.map((p) => ({ p, dim: true })) : []),
-              ];
-            })().map((row) => {
+            {pickerRows(st.projects, st.now, projectQuery, olderOpen).map((row) => {
               if (row === null) {
                 const n = usable(st.projects).filter((p) => isOlder(p, st.now)).length;
                 return (

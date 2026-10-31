@@ -89,7 +89,9 @@ test('an auto-hidden project the user unhid is shown, and hiding it again wins',
 test('only scratch-* folders under scratch-workspaces count as Claude scratch chats', async () => {
   const root = join(real, 'AppData', 'Roaming', 'Claude', 'scratch-workspaces');
   const other = join(root, 'u1', 'not-a-scratch');
-  const ps = await projectsFor([h(join(root, 'u1', 'scratch-aa'), 's1'), h(other, 'o1')]);
+  // The Claude app puts scratch folders straight under scratch-workspaces, or one folder deeper.
+  const ps = await projectsFor([h(join(root, 'scratch-2026-10-28-5f623a'), 's0'), h(join(root, 'u1', 'scratch-aa'), 's1'), h(other, 'o1')]);
   assert.equal(ps.filter((p) => p.name === 'Claude scratch chats').length, 1);
+  assert.equal(ps.find((p) => p.name === 'Claude scratch chats')!.historyOnly, 2);
   assert.ok(byPath(ps, other));
 });

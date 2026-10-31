@@ -18,7 +18,7 @@ export const CLAUDE_SCRATCH_NAME = 'Claude scratch chats';
  * (`…/Claude/scratch-workspaces/<id>/scratch-*`), else null.
  */
 export function claudeScratchRoot(path: string): string | null {
-  const m = /^(.*[\\/]claude[\\/]scratch-workspaces)[\\/][^\\/]+[\\/]scratch-[^\\/]*(?:[\\/]|$)/i.exec(path.trim());
+  const m = /^(.*[\\/]claude[\\/]scratch-workspaces)[\\/](?:[^\\/]+[\\/])*?scratch-[^\\/]*(?:[\\/]|$)/i.exec(path.trim());
   return m ? m[1]! : null;
 }
 

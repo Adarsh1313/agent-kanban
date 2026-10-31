@@ -72,6 +72,11 @@
   --sidebar-width: 248px;
   --topbar-height: 48px;
   --panel-width: 520px;
+  --search-width: 260px;       /* a page's search field (All chats) */
+  --column-project: 180px;     /* All chats: the project column */
+  --column-when: 72px;         /* a list's "when" column (5m, Yesterday) */
+  --glyph-sm: 14px;            /* small project glyph in a list row */
+  --control-height-sm: 24px;   /* a button sitting on a row (Unhide) */
 
   /* Radius by role: small things stay small */
   --radius-badge: 4px;     /* state badges, kbd hints */

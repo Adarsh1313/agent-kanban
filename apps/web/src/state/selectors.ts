@@ -108,7 +108,7 @@ export function pinned(s: AppState, now: number = Date.now()): Chat[] {
  * Board chats (not archived) and history-only chats outside hidden projects that pass the filters. Recent chats
  * leaves out pinned and snoozed ones (`everything` false); All chats lists them too.
  */
-function sidebarChats(s: AppState, now: number, f: Filters = s.ui.filters, everything = false): SidebarChat[] {
+function listedChats(s: AppState, now: number, f: Filters = s.ui.filters, everything = false): SidebarChat[] {
   const known = new Set<string>();
   for (const c of Object.values(s.chats)) if (c.sessionRef) known.add(`${c.provider}\u0000${c.sessionRef}`);
   const fromBoard = Object.values(s.chats)
@@ -120,23 +120,23 @@ function sidebarChats(s: AppState, now: number, f: Filters = s.ui.filters, every
   return [...fromBoard, ...fromHistory];
 }
 
-/** A Recent chats row: a sidebar chat with the project it belongs to. */
-export interface RecentChat extends SidebarChat {
+/** A Recent chats or All chats row: a chat with the project it belongs to. */
+export interface ListedChat extends SidebarChat {
   projectId: string;
   projectName: string;
 }
 
 /** Sidebar "Recent chats": the most recently active chats across projects, newest first, each named by its project; the Filter applies here too. */
-export function recentChats(s: AppState, now: number = Date.now(), limit: number = RECENT_CHATS): RecentChat[] {
-  return sidebarChats(s, now).sort(byRecent).slice(0, limit).map((c) => withProject(s, c));
+export function recentChats(s: AppState, now: number = Date.now(), limit: number = RECENT_CHATS): ListedChat[] {
+  return listedChats(s, now).sort(byRecent).slice(0, limit).map((c) => withProject(s, c));
 }
 
 /** All chats: every chat on the board (pinned and snoozed too) or only in a provider's history, newest first, with All chats' own filters. */
-export function allChats(s: AppState, now: number = Date.now()): RecentChat[] {
-  return sidebarChats(s, now, s.ui.chatsFilters, true).sort(byRecent).map((c) => withProject(s, c));
+export function allChats(s: AppState, now: number = Date.now()): ListedChat[] {
+  return listedChats(s, now, s.ui.chatsFilters, true).sort(byRecent).map((c) => withProject(s, c));
 }
 
-const withProject = (s: AppState, c: SidebarChat): RecentChat =>
+const withProject = (s: AppState, c: SidebarChat): ListedChat =>
   ({ ...c, projectId: findProjectFor(s, c.cwd)?.id ?? projectFolder(c.cwd), projectName: projectLabel(s, c.cwd) });
 
 /**

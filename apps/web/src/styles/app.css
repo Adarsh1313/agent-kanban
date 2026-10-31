@@ -162,7 +162,7 @@ a.prow { color: inherit; text-decoration: none; }
 .plist-rows li.hidden-project { position: relative; }
 .plist-rows li.hidden-project .prow > :not(.go) { opacity: .55; }
 .plist-rows li.hidden-project .go { visibility: hidden; }
-.plist-rows .unhide { position: absolute; right: var(--space-3); top: 0; bottom: 0; margin: auto 0; height: 24px; }
+.plist-rows .unhide { position: absolute; right: var(--space-3); top: 0; bottom: 0; margin: auto 0; height: var(--control-height-sm); }
 .missing-note { color: var(--color-needs-text); margin-right: var(--space-2); }
 .project-note { margin: 0 0 var(--space-4); font-size: var(--text-caption); color: var(--color-text-muted); }
 .know .btn:disabled { opacity: .5; cursor: not-allowed; }
@@ -223,14 +223,14 @@ body:has(> .onb[data-state="open"]) > .toasts { z-index: 91; }
 
 /* All chats: search + Filter on one line, then a plain list (prototype variant A). */
 .ac-tools { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; margin-bottom: var(--space-3); }
-.ac-tools .search input { width: 260px; }
+.ac-tools .search input { width: var(--search-width); }
 .ac-count { margin-left: auto; color: var(--color-text-faint); font-size: var(--text-caption); font-variant-numeric: tabular-nums; }
 .all-chats-page .filterbar { padding: 0 0 var(--space-3); border-bottom: 0; }
-.all-chats-page .crow .proj { flex: none; display: inline-flex; align-items: center; gap: 6px; width: 180px; min-width: 0; color: var(--color-text-muted); font-size: var(--text-caption); white-space: nowrap; overflow: hidden; }
+.all-chats-page .crow .proj { flex: none; display: inline-flex; align-items: center; gap: calc(var(--space-1) * 1.5); width: var(--column-project); min-width: 0; color: var(--color-text-muted); font-size: var(--text-caption); white-space: nowrap; overflow: hidden; }
 .all-chats-page .crow .proj > span:last-child { overflow: hidden; text-overflow: ellipsis; }
-.all-chats-page .crow .proj .folder-glyph { width: 14px; height: 14px; font-size: 9px; }
-.all-chats-page .crow .when { flex: none; width: 72px; text-align: right; color: var(--color-text-faint); font-size: var(--text-caption); font-variant-numeric: tabular-nums; }
-.all-chats-page mark { background: var(--color-needs-soft); color: inherit; border-radius: 2px; }
+.all-chats-page .crow .proj .folder-glyph { width: var(--glyph-sm); height: var(--glyph-sm); font-size: calc(var(--glyph-sm) * .6); }
+.all-chats-page .crow .when { flex: none; width: var(--column-when); text-align: right; color: var(--color-text-faint); font-size: var(--text-caption); font-variant-numeric: tabular-nums; }
+.all-chats-page mark { background: var(--color-needs-soft); color: inherit; border-radius: var(--radius-badge); }
 .all-chats-page .show-more-row { margin-top: var(--space-2); }
 @media (max-width: 640px) { .all-chats-page .crow .proj { width: auto; max-width: 40%; } .ac-tools .search input { width: 100%; } }
 
@@ -239,4 +239,5 @@ body:has(> .onb[data-state="open"]) > .toasts { z-index: 91; }
 .dlg-pop .older-row { color: var(--color-text-muted); }
 .dlg-pop .older-row .icon { transition: transform var(--duration-pop) var(--ease-out); }
 .dlg-pop .older-row[aria-expanded="true"] .icon { transform: rotate(90deg); }
+@media (prefers-reduced-motion: reduce) { .dlg-pop .older-row .icon { transition: none; } }
 .dlg-pop .menu-item.dim { color: var(--color-text-muted); }

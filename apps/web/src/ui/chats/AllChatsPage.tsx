@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { openChatIn, type AppState } from '../../state/reducer.ts';
-import { allChats, memoState, type RecentChat } from '../../state/selectors.ts';
+import { allChats, memoState, type ListedChat } from '../../state/selectors.ts';
 import { useStore, useStoreInstance } from '../../state/store.ts';
 import { openHistoryChat } from '../actions.ts';
 import { relativeTime, dateTime } from '../board/format.ts';
@@ -33,7 +33,7 @@ function onActivate(fn: () => void) {
   };
 }
 
-function Row({ c, q, now }: { c: RecentChat; q: string; now: number }) {
+function Row({ c, q, now }: { c: ListedChat; q: string; now: number }) {
   const store = useStoreInstance();
   const open = () => {
     if (c.chatId) store.setState((s) => openChatIn(s, c.chatId!));

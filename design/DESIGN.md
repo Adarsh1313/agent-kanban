@@ -39,15 +39,22 @@ one running-blue card halfway between two ink columns.
 - **Mono only for file names and commands** inside agent activity.
 - **Selected sidebar item** is a sliding neutral capsule, never a coloured left border.
 - **Provider logos** from `assets/providers/` (LobeHub, MIT), colour versions, never recoloured.
-- **Sidebar:** Board · Projects · Connections, then Providers (focus toggle), Pinned, Recent chats
-  (4 most active projects, 3 chats each, muted project labels, one provider logo per row). 248px.
+- **Sidebar:** Board · All chats · Projects · Connections, then Providers (focus toggle), Pinned, Recent chats
+  (the 10 newest chats, one line each: provider logo, title, the project muted on the right, swapped for
+  the date on hover or focus), then an "All chats" link. The search icon opens All chats, search focused. 248px.
 - **Focusing a provider** filters the board, adds a "Provider is X" chip, and swaps the top-bar usage
   for that provider's meters plus "Usage for all providers".
 - **Filters** follow Linear: categories, then an options pane; active filters become chips; F opens it.
-- **New chat** is project-first; providers that haven't worked there show disabled with the reason.
+- **New chat** is project-first; providers that haven't worked there show disabled with the reason. Its
+  project list has a search and folds projects idle for 30 days behind one "Older (n)" row (unfolds in
+  place, dimmed; typing searches them too). Missing folders and Claude scratch chats aren't offered.
+- **All chats:** a plain list (status, provider logo, title, project glyph and name, when), search that
+  marks the match, and its own Filter limited to Project and Provider. 100 rows, then "Show 100 more".
 - **Notifications** sit behind a bell (count, one damped ring per event, optional chime).
 - **Projects:** Linear-style rows (providers with chat counts, a status bar of chats, last activity);
-  detail shows providers that know the project, its chats, and an About column.
+  detail shows providers that know the project, its chats, and an About column. Hidden projects (temp
+  folder, or Hide project) are left out everywhere; "Show hidden projects" lists them dimmed with Unhide.
+  A moved or deleted folder says "Folder missing": chats readable, New chat disabled.
 - **Connections:** one card per agent, every state a dot and a word: Not installed → Installing →
   Signed out → Waiting for sign-in → Connected. Sign out asks first and says what stops working.
 - **Onboarding:** full screen, Welcome + 4 counted steps (Connect, Bring in your chats, Notifications,
