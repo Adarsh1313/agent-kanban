@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import type { HistoryChat } from '@agent-kanban/shared';
+import type { Chat, HistoryChat, Project } from '@agent-kanban/shared';
+import { folderKey } from '@agent-kanban/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { recentChats } from '../src/state/selectors.ts';
 import { applySnapshot, initialState, type AppState } from '../src/state/reducer.ts';
 import { createStore, StoreProvider, type Store } from '../src/state/store.ts';
 import { Shell } from '../src/ui/shell/Shell.tsx';
@@ -9,15 +9,24 @@ import { Sidebar } from '../src/ui/shell/Sidebar.tsx';
 import { setNewChatHandler } from '../src/ui/actions.ts';
 import { chat } from './helpers.ts';
 
-vi.mock('../src/state/selectors.ts', async (orig) => {
-  const m = await orig<typeof import('../src/state/selectors.ts')>();
-  return { ...m, recentChats: vi.fn(m.recentChats) };
-});
 
 const NOW = Date.parse('2026-10-23T12:00:00.000Z');
 
+/** Every folder the chats use is a project, and all of them are in My projects, so the sidebar's cards list their chats. */
+function projectsOf(chats: Chat[], history: HistoryChat[]): Project[] {
+  const out = new Map<string, Project>();
+  for (const c of [...chats, ...history]) {
+    const k = folderKey(c.cwd);
+    if (!out.has(k)) out.set(k, { id: c.cwd, name: c.cwd.split('/').pop()!, path: c.cwd, providers: [], columns: { running: 0, needs_you: 0, review: 0, done: 0 }, historyOnly: 0, lastActivityAt: c.updatedAt, hidden: null, folderMissing: false });
+  }
+  return [...out.values()];
+}
+
 function seeded(chats = [chat()], history: HistoryChat[] = [], extra: Partial<AppState> = {}): Store {
-  const s = applySnapshot(initialState(), { chats, usage: [], suggested: null, connections: [], history, projects: [] });
+  const projects = projectsOf(chats, history);
+  const on = { claude: true, codex: true, antigravity: true };
+  const settings = { onboarded: true, showChats: on, suggest: on, hiddenProjects: [], unhiddenProjects: [], myProjects: projects.map((p) => p.id) };
+  const s = applySnapshot(initialState(), { chats, usage: [], suggested: null, connections: [], history, projects, settings });
   return createStore({ ...s, now: NOW, ...extra });
 }
 const mount = (store: Store, ui = <Sidebar />) => render(<StoreProvider store={store}>{ui}</StoreProvider>);
@@ -72,7 +81,7 @@ describe('Sidebar: providers', () => {
   });
 });
 
-describe('Sidebar: pinned and recent', () => {
+describe('Sidebar: pinned and project cards', () => {
   it('hides Pinned when nothing is pinned and shows it otherwise', () => {
     const { unmount } = mount(seeded([chat()]));
     expect(screen.queryByText('Pinned')).toBeNull();
@@ -80,24 +89,6 @@ describe('Sidebar: pinned and recent', () => {
     mount(seeded([chat({ id: 'p', title: 'Keep me', pinned: true })]));
     expect(screen.getByText('Pinned')).toBeTruthy();
     expect(screen.getByText('Keep me')).toBeTruthy();
-  });
-
-  it('Recent chats lists the 10 most recent chats, newest first, each labelled with its project; no project groups', () => {
-    const chats = Array.from({ length: 3 }, (_, p) => Array.from({ length: 5 }, (_, i) =>
-      chat({ id: `c${p}-${i}`, sessionRef: `r${p}-${i}`, cwd: `/work/proj${p}`, title: `Chat ${p}-${i}`, updatedAt: new Date(NOW - (i * 10 + p) * 60_000).toISOString() }))).flat();
-    mount(seeded(chats));
-    const rows = [...document.querySelectorAll('.recent .chat-row')];
-    expect(rows.map((r) => r.querySelector('.t')!.textContent)).toEqual(['Chat 0-0', 'Chat 1-0', 'Chat 2-0', 'Chat 0-1', 'Chat 1-1', 'Chat 2-1', 'Chat 0-2', 'Chat 1-2', 'Chat 2-2', 'Chat 0-3']);
-    expect(rows.map((r) => r.querySelector('.rest .p')!.textContent).slice(0, 3)).toEqual(['proj0', 'proj1', 'proj2']);
-    expect(document.querySelector('.proj')).toBeNull();
-    expect(screen.queryByRole('button', { name: /more$/ })).toBeNull();
-  });
-
-  it("a Recent chats row has the date ready to replace the project label on hover", () => {
-    mount(seeded([chat({ id: 'a', title: 'Fix login', cwd: '/work/alpha', updatedAt: new Date(NOW - 3 * 3600_000).toISOString() })]));
-    const row = document.querySelector('.recent .chat-row')!;
-    expect(row.querySelector('.rest .p')!.textContent).toBe('alpha');
-    expect(row.querySelector('.rest .d')!.textContent).toBe('3h');
   });
 
   it('hovering a chat (board or history-only) shows its title, provider and when it was last active (#23)', () => {
@@ -131,18 +122,6 @@ describe('Sidebar: pinned and recent', () => {
     mount(store);
     fireEvent.keyDown(screen.getByRole('button', { name: 'Fix login' }), { key: ' ' });
     expect(store.getState().ui.openChatId).toBe('c9');
-  });
-
-  it('streaming deltas do not recompute the recent list; a chat change does', () => {
-    const store = seeded([chat({ id: 'c1', updatedAt: new Date(NOW + 60_000).toISOString() })], hist(300));
-    mount(store);
-    const spy = vi.mocked(recentChats);
-    spy.mockClear();
-    act(() => { store.setState((s) => ({ ...s, streaming: { ...s.streaming, c1: { m1: 'x' } } })); });
-    expect(spy).not.toHaveBeenCalled();
-    act(() => { store.setState((s) => ({ ...s, chats: { ...s.chats, c1: { ...s.chats.c1!, title: 'Renamed' } } })); });
-    expect(spy).toHaveBeenCalled();
-    expect(screen.getByText('Renamed')).toBeTruthy();
   });
 
   it('a view change keeps the capsule slide (never writes transition: none after the first placement)', () => {
@@ -184,7 +163,8 @@ describe('Sidebar: pinned and recent', () => {
     const t0 = performance.now();
     mount(store);
     const took = performance.now() - t0;
-    expect(document.querySelectorAll('.recent .chat-row').length).toBe(10);
+    // 40 projects, 3 chats on each card.
+    expect(document.querySelectorAll('.project-card .chat-row').length).toBe(120);
     expect(took).toBeLessThan(1000);
   });
 });

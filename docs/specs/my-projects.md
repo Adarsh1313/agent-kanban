@@ -129,7 +129,7 @@ During onboarding, the user picks **My projects**: the projects they work on now
 ## Progress
 
 - [x] Slice 1: server `myProjects` setting (null by default, PATCH validation, broadcast, restart) with API tests
-- [ ] Slice 2: web My projects selectors and sidebar project cards (summary line, 3 + running/needs-you chats, "N more", collapse, empty state, pick card, hidden and folder-missing rules); Recent chats removed
+- [x] Slice 2: web My projects selectors and sidebar project cards (summary line, 3 + running/needs-you chats, "N more", collapse, empty state, pick card, hidden and folder-missing rules); Recent chats removed
 - [ ] Slice 3: onboarding "Your projects" step and the shared picker dialog (tiles, pre-tick, Older, search, Skip); Edit and pick-card entry points
 - [ ] Slice 4: managing My projects: star on Projects rows and project page, Remove from card, auto-add on new chat, "New activity · Add" hint
 - [ ] Slice 5: global search palette (field replaces sidebar New chat, Ctrl+K, two columns, project → chats, keyboard, See all results, Esc)

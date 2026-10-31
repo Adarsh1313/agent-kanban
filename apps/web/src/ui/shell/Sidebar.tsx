@@ -1,16 +1,17 @@
 import type { ProviderId } from '@agent-kanban/shared';
 import { folderKey } from '@agent-kanban/shared';
-import { useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
-import { focusedProvider, hiddenFolders, isArchived, isSnoozed, memoState, pinned as pinnedChats, projectLabel, providerCounts, recentChats, type SidebarChat } from '../../state/selectors.ts';
-import { openChatIn, type AppState } from '../../state/reducer.ts';
+import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { focusedProvider, hiddenFolders, isArchived, isSnoozed, pinned as pinnedChats, providerCounts } from '../../state/selectors.ts';
+import type { AppState } from '../../state/reducer.ts';
 import { uniqueProjects } from '../projects/model.ts';
 import { useStore, useStoreInstance } from '../../state/store.ts';
-import { openHistoryChat, openNewChat, openRowMenu } from '../actions.ts';
-import { Icon, Menu, MenuItem, PROVIDER_IDS, ProviderLogo, StatusIcon, Tooltip, providerName } from '../primitives/index.ts';
+import { openNewChat } from '../actions.ts';
+import { Icon, Menu, MenuItem, PROVIDER_IDS, ProviderLogo, Tooltip, providerName } from '../primitives/index.ts';
 import { replayOnboarding } from '../onboarding/Onboarding.tsx';
+import { MyProjects } from '../myprojects/MyProjects.tsx';
+import { ChatRow } from './ChatRow.tsx';
 import { navigate, hashFor } from './route.ts';
 import { toggleTheme } from './theme.ts';
-import { dateTime, relativeTime } from '../board/format.ts';
 
 const NAV = [
   ['board', 'board', 'Board'],
@@ -20,15 +21,6 @@ const NAV = [
 ] as const;
 
 
-function onActivate(fn: () => void) {
-  return (e: KeyboardEvent<HTMLElement>) => {
-    if ((e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget) {
-      e.preventDefault();
-      fn();
-    }
-  };
-}
-
 function SideSection({ title, children }: { title: string; children: ReactNode }) {
   const [open, setOpen] = useState(true);
   return (
@@ -37,42 +29,6 @@ function SideSection({ title, children }: { title: string; children: ReactNode }
         <Icon name="chevron-down" size="sm" />{title}
       </button>
       <div className={`collapsible${open ? '' : ' closed'}`} inert={!open}><div>{children}</div></div>
-    </div>
-  );
-}
-
-interface RowChat { key: string; chatId: string | null; provider: ProviderId; sessionRef: string | null; title: string; cwd: string; updatedAt: string; column: SidebarChat['column'] }
-
-function ChatRow({ chat, current, project: given }: { chat: RowChat; current: boolean; project?: string }) {
-  const store = useStoreInstance();
-  const now = useStore((s) => s.now);
-  const project = useStore((s) => given ?? projectLabel(s, chat.cwd));
-  // Hover shows the full title plus its project, provider and when it was last active (#23); the row swaps the project label for the date.
-  const when = `${project} · ${providerName(chat.provider)} · ${dateTime(chat.updatedAt, now)}`;
-  const open = () => {
-    if (chat.chatId) store.setState((s) => openChatIn(s, chat.chatId!));
-    else if (chat.sessionRef) openHistoryChat({ provider: chat.provider, sessionRef: chat.sessionRef, cwd: chat.cwd, title: chat.title });
-  };
-  const more = (e: MouseEvent<HTMLButtonElement>) => {
-    e.stopPropagation();
-    openRowMenu(
-      { chatId: chat.chatId, history: chat.sessionRef ? { provider: chat.provider, sessionRef: chat.sessionRef, cwd: chat.cwd, title: chat.title } : null },
-      e.currentTarget,
-    );
-  };
-  return (
-    <div className="chat-row" role="button" tabIndex={0} title={`${chat.title}
-${when}`} aria-description={when} aria-current={current ? 'true' : undefined} onClick={open} onKeyDown={onActivate(open)}>
-      <ProviderLogo id={chat.provider} size="sm" />
-      <span className="t">{chat.title}</span>
-      {chat.column === 'running' && <StatusIcon state="running" />}
-      {chat.column === 'needs_you' && <span className="state-dot" title="Needs you" />}
-      <span className="rest" aria-hidden="true"><span className="p">{project}</span><span className="d">{relativeTime(chat.updatedAt, now)}</span></span>
-      <Tooltip label="More actions">
-        <button className="row-more" type="button" aria-label={`More actions for ${chat.title}`} aria-haspopup="menu" onClick={more}>
-          <Icon name="more" size="sm" />
-        </button>
-      </Tooltip>
     </div>
   );
 }
@@ -94,32 +50,6 @@ function Providers() {
           <ProviderLogo id={id} />{providerName(id)}<span className="meta-r">{counts[id]}</span>
         </button>
       ))}
-    </SideSection>
-  );
-}
-
-function Recent() {
-  // Memoized on the parts it reads, so streaming deltas do not re-sort every history chat.
-  const select = useMemo(
-    () => memoState((s) => [s.chats, s.history, s.projects, s.settings, s.ui.filters, s.ui.archiving, s.now], (s) => recentChats(s, s.now)),
-    [],
-  );
-  const list = useStore(select);
-  const filtering = useStore((s) => Object.values(s.ui.filters).some((v) => v !== null));
-  const openChatId = useStore((s) => s.ui.openChatId);
-  const openHistory = useStore((s) => s.ui.openHistory);
-  return (
-    <SideSection title="Recent chats">
-      <div className="recent">
-        {filtering && list.length === 0 && <p className="empty-note side-empty">No matching chats</p>}
-        {list.map((c) => (
-          <ChatRow key={c.key} chat={c} project={c.projectName}
-            current={c.chatId !== null ? c.chatId === openChatId : openHistory !== null && openHistory.provider === c.provider && openHistory.sessionRef === c.sessionRef} />
-        ))}
-        <button className="show-more-row all-projects" type="button" aria-label="See all chats" onClick={() => navigate('chats')}>
-          All chats<Icon name="chevron-right" size="sm" />
-        </button>
-      </div>
     </SideSection>
   );
 }
@@ -223,7 +153,7 @@ export function Sidebar() {
       <div className="scroll">
         <Providers />
         <Pinned />
-        <Recent />
+        <MyProjects />
       </div>
 
       <div className="side-foot">

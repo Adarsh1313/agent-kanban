@@ -99,12 +99,9 @@ describe('All chats', () => {
 describe('Getting to All chats', () => {
   beforeEach(() => { location.hash = '#/board'; });
 
-  it('the nav item and the link under Recent chats go to All chats', () => {
+  it('the nav item goes to All chats', () => {
     mount(seeded());
     fireEvent.click(screen.getByRole('button', { name: /^All chats$/ }));
-    expect(location.hash).toBe('#/chats');
-    act(() => { location.hash = '#/board'; });
-    fireEvent.click(screen.getByRole('button', { name: 'See all chats' }));
     expect(location.hash).toBe('#/chats');
   });
 
