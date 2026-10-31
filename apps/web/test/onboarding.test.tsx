@@ -250,7 +250,8 @@ describe('chats and notifications steps', () => {
     expect(sound.getAttribute('aria-checked')).toBe('true');
     fireEvent.click(sound);
     expect(JSON.parse(localStorage.getItem('agent-kanban.notify') ?? '{}').sound).toBe(false);
-    expect(screen.getByRole('button', { name: 'Play it' })).toBeTruthy();
+    // The speaker plays the chime whether or not Sound is on (#36).
+    expect(screen.getByRole('button', { name: 'Play the chime' }).querySelector('.icon')).toBeTruthy();
     fireEvent.click(sound); // restore
   });
 });
