@@ -1,4 +1,4 @@
-import type { Chat, Message, OpenRequest, ToolCall } from '@agent-kanban/shared';
+import type { Chat, Message, OpenRequest, ProviderId, ToolCall } from '@agent-kanban/shared';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { AppState } from '../../state/reducer.ts';
 import { useStore } from '../../state/store.ts';
@@ -21,7 +21,7 @@ interface Turn {
   key: string;
   start: string;
   user: Message | null;
-  replies: { id: string; text: string; createdAt: string | null }[];
+  replies: { id: string; text: string; createdAt: string | null; provider?: ProviderId }[];
   calls: ToolCall[];
 }
 
@@ -36,7 +36,7 @@ export function buildTurns(messages: Message[], calls: ToolCall[], streaming: Re
       turns.push({ key: m.id, start: m.createdAt, user: m.role === 'user' ? m : null, replies: [], calls: [] });
       if (m.role === 'user') continue;
     }
-    turns[turns.length - 1]!.replies.push({ id: m.id, text: m.text, createdAt: m.createdAt });
+    turns[turns.length - 1]!.replies.push({ id: m.id, text: m.text, createdAt: m.createdAt, ...(m.provider ? { provider: m.provider } : {}) });
   }
   const live = Object.entries(streaming);
   if (turns.length === 0 && (calls.length > 0 || live.length > 0)) turns.push({ key: 'start', start: '', user: null, replies: [], calls: [] });
@@ -172,7 +172,7 @@ export function Thread({ chat }: { chat: Chat }) {
             {hasAgent && (
               <div className="msg agent">
                 <div className="who">
-                  <ProviderLogo id={chat.provider} size="sm" />{app}
+                  <ProviderLogo id={t.replies[0]?.provider ?? chat.provider} size="sm" />{t.replies[0]?.provider ? providerName(t.replies[0].provider) : app}
                   {t.replies[0]?.createdAt && <time className="msg-time" dateTime={t.replies[0].createdAt}>{clockTime(t.replies[0].createdAt, now)}</time>}
                 </div>
                 {t.calls.length > 0 && <WorkGroup calls={t.calls} working={working} cwd={chat.cwd} />}

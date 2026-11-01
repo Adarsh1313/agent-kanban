@@ -307,6 +307,39 @@ describe('Chat panel: requests and composer', () => {
     expect(mocked.send).toHaveBeenCalledWith('c1', '/triage the bug');
   });
 
+  it('picking another provider shows the handoff note and switches on send; replies carry their provider', async () => {
+    thread([
+      message({ id: 'u1', role: 'user', text: 'Build it', createdAt: '2026-10-23T10:00:00.000Z' }),
+      message({ id: 'a1', text: 'Built.', createdAt: '2026-10-23T10:01:00.000Z', provider: 'claude' }),
+      message({ id: 'u2', role: 'user', text: 'Review', createdAt: '2026-10-23T10:02:00.000Z' }),
+      message({ id: 'a2', text: 'Looks fine.', createdAt: '2026-10-23T10:03:00.000Z', provider: 'codex' }),
+    ]);
+    mocked.send.mockResolvedValue(undefined);
+    mount(seeded([chat({ title: 'Talk', column: 'review', provider: 'claude' })]));
+    fireEvent.click(card('Talk'));
+    await waitFor(() => expect(within(panel()).getByText('Looks fine.')).toBeTruthy());
+    const who = [...panel().querySelectorAll('.msg.agent .who')].map((w) => w.textContent);
+    expect(who[0]).toContain('Claude');
+    expect(who[1]).toContain('Codex');
+    const pick = within(panel()).getByRole('combobox', { name: 'Provider' });
+    expect(panel().querySelector('.handoff-note')!.textContent).toBe('');
+    fireEvent.change(pick, { target: { value: 'codex' } });
+    expect(within(panel()).getByText("Codex will get the last messages, your spec's progress and project notes.")).toBeTruthy();
+    expect(mocked.send).not.toHaveBeenCalled();
+    const box = within(panel()).getByRole('textbox', { name: 'Message' });
+    fireEvent.change(box, { target: { value: 'carry on' } });
+    fireEvent.keyDown(box, { key: 'Enter' });
+    expect(mocked.send).toHaveBeenCalledWith('c1', 'carry on', 'codex');
+  });
+
+  it('out of usage offers Continue with another provider in one click', async () => {
+    mocked.send.mockResolvedValue(undefined);
+    mount(seeded([chat({ title: 'Lim', column: 'needs_you', needsReason: 'limit', provider: 'claude' })], { suggested: 'codex' }));
+    fireEvent.click(card('Lim'));
+    fireEvent.click(within(panel()).getByRole('button', { name: 'Continue with Codex' }));
+    expect(mocked.send).toHaveBeenCalledWith('c1', expect.any(String), 'codex');
+  });
+
   it('header shows Stop while running and Mark done in Review', async () => {
     mocked.stop.mockResolvedValue(chat({ column: 'needs_you', needsReason: 'stopped', updatedAt: '2026-10-23T12:01:00.000Z' }));
     const store = seeded([chat({ title: 'Head', column: 'running' })]);

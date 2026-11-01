@@ -127,7 +127,8 @@ export const api = {
   pickFolder: () => post<{ path: string | null }>('/api/folders/pick'),
   /** Shows a project folder in the computer's file manager (#15). */
   openFolder: (path: string) => post<void>('/api/folders/open', { path }),
-  send: (id: string, text: string) => post<void>(`/api/chats/${enc(id)}/messages`, { text }),
+  /** `provider` other than the chat's hands the chat over to it with this message (#40). */
+  send: (id: string, text: string, provider?: ProviderId) => post<void>(`/api/chats/${enc(id)}/messages`, provider ? { text, provider } : { text }),
   answer: (id: string, requestId: string, decision: AnswerDecision) =>
     post<void>(`/api/chats/${enc(id)}/requests/${enc(requestId)}`, { decision }),
   stop: (id: string) => post<Chat>(`/api/chats/${enc(id)}/stop`),

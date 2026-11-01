@@ -11,6 +11,7 @@ import { Icon, ProviderLogo, StatusIcon, Tooltip, providerName, toast } from '..
 import { pushLayer } from '../primitives/layers.ts';
 import { ChatActionsMenu, runAction, type ChatActionsTarget } from './ChatActionsMenu.tsx';
 import { Composer } from './Composer.tsx';
+import { ChatComposer, ContinueWith } from './ChatComposer.tsx';
 import { useSkillNames } from '../skills/SkillSync.tsx';
 import { Thread } from './Thread.tsx';
 import { HistoryThread } from './HistoryThread.tsx';
@@ -193,7 +194,6 @@ export function ChatPanel() {
   };
 
   const skills = useSkillNames();
-  const sendTo = (c: Chat) => (text: string) => runAction(store, () => api.send(c.id, text));
   const continueHistory = (ref: HistoryRef) => async (text: string) => {
     try {
       const created = await api.continueHistory({ provider: ref.provider, sessionRef: ref.sessionRef, text });
@@ -242,7 +242,8 @@ export function ChatPanel() {
         {s.kind === 'chat' ? (
           <>
             <Thread chat={s.chat} key={`t:${s.chat.id}`} />
-            <Composer key={`c:${s.chat.id}`} ref={composerRef} onSend={sendTo(s.chat)} hint={HINT} skills={skills}
+            <ContinueWith chat={s.chat} />
+            <ChatComposer key={`c:${s.chat.id}`} ref={composerRef} chat={s.chat} hint={HINT} skills={skills}
               placeholder={s.chat.column === 'running' ? 'Send a note. It reaches the agent after this step' : 'Reply or give a new instruction'} />
           </>
         ) : (
