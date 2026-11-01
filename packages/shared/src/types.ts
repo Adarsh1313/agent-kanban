@@ -60,6 +60,33 @@ export interface Chat {
   origin?: 'outside';
   /** True while that outside chat is still running in Claude Code: it can only be watched, not replied to. */
   outsideLive?: boolean;
+  /** The routine that started this chat, if any (#45). */
+  routineId?: string | null;
+}
+
+/** Composer effort (#42). Routines store it now; adapters map it once effort is built. */
+export type Effort = 'quick' | 'normal' | 'thorough';
+/** Days are 0 (Sunday) to 6; time is 'HH:MM' in the machine's local time. Daily is all 7 days, Weekdays 1 to 5. */
+export interface RoutineSchedule { days: number[]; time: string }
+/** How the last run went: started on time, ran late (caught up on open), skipped while the last run was still going, or the folder was missing. */
+export type RoutineResult = 'ran' | 'ran_late' | 'skipped_running' | 'folder_missing';
+export interface Routine {
+  id: string;
+  name: string;
+  cwd: string;
+  provider: ProviderId;
+  effort: Effort;
+  kind: 'skill' | 'prompt';
+  text: string;
+  schedule: RoutineSchedule;
+  paused: boolean;
+  chime: boolean;
+  lastRunAt: string | null;
+  lastResult: RoutineResult | null;
+  lastChatId: string | null;
+  /** When the next run is due (null while paused). */
+  nextRunAt: string | null;
+  createdAt: string;
 }
 
 export interface QueuedMessage { id: string; text: string }
@@ -107,6 +134,7 @@ export type ServerEvent =
   | { type: 'connection.updated'; health: ConnectionHealth }
   | { type: 'connect.updated'; state: ConnectState }
   | { type: 'settings.updated'; settings: Settings }
+  | { type: 'routines.updated'; routines: Routine[] }
   | { type: 'accounts.updated'; provider: AccountProvider; accounts: Account[] }
   | { type: 'hooks.updated'; installed: boolean }
   | { type: 'notification'; chatId: string; kind: 'permission' | 'question' | 'finished' | 'limit' | 'error'; action?: RequestAction };

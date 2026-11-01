@@ -111,9 +111,10 @@ export class ChatService {
 
   // ---- public API ----
 
-  async start(input: { provider: ProviderId; cwd: string; prompt: string; model?: string }): Promise<Chat> {
+  /** `title` and `routineId` are set by a routine's run (#45); a plain new chat is titled from its prompt. */
+  async start(input: { provider: ProviderId; cwd: string; prompt: string; model?: string; title?: string; routineId?: string }): Promise<Chat> {
     const chat = this.store.createChat({
-      provider: input.provider, cwd: input.cwd, title: input.prompt, model: input.model ?? null,
+      provider: input.provider, cwd: input.cwd, title: input.title ?? input.prompt, model: input.model ?? null, routineId: input.routineId ?? null,
     });
     this.addMessage(chat.id, 'user', input.prompt);
     this.broadcast({ type: 'chat.updated', chat });

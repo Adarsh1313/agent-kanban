@@ -2,10 +2,11 @@ import type { UiState } from '../../state/reducer.ts';
 
 export interface Route { view: UiState['view']; projectId: string | null }
 
-/** `#/board` (default), `#/chats`, `#/projects`, `#/projects/<encodeURIComponent(path)>`, `#/connections`. Anything else is the board. */
+/** `#/board` (default), `#/chats`, `#/projects`, `#/projects/<encodeURIComponent(path)>`, `#/routines`, `#/connections`. Anything else is the board. */
 export function parseHash(hash: string): Route {
   const path = hash.replace(/^#\/?/, '');
   if (path === 'connections') return { view: 'connections', projectId: null };
+  if (path === 'routines') return { view: 'routines', projectId: null };
   if (path === 'chats') return { view: 'chats', projectId: null };
   if (path === 'projects' || path === 'projects/') return { view: 'projects', projectId: null };
   if (path.startsWith('projects/')) {

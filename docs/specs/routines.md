@@ -77,7 +77,9 @@ The editor follows T3 Code's scheduled tasks and Enjoy's workflows (weekday and 
 
 ## Progress
 
-- [ ] Slice 1: routines store + CRUD API with validation and tests
-- [ ] Slice 2: scheduler: due runs, weekdays/days/time, pause, run now, overlap skip, 12 h catch-up, folder missing
-- [ ] Slice 3: web: Routines sidebar item, list with plain schedule and next run, editor dialog
-- [ ] Slice 4: project page Routines block, chime option, skill picker; DESIGN.md; close #45
+- [x] Slice 1: routines store + CRUD API with validation and tests
+- [x] Slice 2: scheduler: due runs, weekdays/days/time, pause, run now, overlap skip, 12 h catch-up, folder missing
+- [x] Slice 3: web: Routines sidebar item, list with plain schedule and next run, editor dialog
+- [x] Slice 4: project page Routines block, chime option, skill picker; DESIGN.md; close #45
+
+Note: skills (#40) and effort (#42) aren't on `main` yet. The editor stores effort and treats a line starting with `/` as `kind: 'skill'`; runs send the text as a plain prompt until those land. The `/` skill picker is left for #40.
