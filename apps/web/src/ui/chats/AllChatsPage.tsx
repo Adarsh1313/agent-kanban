@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import { openChatIn, type AppState } from '../../state/reducer.ts';
 import { api } from '../../api/client.ts';
-import { allChats, groupByDay, memoState, type ListedChat } from '../../state/selectors.ts';
+import { allChats, groupByDay, memoState, visibleProjects, type ListedChat } from '../../state/selectors.ts';
 import { refreshHistory, useStore, useStoreInstance } from '../../state/store.ts';
 import { openHistoryChat, openRowMenu } from '../actions.ts';
 import { relativeTime, dateTime } from '../board/format.ts';
@@ -27,16 +27,7 @@ function highlight(text: string, q: string): ReactNode {
   return <>{text.slice(0, i)}<mark>{text.slice(i, i + q.length)}</mark>{text.slice(i + q.length)}</>;
 }
 
-function onActivate(fn: () => void) {
-  return (e: KeyboardEvent<HTMLElement>) => {
-    if ((e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget) {
-      e.preventDefault();
-      fn();
-    }
-  };
-}
-
-function Row({ c, q, now }: { c: ListedChat; q: string; now: number }) {
+function Row({ c, q, now, selected, onSelect }: { c: ListedChat; q: string; now: number; selected: boolean; onSelect: (shift: boolean) => void }) {
   const store = useStoreInstance();
   const open = () => {
     if (c.chatId) store.setState((s) => openChatIn(s, c.chatId!));
@@ -49,7 +40,12 @@ function Row({ c, q, now }: { c: ListedChat; q: string; now: number }) {
   return (
     <li role="listitem">
       <div className="crow" role="button" tabIndex={0} title={`${c.title}\n${c.projectName} · ${providerName(c.provider)} · ${dateTime(c.updatedAt, now)}`}
-        onClick={open} onKeyDown={onActivate(open)}>
+        data-selected={selected || undefined} onClick={open} onKeyDown={(e) => {
+          if (e.key === ' ') { e.preventDefault(); onSelect(e.shiftKey); }
+          else if (e.key === 'Enter' && e.target === e.currentTarget) { e.preventDefault(); open(); }
+        }}>
+        <input className="chat-check" type="checkbox" checked={selected} aria-label={`Select ${c.title}`} onChange={() => {}}
+          onClick={(e) => { e.stopPropagation(); onSelect(e.shiftKey); }} />
         <ProviderLogo id={c.provider} size="sm" alt={providerName(c.provider)} />
         <span className="t">{highlight(c.title, q)}</span>
         <span className="proj"><span className="folder-glyph proj-glyph" aria-hidden="true">{(c.projectName || '?')[0]!.toUpperCase()}</span><span>{highlight(c.projectName, q)}</span></span>
@@ -70,11 +66,17 @@ export function AllChatsPage() {
   const filtering = useStore((s) => Object.values(s.ui.chatsFilters).some((v) => v !== null));
   const mode = useStore((s) => s.ui.chatsMode);
   const trash = useStore((s) => s.trash);
+  const projects = useStore((s) => visibleProjects(s));
   const focusAsked = useStore((s) => s.ui.chatsSearchFocus);
   const [query, setQuery] = useState('');
   const [shown, setShown] = useState(PAGE);
   const [emptying, setEmptying] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(() => new Set());
+  const [anchor, setAnchor] = useState<number | null>(null);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkDelete, setBulkDelete] = useState(false);
+  const [moving, setMoving] = useState(false);
   const box = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -118,7 +120,62 @@ export function AllChatsPage() {
     finally { setBusy(false); }
   };
   const count = mode === 'trash' ? trashRows.length : rows.length;
-  const groups = useMemo(() => groupByDay(rows.slice(0, shown), now), [rows, shown, now]);
+  const visibleRows = useMemo(() => rows.slice(0, shown), [rows, shown]);
+  const groups = useMemo(() => groupByDay(visibleRows, now), [visibleRows, now]);
+  const rowIndex = useMemo(() => new Map(visibleRows.map((row, i) => [row.key, i])), [visibleRows]);
+  const clearSelection = () => { setSelected(new Set()); setAnchor(null); };
+  const toggle = (key: string, shift: boolean) => {
+    const index = rowIndex.get(key);
+    if (index === undefined) return;
+    setSelected((current) => {
+      const next = new Set(current);
+      if (shift && anchor !== null) {
+        const [from, to] = anchor < index ? [anchor, index] : [index, anchor];
+        for (let i = from; i <= to; i++) next.add(visibleRows[i]!.key);
+      } else if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+    setAnchor(index);
+  };
+
+  useEffect(() => {
+    const onKey = (e: globalThis.KeyboardEvent) => { if (e.key === 'Escape' && selected.size > 0) clearSelection(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [selected.size]);
+  useEffect(clearSelection, [mode]);
+
+  const applyBulk = async (action: 'archive' | 'unarchive' | 'delete' | 'move', projectLabel?: string) => {
+    const ids = [...selected];
+    if (ids.length === 0) return;
+    setBulkBusy(true);
+    try {
+      const result = await api.bulkChats(ids, action, projectLabel);
+      const done = new Set(result.done);
+      store.setState((s) => ({
+        ...s,
+        chats: Object.fromEntries(Object.entries(s.chats).map(([id, chat]) => [id, !done.has(id) ? chat
+          : action === 'archive' ? { ...chat, archived: true }
+            : action === 'unarchive' ? { ...chat, archived: false }
+              : action === 'delete' ? { ...chat, deletedAt: new Date().toISOString() }
+                : { ...chat, projectLabel: projectLabel ?? null }])),
+        history: s.history
+          .filter((h) => !(action === 'delete' && done.has(`h:${h.provider}:${h.sessionRef}`)))
+          .map((h) => done.has(`h:${h.provider}:${h.sessionRef}`) && (action === 'archive' || action === 'unarchive') ? { ...h, archived: action === 'archive' } : h),
+      }));
+      if (action === 'delete') api.trash().then((next) => store.setState((s) => ({ ...s, trash: next }))).catch(() => {});
+      const verb = action === 'archive' ? 'archived' : action === 'unarchive' ? 'unarchived' : action === 'delete' ? 'moved to Trash' : 'moved';
+      toast(`${result.done.length} ${verb}${result.skipped.length ? ` · ${result.skipped.length} skipped` : ''}`,
+        action === 'archive' && result.done.length ? { label: 'Undo', run: () => void api.bulkChats(result.done, 'unarchive').then(() => {
+          store.setState((s) => ({ ...s,
+            chats: Object.fromEntries(Object.entries(s.chats).map(([id, chat]) => [id, done.has(id) ? { ...chat, archived: false } : chat])),
+            history: s.history.map((h) => done.has(`h:${h.provider}:${h.sessionRef}`) ? { ...h, archived: false } : h),
+          }));
+        }).catch((err: unknown) => toast(errorText(err))) } : undefined);
+      clearSelection(); setBulkDelete(false); setMoving(false);
+    } catch (err) { toast(errorText(err)); }
+    finally { setBulkBusy(false); }
+  };
 
   return (
     <div className="page all-chats-page">
@@ -139,6 +196,7 @@ export function AllChatsPage() {
           <button className="btn" type="button" role="tab" aria-selected={mode === 'active'} onClick={() => setMode('active')}>Active</button>
           <button className="btn" type="button" role="tab" aria-selected={mode === 'archived'} onClick={() => setMode('archived')}>Archived</button>
           <button className="btn" type="button" role="tab" aria-selected={mode === 'trash'} onClick={() => setMode('trash')}>Trash</button>
+          {mode !== 'trash' && visibleRows.length > 0 && <button className="btn ghost select-view" type="button" onClick={() => setSelected(new Set(visibleRows.map((c) => c.key)))}>Select all in view</button>}
           {mode === 'trash' && trash.length > 0 && <button className="btn ghost trash-empty" type="button" onClick={() => setEmptying(true)}>Empty trash</button>}
         </div>
         <FilterBar scope="chats" />
@@ -176,7 +234,7 @@ export function AllChatsPage() {
                 return <section className="chat-day" key={group.label} aria-labelledby={id}>
                   <h3 id={id}>{group.label}</h3>
                   <ul className="chat-list chat-rows" role="presentation">
-                    {group.chats.map((c) => <Row key={c.key} c={c} q={q} now={now} />)}
+                    {group.chats.map((c) => <Row key={c.key} c={c} q={q} now={now} selected={selected.has(c.key)} onSelect={(shift) => toggle(c.key, shift)} />)}
                   </ul>
                 </section>;
               })}
@@ -191,6 +249,21 @@ export function AllChatsPage() {
         footer={<><span className="grow" /><button className="btn ghost" type="button" disabled={busy} onClick={() => setEmptying(false)}>Cancel</button>
           <button className="btn danger" type="button" disabled={busy} onClick={() => void emptyTrash()}>Empty trash</button></>}>
         <p>These chats will be gone for good.</p>
+      </Dialog>
+      {selected.size > 0 && <div className="bulk-bar" role="region" aria-label="Selected chat actions">
+        <span className="bulk-count" role="status" aria-live="polite">{selected.size} selected</span>
+        <button className="btn" type="button" disabled={bulkBusy} onClick={() => void applyBulk(mode === 'archived' ? 'unarchive' : 'archive')}>{mode === 'archived' ? 'Unarchive' : 'Archive'}</button>
+        <button className="btn" type="button" disabled={bulkBusy} onClick={() => setMoving(true)}>Move to project</button>
+        <button className="btn danger" type="button" disabled={bulkBusy} onClick={() => setBulkDelete(true)}>Delete</button>
+        <button className="btn ghost" type="button" disabled={bulkBusy} onClick={clearSelection}>Clear</button>
+      </div>}
+      <Dialog open={bulkDelete} onClose={() => { if (!bulkBusy) setBulkDelete(false); }} title={`Delete ${selected.size} chats?`}
+        footer={<><span className="grow" /><button className="btn ghost" type="button" disabled={bulkBusy} onClick={() => setBulkDelete(false)}>Cancel</button>
+          <button className="btn danger" type="button" disabled={bulkBusy} onClick={() => void applyBulk('delete')}>Delete chats</button></>}>
+        <p>They go to Trash for 30 days. Running and Antigravity chats will be skipped.</p>
+      </Dialog>
+      <Dialog open={moving} onClose={() => { if (!bulkBusy) setMoving(false); }} title="Move chats to project">
+        <div className="bulk-projects">{projects.map((project) => <button className="btn" type="button" disabled={bulkBusy} key={project.id} onClick={() => void applyBulk('move', project.path)}>{project.name}</button>)}</div>
       </Dialog>
     </div>
   );

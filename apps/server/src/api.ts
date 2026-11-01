@@ -349,6 +349,46 @@ export function createApi(opts: {
       chats.markDeleted(m[0]!, entry.deletedAt);
       return { status: 200, body: entry };
     }
+    if (match('POST', '/api/chats/bulk')) {
+      const b = await readJson(req);
+      if (!Array.isArray(b.ids) || b.ids.length === 0 || b.ids.length > 1000 || !b.ids.every((id) => typeof id === 'string' && id)) throw new HttpError(400, 'Choose 1 to 1,000 chats.');
+      const action = b.action;
+      if (!['archive', 'unarchive', 'delete', 'move'].includes(String(action))) throw new HttpError(400, 'Unknown bulk action.');
+      if (action === 'move' && (typeof b.projectLabel !== 'string' || !b.projectLabel)) throw new HttpError(400, 'Choose a project.');
+      const done: string[] = [];
+      const skipped: { id: string; reason: string }[] = [];
+      const allHistory = await history();
+      for (const id of b.ids as string[]) {
+        try {
+          if (id.startsWith('h:')) {
+            const [, p, ...rest] = id.split(':');
+            const ref = rest.join(':');
+            const providerId = p as ProviderId;
+            const item = allHistory.find((h) => h.provider === providerId && h.sessionRef === ref);
+            if (!item) throw new TrashError(404, 'Chat not found.');
+            if (action === 'archive' || action === 'unarchive') chats.setHistoryArchived(providerId, ref, action === 'archive');
+            else if (action === 'delete') {
+              if (!opts.trash) throw new TrashError(404, 'Not found.');
+              await opts.trash.deleteHistory(item);
+            } else throw new TrashError(422, 'History-only chats cannot be moved yet.');
+          } else {
+            const chat = chats.getChat(id);
+            if (action === 'archive') chats.archive(id);
+            else if (action === 'unarchive') chats.unarchive(id);
+            else if (action === 'move') chats.patch(id, { projectLabel: b.projectLabel as string });
+            else {
+              if (!opts.trash) throw new TrashError(404, 'Not found.');
+              const entry = await opts.trash.deleteChat(chat);
+              chats.markDeleted(id, entry.deletedAt);
+            }
+          }
+          done.push(id);
+        } catch (err) {
+          skipped.push({ id, reason: err instanceof Error ? err.message : 'Could not complete that action.' });
+        }
+      }
+      return { status: 200, body: { done, skipped } };
+    }
     if ((m = match('POST', '/api/history/:provider/:ref/delete'))) {
       if (!opts.trash) throw new HttpError(404, 'Not found.');
       const id = m[0] as ProviderId;

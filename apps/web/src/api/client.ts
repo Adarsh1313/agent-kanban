@@ -101,6 +101,7 @@ const post = <T>(path: string, body?: unknown) => request<T>('POST', path, body)
 export type AnswerDecision = 'allow' | 'deny' | { reply: string };
 export interface ChatPatch { title?: string; pinned?: boolean; snoozedUntil?: string | null; effort?: Effort; autoResume?: boolean; projectLabel?: string | null }
 export interface UsageResponse { readings: UsageReading[]; suggested: ProviderId | null }
+export interface BulkResult { done: string[]; skipped: { id: string; reason: string }[] }
 /** What the Connections page can ask the server to do for a provider (`open` re-opens the sign-in page the server holds). */
 export type ConnectAction = 'install' | 'signin' | 'signout' | 'update' | 'cancel' | 'open';
 export interface SettingsPatch {
@@ -145,6 +146,8 @@ export const api = {
   archive: (id: string, opts: RequestOptions = {}) => request<Chat>('POST', `/api/chats/${enc(id)}/archive`, undefined, opts),
   unarchive: (id: string) => post<Chat>(`/api/chats/${enc(id)}/unarchive`),
   deleteChat: (id: string) => post<TrashEntry>(`/api/chats/${enc(id)}/delete`),
+  bulkChats: (ids: string[], action: 'archive' | 'unarchive' | 'delete' | 'move', projectLabel?: string) =>
+    post<BulkResult>('/api/chats/bulk', { ids, action, ...(projectLabel ? { projectLabel } : {}) }),
   /** The follow-up queue of an out-of-usage chat (#39). */
   editQueued: (id: string, queued: string, text: string) => request<Chat>('PATCH', `/api/chats/${enc(id)}/queue/${enc(queued)}`, { text }),
   removeQueued: (id: string, queued: string) => request<Chat>('DELETE', `/api/chats/${enc(id)}/queue/${enc(queued)}`),
