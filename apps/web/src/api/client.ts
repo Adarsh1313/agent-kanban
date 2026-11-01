@@ -12,6 +12,7 @@ import type {
   ProviderId,
   Routine,
   Settings,
+  SkillsReport,
   ToolCall,
   UsageReading, Account, AccountProvider,
 } from '@agent-kanban/shared';
@@ -97,7 +98,7 @@ const get = <T>(path: string) => request<T>('GET', path);
 const post = <T>(path: string, body?: unknown) => request<T>('POST', path, body);
 
 export type AnswerDecision = 'allow' | 'deny' | { reply: string };
-export interface ChatPatch { title?: string; pinned?: boolean; snoozedUntil?: string | null; effort?: Effort; autoResume?: boolean }
+export interface ChatPatch { title?: string; pinned?: boolean; snoozedUntil?: string | null; effort?: Effort; autoResume?: boolean; projectLabel?: string | null }
 export interface UsageResponse { readings: UsageReading[]; suggested: ProviderId | null }
 /** What the Connections page can ask the server to do for a provider (`open` re-opens the sign-in page the server holds). */
 export type ConnectAction = 'install' | 'signin' | 'signout' | 'update' | 'cancel' | 'open';
@@ -107,6 +108,9 @@ export interface SettingsPatch {
   suggest?: Partial<Record<ProviderId, boolean>>;
   hiddenProjects?: string[];
   unhiddenProjects?: string[];
+  homeProvider?: ProviderId | null;
+  skillSync?: boolean;
+  notesProjects?: string[];
   suggestNextSteps?: boolean;
   myProjects?: string[] | null;
 }
@@ -130,7 +134,8 @@ export const api = {
   pickFolder: () => post<{ path: string | null }>('/api/folders/pick'),
   /** Shows a project folder in the computer's file manager (#15). */
   openFolder: (path: string) => post<void>('/api/folders/open', { path }),
-  send: (id: string, text: string) => post<void>(`/api/chats/${enc(id)}/messages`, { text }),
+  /** `provider` other than the chat's hands the chat over to it with this message (#40). */
+  send: (id: string, text: string, provider?: ProviderId) => post<void>(`/api/chats/${enc(id)}/messages`, provider ? { text, provider } : { text }),
   answer: (id: string, requestId: string, decision: AnswerDecision) =>
     post<void>(`/api/chats/${enc(id)}/requests/${enc(requestId)}`, { decision }),
   stop: (id: string) => post<Chat>(`/api/chats/${enc(id)}/stop`),
@@ -148,6 +153,13 @@ export const api = {
   historyMessages: (provider: ProviderId, sessionRef: string) =>
     get<Transcript>(`/api/history/${provider}/${encodeURIComponent(sessionRef)}/messages`),
   usage: () => get<UsageResponse>('/api/usage'),
+  /** Project notes (#40): turn on or off (answers the new settings), read and save. */
+  setNotes: (path: string, on: boolean) => post<Settings>('/api/projects/notes', { path, on }),
+  notes: (path: string) => get<{ text: string }>(`/api/projects/notes?path=${enc(path)}`),
+  saveNotes: (path: string, text: string) => request<{ text: string }>('PUT', '/api/projects/notes', { path, text }),
+  /** Skill sync's last report plus every home provider skill (#40). */
+  skills: () => get<SkillsReport>('/api/skills'),
+  syncSkills: () => post<SkillsReport>('/api/skills/sync'),
   refreshUsage: () => post<UsageResponse>('/api/usage/refresh'),
   connections: () => get<ConnectionHealth[]>('/api/connections'),
   checkConnections: (provider?: ProviderId) => post<ConnectionHealth[]>('/api/connections/check', provider ? { provider } : {}),

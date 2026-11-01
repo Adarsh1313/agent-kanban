@@ -3,6 +3,9 @@ import { CLAUDE_SCRATCH_NAME, folderKey, isClaudeScratch, projectFolder } from '
 import type { AppState, Filters } from './reducer.ts';
 
 const MINUTE = 60_000;
+
+/** The folder a chat is grouped under: its "Move to project" label, else where it runs (#40). */
+export const chatFolder = (c: { cwd: string; projectLabel?: string | null }): string => c.projectLabel || c.cwd;
 const ACTIVITY_LIMIT_MIN = { hour: 60, today: 1440, week: 10080 } as const;
 
 /** A project with no activity for this long is "Older": folded away in New chat and the Project filter. */
@@ -65,7 +68,7 @@ interface Filterable {
 
 function passes(c: Filterable, f: Filters, now: number): boolean {
   if (f.provider && !f.provider.includes(c.provider)) return false;
-  if (f.project && !f.project.some((p) => folderKey(projectFolder(p)) === folderKey(projectFolder(c.cwd)))) return false;
+  if (f.project && !f.project.some((p) => folderKey(projectFolder(p)) === folderKey(projectFolder(chatFolder(c))))) return false;
   if (f.status && !(c.column && f.status.includes(c.column))) return false;
   if (f.model && !(c.model !== null && f.model.includes(c.model))) return false;
   if (f.reason && !(c.needsReason !== null && (f.reason as string[]).includes(c.needsReason))) return false;
@@ -83,7 +86,7 @@ const byRecent = (a: { updatedAt: string }, b: { updatedAt: string }) => (a.upda
 /** Board chats that pass the filters; archived and snoozed ones are hidden. */
 export function visibleChats(s: AppState, now: number = Date.now()): Chat[] {
   return Object.values(s.chats)
-    .filter((c) => c.column !== null && !isArchived(s, c) && !isSnoozed(c, now) && !inHiddenProject(s, c.cwd) && passes(c, s.ui.filters, now))
+    .filter((c) => c.column !== null && !isArchived(s, c) && !isSnoozed(c, now) && !inHiddenProject(s, chatFolder(c)) && passes(c, s.ui.filters, now))
     .sort(byRecent);
 }
 
@@ -94,11 +97,11 @@ export function boardColumns(s: AppState, now: number = Date.now()): Record<Colu
 }
 
 const toSidebar = (c: Chat): SidebarChat => ({
-  key: c.id, chatId: c.id, provider: c.provider, sessionRef: c.sessionRef, title: c.title, cwd: c.cwd, updatedAt: c.updatedAt, column: c.column, pinned: c.pinned,
+  key: c.id, chatId: c.id, provider: c.provider, sessionRef: c.sessionRef, title: c.title, cwd: chatFolder(c), updatedAt: c.updatedAt, column: c.column, pinned: c.pinned,
 });
 
 export function pinned(s: AppState, now: number = Date.now()): Chat[] {
-  return Object.values(s.chats).filter((c) => c.pinned && !isArchived(s, c) && !isSnoozed(c, now) && !inHiddenProject(s, c.cwd)).sort(byRecent);
+  return Object.values(s.chats).filter((c) => c.pinned && !isArchived(s, c) && !isSnoozed(c, now) && !inHiddenProject(s, chatFolder(c))).sort(byRecent);
 }
 
 /**
@@ -109,7 +112,7 @@ function listedChats(s: AppState, now: number, f: Filters = s.ui.filters, everyt
   const known = new Set<string>();
   for (const c of Object.values(s.chats)) if (c.sessionRef) known.add(`${c.provider}\u0000${c.sessionRef}`);
   const fromBoard = Object.values(s.chats)
-    .filter((c) => !isArchived(s, c) && (everything || (!c.pinned && !isSnoozed(c, now))) && !inHiddenProject(s, c.cwd) && passes(c, f, now))
+    .filter((c) => !isArchived(s, c) && (everything || (!c.pinned && !isSnoozed(c, now))) && !inHiddenProject(s, chatFolder(c)) && passes(c, f, now))
     .map(toSidebar);
   const fromHistory: SidebarChat[] = s.history
     .filter((h) => !known.has(`${h.provider}\u0000${h.sessionRef}`) && !inHiddenProject(s, h.cwd) && passes({ ...h, column: null, model: null, needsReason: null }, f, now))
@@ -182,7 +185,7 @@ export function allChats(s: AppState, now: number = Date.now()): ListedChat[] {
 }
 
 const withProject = (s: AppState, c: SidebarChat): ListedChat =>
-  ({ ...c, projectId: findProjectFor(s, c.cwd)?.id ?? projectFolder(c.cwd), projectName: projectLabel(s, c.cwd) });
+  ({ ...c, projectId: findProjectFor(s, chatFolder(c))?.id ?? projectFolder(chatFolder(c)), projectName: projectLabel(s, chatFolder(c)) });
 
 /**
  * The provider to preselect in New chat: the suggestion if allowed, else the first allowed one whose
@@ -217,7 +220,7 @@ function countProviders(s: AppState): Record<ProviderId, number> {
   const known = new Set<string>();
   for (const c of Object.values(s.chats)) {
     if (c.sessionRef) known.add(`${c.provider}\u0000${c.sessionRef}`);
-    if (!isArchived(s, c) && !inHiddenProject(s, c.cwd)) counts[c.provider] += 1;
+    if (!isArchived(s, c) && !inHiddenProject(s, chatFolder(c))) counts[c.provider] += 1;
   }
   for (const h of s.history) if (!known.has(`${h.provider}\u0000${h.sessionRef}`) && !inHiddenProject(s, h.cwd)) counts[h.provider] += 1;
   return counts;

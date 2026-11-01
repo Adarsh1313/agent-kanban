@@ -7,13 +7,14 @@ import { existsSync, realpathSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { timingSafeEqual } from 'node:crypto';
 import { WebSocketServer, WebSocket } from 'ws';
-import type { ConnectionHealth, Effort, HistoryChat, ModelOption, ProviderId, ServerEvent } from '@agent-kanban/shared';
+import type { ConnectionHealth, Effort, HistoryChat, ModelOption, ProviderId, ServerEvent, SkillsReport } from '@agent-kanban/shared';
 import { ActiveElsewhereError, CantContinueError } from './chats.ts';
 import { ConnectBusyError, ConnectStateError } from './connect/service.ts';
 import { PickerBusyError } from './folder-picker.ts';
 import type { Transcript } from './history/transcript.ts';
 import type { ConnectService } from './connect/service.ts';
 import { SettingsError } from './settings.ts';
+import { disableNotes, enableNotes, readNotes, writeNotes } from './notes.ts';
 import { RoutineError, RoutineNotFoundError } from './routines.ts';
 import type { RoutineService } from './routines.ts';
 import { ACCOUNT_PROVIDERS, AccountBusyError, AccountError, type AccountService } from './accounts.ts';
@@ -107,6 +108,8 @@ export function createApi(opts: {
   adapters?: { get(id: ProviderId): ProviderAdapter | undefined };
   connect?: Pick<ConnectService, 'states' | 'install' | 'signIn' | 'signOut' | 'update' | 'cancel' | 'openSignInPage'>;
   settings?: SettingsStore;
+  /** Skill sync (#40): the last report, Sync now and the home provider's skill names. */
+  skills?: { report(): SkillsReport; sync(): SkillsReport; names(): string[] };
   /** Routines and their scheduler (#45). */
   routines?: RoutineService;
   /** Past messages of a chat that is only in the provider's history (#16). */
@@ -237,7 +240,7 @@ export function createApi(opts: {
     if ((m = match('GET', '/api/chats/:id/tool-calls'))) return { status: 200, body: chats.listToolCalls(m[0]!) };
     if ((m = match('PATCH', '/api/chats/:id'))) {
       const b = await readJson(req);
-      const patch: { title?: string; pinned?: boolean; snoozedUntil?: string | null; effort?: Effort; autoResume?: boolean } = {};
+      const patch: { title?: string; pinned?: boolean; snoozedUntil?: string | null; effort?: Effort; autoResume?: boolean; projectLabel?: string | null } = {};
       for (const [k, v] of Object.entries(b)) {
         if (k === 'title') {
           const t = typeof v === 'string' ? v.trim() : '';
@@ -255,6 +258,10 @@ export function createApi(opts: {
             if (typeof v !== 'string' || Number.isNaN(Date.parse(v))) throw new HttpError(400, 'Snooze time must be a date.');
             patch.snoozedUntil = new Date(v).toISOString();
           }
+        } else if (k === 'projectLabel') {
+          // A label only: the chat shows under that project and still runs in its own folder (decision 9).
+          if (v !== null && (typeof v !== 'string' || v.trim() === '')) throw new HttpError(400, 'Project must be a folder or null.');
+          patch.projectLabel = v === null ? null : v;
         } else if (k === 'effort') patch.effort = effort(v);
         else throw new HttpError(400, `You can't change "${k}".`);
       }
@@ -267,6 +274,28 @@ export function createApi(opts: {
       const known = key ? buildProjects(chats.listChats(), await visibleHistory(), projectRules()).find((p) => folderKey(p.id) === key) : undefined;
       if (!known) throw new HttpError(404, 'Not found.');
       return { status: 200, body: await projectInfo(known.path) };
+    }
+    if (match('GET', '/api/projects/notes') || match('PUT', '/api/projects/notes') || match('POST', '/api/projects/notes')) {
+      if (!settings) throw new HttpError(404, 'Not found.');
+      const b = method === 'GET' ? {} : await readJson(req);
+      const path = method === 'GET' ? url.searchParams.get('path') ?? '' : typeof b.path === 'string' ? b.path : '';
+      const known = path ? buildProjects(chats.listChats(), await visibleHistory(), projectRules()).find((p) => folderKey(p.path) === folderKey(path)) : undefined;
+      if (!known) throw new HttpError(404, 'Not found.');
+      const key = folderKey(known.path);
+      if (method === 'POST') {
+        // Turning notes on or off for the project.
+        if (typeof b.on !== 'boolean') throw new HttpError(400, 'On must be true or false.');
+        if (b.on) enableNotes(known.path); else disableNotes(known.path);
+        const others = (settings.get().notesProjects ?? []).filter((k) => folderKey(k) !== key);
+        const next = settings.patch({ notesProjects: b.on ? [...others, known.path] : others });
+        broadcast({ type: 'settings.updated', settings: next });
+        return { status: 200, body: next };
+      }
+      if (method === 'PUT') {
+        if (typeof b.text !== 'string') throw new HttpError(400, 'Missing "text".');
+        writeNotes(known.path, b.text);
+      }
+      return { status: 200, body: { text: readNotes(known.path) ?? '' } };
     }
     if (match('GET', '/api/models')) return { status: 200, body: await models() };
     if (match('POST', '/api/chats')) {
@@ -284,7 +313,7 @@ export function createApi(opts: {
     }
     if ((m = match('POST', '/api/chats/:id/messages'))) {
       const b = await readJson(req);
-      await chats.send(m[0]!, str(b, 'text'));
+      await chats.send(m[0]!, str(b, 'text'), b.provider === undefined ? undefined : provider(b));
       return { status: 204 };
     }
     if ((m = match('POST', '/api/chats/:id/requests/:requestId'))) {
@@ -365,6 +394,14 @@ export function createApi(opts: {
       if (!run) throw new HttpError(404, 'Not found.');
       return { status: 202, body: await run() };
     }
+    if (match('GET', '/api/skills')) {
+      if (!opts.skills) throw new HttpError(404, 'Not found.');
+      return { status: 200, body: { ...opts.skills.report(), available: opts.skills.names() } };
+    }
+    if (match('POST', '/api/skills/sync')) {
+      if (!opts.skills) throw new HttpError(404, 'Not found.');
+      return { status: 200, body: { ...opts.skills.sync(), available: opts.skills.names() } };
+    }
     if (url.pathname === '/api/routines' || url.pathname.startsWith('/api/routines/')) {
       const r = opts.routines;
       if (!r) throw new HttpError(404, 'Not found.');
@@ -387,6 +424,8 @@ export function createApi(opts: {
         if (e instanceof SettingsError) throw new HttpError(400, e.message);
         throw e;
       }
+      // A new home provider or the sync switch takes effect at once.
+      if ('homeProvider' in b || 'skillSync' in b) opts.skills?.sync();
       // Other open pages (a second tab) follow the change.
       broadcast({ type: 'settings.updated', settings: next });
       return { status: 200, body: next };
@@ -400,7 +439,7 @@ export function createApi(opts: {
       res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Vary', 'Origin');
       res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
-      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, PUT, DELETE, OPTIONS');
     }
     const send = (status: number, body?: unknown) => {
       if (body === undefined) { res.writeHead(status); res.end(); return; }

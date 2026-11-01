@@ -370,3 +370,29 @@ body:has(> .onb[data-state="open"]) > .toasts { z-index: 91; }
   font-size: var(--text-caption); color: var(--color-text-muted); text-align: left; }
 @media (hover: hover) and (pointer: fine) { .palette-all:hover { color: var(--color-text); background: var(--color-nav-hover); } }
 @media (max-width: 640px) { .palette-cols { grid-template-columns: minmax(0, 1fr); } .palette-cols > div:first-child { border-right: 0; border-bottom: 1px solid var(--color-border); } }
+/* Skill sync (#40): home provider tiles reuse the Connections card; the synced list sits under the switch. */
+.home-tile { text-align: left; cursor: pointer; font: inherit; color: inherit; }
+.home-tile small { color: var(--color-text-muted); font-size: var(--text-caption); }
+.home-tile[aria-checked="true"] { border-color: var(--color-text); }
+.home-tile:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+.skill-sync { display: flex; flex-direction: column; gap: var(--space-3); margin-bottom: var(--space-8); align-items: flex-start; }
+.skill-sync .home-pick { margin-bottom: 0; width: 100%; }
+.skill-list { display: flex; flex-direction: column; gap: var(--space-1); font-size: var(--text-body); }
+.skill-list p { margin: 0; }
+.skill-list ul { margin: 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-2); }
+.skill-list li { padding: 0 var(--space-2); border: 1px solid var(--color-border); border-radius: var(--radius-card); font-family: var(--font-mono); font-size: var(--text-caption); }
+.skill-skipped { color: var(--color-text-muted); font-size: var(--text-caption); }
+.composer-box { position: relative; }
+.skill-menu { position: absolute; left: 0; right: 0; bottom: 100%; margin: 0 0 var(--space-1); padding: var(--space-1); list-style: none; max-height: calc(var(--space-8) * 5); overflow: auto;
+  background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-card); box-shadow: var(--shadow-pop); z-index: 1; }
+.skill-menu li { padding: var(--space-1) var(--space-2); border-radius: var(--radius-card); font-family: var(--font-mono); font-size: var(--text-body); cursor: pointer; }
+.skill-menu li[aria-selected="true"] { background: var(--color-control); }
+/* Handoff (#40): the provider picker sits in the composer row; the note says what the new provider gets. */
+.provider-pick { font: inherit; font-size: var(--text-caption); color: var(--color-text); background: var(--color-control); border: 1px solid var(--color-border); border-radius: var(--radius-card); padding: 0 var(--space-1); }
+.handoff-note:empty { display: none; }
+.handoff-note { padding: var(--space-1) var(--space-4); font-size: var(--text-caption); color: var(--color-text-muted); }
+.limit-nudge { display: flex; align-items: center; gap: var(--space-2); }
+.project-notes { display: flex; flex-direction: column; gap: var(--space-2); align-items: flex-start; margin-top: var(--space-6); }
+.project-notes .toggle-row { width: 100%; }
+.notes-edit { width: 100%; min-height: calc(var(--space-8) * 8); font-family: var(--font-mono); font-size: var(--text-body); color: var(--color-text); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-card); padding: var(--space-2); resize: vertical; }
+.moved-note { font-size: var(--text-caption); color: var(--color-text-muted); margin-left: var(--space-2); }

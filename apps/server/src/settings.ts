@@ -14,7 +14,7 @@ export class SettingsError extends Error {}
 const allOn = (): Record<ProviderId, boolean> => ({ claude: true, codex: true, antigravity: true });
 
 export function defaultSettings(): Settings {
-  return { onboarded: false, showChats: allOn(), suggest: allOn(), hiddenProjects: [], unhiddenProjects: [], suggestNextSteps: true, myProjects: null };
+  return { onboarded: false, showChats: allOn(), suggest: allOn(), hiddenProjects: [], unhiddenProjects: [], suggestNextSteps: true, myProjects: null, homeProvider: null, skillSync: false, notesProjects: [] };
 }
 
 function readJson(backend: SettingsBackend, key: string): unknown {
@@ -55,6 +55,9 @@ export class SettingsStore {
 
   get(): Settings {
     const onboarded = readJson(this.backend, 'onboarded');
+    const rawHome = readJson(this.backend, 'homeProvider');
+    const homeProvider = PROVIDERS.includes(rawHome as ProviderId) ? rawHome as ProviderId : null;
+    const skillSync = readJson(this.backend, 'skillSync');
     const nextSteps = readJson(this.backend, 'suggestNextSteps');
     return {
       onboarded: typeof onboarded === 'boolean' ? onboarded : false,
@@ -64,6 +67,10 @@ export class SettingsStore {
       unhiddenProjects: readPaths(readJson(this.backend, 'unhiddenProjects')),
       suggestNextSteps: typeof nextSteps === 'boolean' ? nextSteps : true,
       myProjects: readMine(readJson(this.backend, 'myProjects')),
+      homeProvider,
+      // On by default once a home provider is picked.
+      skillSync: typeof skillSync === 'boolean' ? skillSync : homeProvider !== null,
+      notesProjects: readPaths(readJson(this.backend, 'notesProjects')),
     };
   }
 
@@ -73,6 +80,7 @@ export class SettingsStore {
    */
   patch(body: Record<string, unknown>): Settings {
     const next = this.get();
+    let explicitSync = this.backend.getSetting('skillSync') !== undefined;
     for (const [key, value] of Object.entries(body)) {
       if (key === 'onboarded' || key === 'suggestNextSteps') {
         if (typeof value !== 'boolean') throw new SettingsError(`"${key}" must be true or false.`);
@@ -84,8 +92,15 @@ export class SettingsStore {
           if (typeof flag !== 'boolean') throw new SettingsError(`"${key}.${id}" must be true or false.`);
           next[key][id as ProviderId] = flag;
         }
-      } else if (key === 'hiddenProjects' || key === 'unhiddenProjects') {
-        if (!isPaths(value)) throw new SettingsError(`"${key}" must be a list of folders.`);
+      } else if (key === 'homeProvider') {
+        if (value !== null && !PROVIDERS.includes(value as ProviderId)) throw new SettingsError('Unknown provider. Use claude, codex or antigravity.');
+        next.homeProvider = value as ProviderId | null;
+      } else if (key === 'skillSync') {
+        if (typeof value !== 'boolean') throw new SettingsError('Skill sync must be true or false.');
+        next.skillSync = value;
+        explicitSync = true;
+      } else if (key === 'hiddenProjects' || key === 'unhiddenProjects' || key === 'notesProjects') {
+        if (!Array.isArray(value) || !value.every((x) => typeof x === 'string' && x.trim() !== '')) throw new SettingsError(`"${key}" must be a list of folders.`);
         next[key] = value as string[];
       } else if (key === 'myProjects') {
         if (value !== null && !isPaths(value)) throw new SettingsError('"myProjects" must be a list of folders, or null.');
@@ -101,7 +116,11 @@ export class SettingsStore {
     this.backend.setSetting('unhiddenProjects', JSON.stringify(next.unhiddenProjects));
     this.backend.setSetting('suggestNextSteps', JSON.stringify(next.suggestNextSteps));
     this.backend.setSetting('myProjects', JSON.stringify(next.myProjects));
-    return next;
+    this.backend.setSetting('homeProvider', JSON.stringify(next.homeProvider));
+    this.backend.setSetting('notesProjects', JSON.stringify(next.notesProjects));
+    // Left unset until chosen, so picking a home provider later turns sync on by default.
+    if (explicitSync) this.backend.setSetting('skillSync', JSON.stringify(next.skillSync));
+    return this.get();
   }
 
   /** Providers the "Most room" suggestion may pick. */

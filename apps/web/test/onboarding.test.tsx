@@ -14,7 +14,7 @@ import { Sidebar } from '../src/ui/shell/Sidebar.tsx';
 
 vi.mock('../src/api/client.ts', async (orig) => {
   const m = await orig<typeof import('../src/api/client.ts')>();
-  return { ...m, api: { ...m.api, checkConnections: vi.fn(), connect: vi.fn(), patchSettings: vi.fn(), history: vi.fn(), projects: vi.fn() } };
+  return { ...m, api: { ...m.api, checkConnections: vi.fn(), connect: vi.fn(), patchSettings: vi.fn(), skills: vi.fn(async () => ({ synced: [], skipped: [] })), history: vi.fn(), projects: vi.fn() } };
 });
 type Fn = ReturnType<typeof vi.fn>;
 const mocked = api as unknown as { checkConnections: Fn; connect: Fn; patchSettings: Fn; history: Fn; projects: Fn };
@@ -174,14 +174,14 @@ describe('connect step', () => {
     fireEvent.click(primary('Get started'));
     expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Connect the agents you use' }));
     expect(screen.getByRole('group', { name: 'Connect the agents you use' }).getAttribute('aria-describedby')).toBeTruthy();
-    expect(screen.getByText('Step 1 of 5')).toBeTruthy();
+    expect(screen.getByText('Step 1 of 6')).toBeTruthy();
   });
 
   it('Enter on the step advances with the primary button; Back returns', () => {
     mount(seeded([conn('claude')]));
     fireEvent.keyDown(dialog()!, { key: 'Enter' });
     expect(screen.getByRole('heading', { name: 'Connect the agents you use' })).toBeTruthy();
-    expect(screen.getByText('Step 1 of 5')).toBeTruthy();
+    expect(screen.getByText('Step 1 of 6')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Back' }));
     expect(screen.getByRole('heading', { name: /All your coding agents/ })).toBeTruthy();
   });
@@ -246,6 +246,7 @@ describe('chats and notifications steps', () => {
     fireEvent.click(primary('Continue'));
     fireEvent.click(primary('Continue'));
     fireEvent.click(primary('Continue'));
+    fireEvent.click(primary('Continue'));
     expect(screen.getByRole('heading', { name: 'Know when an agent needs you' })).toBeTruthy();
     const sound = screen.getByRole('switch', { name: 'Sound' });
     expect(sound.getAttribute('aria-checked')).toBe('true');
@@ -274,7 +275,7 @@ describe('projects step (#38)', () => {
     expect(beta.getAttribute('aria-checked')).toBe('true');
     fireEvent.click(beta);
     fireEvent.click(primary('Continue'));
-    expect(screen.getByRole('heading', { name: 'Know when an agent needs you' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Which agent do you use most?' })).toBeTruthy();
     await waitFor(() => expect(mocked.patchSettings).toHaveBeenCalledWith({ myProjects: ['/w/alpha'] }));
   });
 
@@ -290,6 +291,7 @@ describe('projects step (#38)', () => {
 describe('notifications step hint (#6)', () => {
   const toNotifications = () => {
     fireEvent.click(primary('Get started'));
+    fireEvent.click(primary('Continue'));
     fireEvent.click(primary('Continue'));
     fireEvent.click(primary('Continue'));
     fireEvent.click(primary('Continue'));
@@ -311,6 +313,7 @@ describe('notifications step hint (#6)', () => {
 describe('finish', () => {
   const toReady = () => {
     fireEvent.click(primary('Get started'));
+    fireEvent.click(primary('Continue'));
     fireEvent.click(primary('Continue'));
     fireEvent.click(primary('Continue'));
     fireEvent.click(primary('Continue'));
@@ -397,5 +400,22 @@ describe('finish', () => {
     expect(screen.getByRole('heading', { name: 'You’re set up' })).toBeTruthy();
     expect(store.getState().settings?.onboarded).toBe(false);
     expect(newChat).not.toHaveBeenCalled();
+  });
+});
+
+describe('home provider step (#40)', () => {
+  it('picking a tile writes homeProvider; tiles are a radio group', async () => {
+    mocked.patchSettings.mockImplementation(async (p: Partial<Settings>) => settings(p));
+    mount(seeded([conn('claude'), conn('codex')]));
+    fireEvent.click(primary('Get started'));
+    fireEvent.click(primary('Continue'));
+    fireEvent.click(primary('Continue'));
+    fireEvent.click(primary('Continue'));
+    expect(await screen.findByRole('heading', { name: 'Which agent do you use most?' })).toBeTruthy();
+    const group = screen.getByRole('radiogroup', { name: 'Home provider' });
+    expect(within(group).getAllByRole('radio')).toHaveLength(2);
+    fireEvent.click(within(group).getByRole('radio', { name: /Codex/ }));
+    await waitFor(() => expect(mocked.patchSettings).toHaveBeenCalledWith({ homeProvider: 'codex' }));
+    await waitFor(() => expect(within(group).getByRole('radio', { name: /Codex/ }).getAttribute('aria-checked')).toBe('true'));
   });
 });

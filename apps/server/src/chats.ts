@@ -12,6 +12,7 @@ import { AdapterRegistry } from './adapters/registry.ts';
 import type { AdapterSource } from './adapters/registry.ts';
 import type { UsageService } from './usage/service.ts';
 import { ANTIGRAVITY_SIGNED_OUT } from './adapters/antigravity.ts';
+import { buildPreface } from './handoff.ts';
 
 const NAMES: Record<ProviderId, string> = { claude: 'Claude Code', codex: 'Codex', antigravity: 'Antigravity' };
 const ACTIVE_WINDOW_MS = 15_000;
@@ -107,6 +108,8 @@ export class ChatService {
   /** Errors already reported, per chat: one failed resume is shared by concurrent callers of the SAME chat only. */
   private reported = new WeakMap<object, Set<string>>();
   private historyGates = new Map<string, Promise<void>>();
+  private outgoing: (provider: ProviderId, text: string) => string;
+  private notes: (cwd: string) => string | null;
   /** The effort each chat's current turn runs at, so its replies can note it. */
   private turnEffort = new Map<string, Effort>();
   private resumeTimer: NodeJS.Timeout | null = null;
@@ -120,8 +123,14 @@ export class ChatService {
     now?: () => Date;
     /** The "Suggest next steps" setting (default on). */
     suggestNextSteps?: () => boolean;
+    /** The text an adapter receives for what the user typed (a `/skill` in the provider's own form). */
+    outgoing?: (provider: ProviderId, text: string) => string;
+    /** The project notes to hand over, when notes are on for the folder. */
+    notes?: (cwd: string) => string | null;
   }) {
     this.suggestNextSteps = opts.suggestNextSteps ?? (() => true);
+    this.notes = opts.notes ?? (() => null);
+    this.outgoing = opts.outgoing ?? ((_, t) => t);
     this.store = opts.store;
     this.adapters = typeof (opts.adapters as AdapterSource).onAdapter === 'function' ? (opts.adapters as AdapterSource) : AdapterRegistry.of(opts.adapters as Partial<Record<ProviderId, ProviderAdapter>>);
     this.usage = opts.usage;
@@ -149,7 +158,7 @@ export class ChatService {
     // Answer as soon as the card exists (running, "Getting started…"): a cold Antigravity takes a minute or two to
     // open a session. The session arrives by chat.updated; a failure moves the card to Needs you with the error.
     // begin() marks the chat pending synchronously, so a message or answer sent meanwhile waits for it.
-    void this.begin(chat, input.prompt);
+    void this.begin(chat, this.outgoing(chat.provider, input.prompt));
     return chat;
   }
 
@@ -159,8 +168,10 @@ export class ChatService {
   }
 
   /** Out of usage: a message waits in the follow-up queue and goes out when the chat can continue (#39). */
-  async send(chatId: string, text: string): Promise<void> {
+  /** `provider` other than the chat's hands the chat over to it on this message (#40), at once even when out of usage. */
+  async send(chatId: string, text: string, provider?: ProviderId): Promise<void> {
     const current = this.mustGet(chatId);
+    if (provider && provider !== current.provider) { await this.sendNow(chatId, text, provider); return; }
     if (current.column === 'needs_you' && current.needsReason === 'limit') {
       this.setQueue(chatId, [...(current.queue ?? []), { id: randomUUID(), text }]);
       return;
@@ -246,11 +257,13 @@ export class ChatService {
     this.resumeTimer = null;
   }
 
-  private async sendNow(chatId: string, text: string): Promise<void> {
+  private async sendNow(chatId: string, text: string, provider?: ProviderId): Promise<void> {
     this.mustGet(chatId);
     while (this.pending.has(chatId)) await this.pending.get(chatId);
-    const chat = this.mustGet(chatId);
+    let chat = this.mustGet(chatId);
     if (chat.outsideLive) throw new ActiveElsewhereError();
+    let preface: string | null = null;
+    if (provider && provider !== chat.provider) ({ chat, preface } = this.handOver(chat, provider));
     if (chat.sessionRef && !this.live.has(chat.id) && chat.provider === 'claude' && this.isActiveElsewhere(chat.sessionRef, chat.id)) {
       throw new ActiveElsewhereError();
     }
@@ -259,8 +272,32 @@ export class ChatService {
     this.userStopped.delete(chatId); // the user moved on: the new turn's events count
     this.addMessage(chatId, 'user', text);
     this.transition(chatId, { type: 'user.message' });
-    if (!chat.sessionRef) await this.begin(chat, text);
-    else await this.deliver(chat, text);
+    const typed = this.outgoing(chat.provider, text);
+    const out = preface ? `${preface}
+
+${typed}` : typed;
+    if (!chat.sessionRef) await this.begin(chat, out);
+    else await this.deliver(chat, out);
+  }
+
+  /**
+   * Switches the chat to `to`: the old provider's session and how far it got are kept, `to` resumes its own
+   * session if it took part before, and the preface carries what it missed.
+   */
+  private handOver(chat: Chat, to: ProviderId): { chat: Chat; preface: string } {
+    const messages = this.store.listMessages(chat.id);
+    const refs = { ...(chat.providerRefs ?? {}) };
+    if (chat.sessionRef) refs[chat.provider] = chat.sessionRef;
+    const seen = this.store.getHandoffSeen(chat.id);
+    seen[chat.provider] = messages.length;
+    const since = refs[to] ? seen[to] ?? 0 : 0;
+    this.store.setHandoffSeen(chat.id, seen);
+    this.closeRequests(chat.id);
+    this.live.delete(chat.id);
+    const preface = buildPreface({ to, messages, toolCalls: this.store.listToolCalls(chat.id), since, cwd: chat.cwd, notes: this.notes(chat.cwd) });
+    const next = this.store.updateChat(chat.id, { provider: to, sessionRef: refs[to] ?? null, model: null, providerRefs: refs });
+    this.broadcast({ type: 'chat.updated', chat: next });
+    return { chat: next, preface };
   }
 
   async answer(chatId: string, requestId: string, decision: Decision): Promise<void> {
@@ -326,8 +363,8 @@ export class ChatService {
     return chat;
   }
 
-  /** Rename, pin, snooze, set the effort of a chat (effort applies from the next message) or turn auto-resume on or off. */
-  patch(chatId: string, patch: { title?: string; pinned?: boolean; snoozedUntil?: string | null; effort?: Effort; autoResume?: boolean }): Chat {
+  /** Rename, pin, snooze, set the effort of a chat (effort applies from the next message), turn auto-resume on or off, or move it to a project (a label). */
+  patch(chatId: string, patch: { title?: string; pinned?: boolean; snoozedUntil?: string | null; effort?: Effort; autoResume?: boolean; projectLabel?: string | null }): Chat {
     const current = this.mustGet(chatId);
     if (Object.values(patch).every((v) => v === undefined)) return current;
     // Not activity: the card keeps its place and its "5m ago".
@@ -379,7 +416,7 @@ export class ChatService {
     this.addMessage(chat.id, 'user', text);
     this.broadcast({ type: 'chat.updated', chat });
     this.replayBuffered(h.provider, h.sessionRef, chat.id);
-    await this.deliver(chat, text);
+    await this.deliver(chat, this.outgoing(chat.provider, text));
     return this.store.getChat(chat.id)!;
   }
 

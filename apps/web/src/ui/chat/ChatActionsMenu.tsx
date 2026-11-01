@@ -1,4 +1,6 @@
 import type { Chat, ProviderId } from '@agent-kanban/shared';
+import { folderKey } from '@agent-kanban/shared';
+import { chatFolder, visibleProjects } from '../../state/selectors.ts';
 import { api } from '../../api/client.ts';
 import { closePanelIn, mergeChats, openHistoryIn, type AppState, type HistoryRef } from '../../state/reducer.ts';
 import { useStore, useStoreInstance, type Store } from '../../state/store.ts';
@@ -157,6 +159,7 @@ export interface ChatActionsMenuProps {
 export function ChatActionsMenu({ anchor, open: wanted, target, onClose, onRename }: ChatActionsMenuProps) {
   const store = useStoreInstance();
   const chat = useStore((s) => (target?.chatId ? s.chats[target.chatId] : undefined));
+  const projects = useStore((s) => visibleProjects(s));
   const open = wanted && target !== null && (chat !== undefined || target.history !== null);
   const history = chat ? null : target?.history ?? null;
   const historyOpen = useStore((s) => history !== null && s.ui.openHistory?.provider === history.provider && s.ui.openHistory.sessionRef === history.sessionRef);
@@ -178,6 +181,7 @@ export function ChatActionsMenu({ anchor, open: wanted, target, onClose, onRenam
             <MenuItem icon="snooze" right={<Icon name="chevron-right" size="sm" />} onSelect={() => nav.go('snooze')}>Snooze</MenuItem>
           )}
           <MenuItem icon="rename" onSelect={pick(() => onRename(chat.id))}>Rename</MenuItem>
+          <MenuItem icon="folder" right={<Icon name="chevron-right" size="sm" />} onSelect={() => nav.go('move')}>Move to project</MenuItem>
           <MenuItem icon="folder" onSelect={pick(() => void openFolder(chat.cwd))}>Open folder</MenuItem>
           <MenuItem icon="copy" onSelect={pick(() => void copyText(chat.cwd))}>Copy project path</MenuItem>
           {cmd && <MenuItem icon="terminal" onSelect={pick(() => void copyText(cmd))}>Copy resume command</MenuItem>}
@@ -224,7 +228,27 @@ export function ChatActionsMenu({ anchor, open: wanted, target, onClose, onRenam
             ))}
           </>
         ),
+        move: (nav) => (
+          <>
+            <MenuLabel>
+              <Tooltip label="Back">
+                <button className="btn icon-only ghost menu-back" type="button" aria-label="Back" onClick={nav.back}><Icon name="back" size="sm" /></button>
+              </Tooltip>
+              Move to project
+            </MenuLabel>
+            {chat && projects.filter((p) => folderKey(p.path) !== folderKey(chatFolder(chat))).map((p) => (
+              <MenuItem key={p.id} onSelect={pick(() => void moveToProject(store, chat, p.path))}>{p.name || p.path}</MenuItem>
+            ))}
+            {chat?.projectLabel && <MenuItem onSelect={pick(() => void moveToProject(store, chat, null))}>Back to its own folder</MenuItem>}
+          </>
+        ),
       }}
     />
   );
+}
+
+/** Move to project (#40): a label only. The chat shows under the project and keeps running in its own folder. */
+export async function moveToProject(store: Store, chat: Chat, path: string | null): Promise<void> {
+  const ok = await runAction(store, () => api.patchChat(chat.id, { projectLabel: path }));
+  if (ok && path) toast(`Moved. It still runs in ${chat.cwd}`);
 }

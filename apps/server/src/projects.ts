@@ -60,7 +60,7 @@ export function buildProjects(chats: Chat[], history: HistoryChat[], rules: Proj
   const known = new Set<string>();
   for (const c of chats) {
     if (c.archived) continue;
-    const p = get(c.cwd);
+    const p = get(c.projectLabel || c.cwd);
     touch(p, c.provider, c.updatedAt, true);
     if (c.column) p.columns[c.column]++;
     if (c.sessionRef) known.add(`${c.provider}:${c.sessionRef}`);

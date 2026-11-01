@@ -10,10 +10,10 @@ import { usageSummary } from '../src/ui/usage/model.ts';
 
 vi.mock('../src/api/client.ts', async (orig) => {
   const m = await orig<typeof import('../src/api/client.ts')>();
-  return { ...m, api: { ...m.api, checkConnections: vi.fn(), connect: vi.fn(), patchSettings: vi.fn(), history: vi.fn(), projects: vi.fn() } };
+  return { ...m, api: { ...m.api, checkConnections: vi.fn(), connect: vi.fn(), patchSettings: vi.fn(), history: vi.fn(), projects: vi.fn(), skills: vi.fn(async () => ({ synced: [], skipped: [] })), syncSkills: vi.fn() } };
 });
 type Fn = ReturnType<typeof vi.fn>;
-const mocked = api as unknown as { checkConnections: Fn; connect: Fn; patchSettings: Fn; history: Fn; projects: Fn };
+const mocked = api as unknown as { checkConnections: Fn; connect: Fn; patchSettings: Fn; history: Fn; projects: Fn; skills: Fn; syncSkills: Fn };
 
 const NOW = Date.parse('2026-10-23T12:00:00.000Z');
 const ago = (min: number) => new Date(NOW - min * 60_000).toISOString();
@@ -525,5 +525,22 @@ describe('cardView after an operation', () => {
     const done = cs('codex', { lastOp: 'signin', outcome: 'done', updatedAt: ago(0) });
     expect(cardView(conn('codex', { checkedAt: ago(1) }), done, true)).toBe('checking');
     expect(cardView(conn('codex', { checkedAt: new Date(NOW + 1000).toISOString() }), done, true)).toBe('connected');
+  });
+});
+
+describe('Skill sync section (#40)', () => {
+  it('lists synced skills behind Show more, the skipped ones, and Sync now reruns', async () => {
+    const names = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
+    mocked.skills.mockResolvedValue({ synced: names, skipped: [{ name: 'grill', provider: 'codex' }] });
+    mocked.syncSkills.mockResolvedValue({ synced: [...names, 'i'], skipped: [] });
+    mount(seeded([], [], [], [], { ...SETTINGS, homeProvider: 'claude', skillSync: true }));
+    const list = await screen.findByRole('list', { name: 'Synced skills' });
+    expect(within(list).getAllByRole('listitem')).toHaveLength(6);
+    expect(screen.getByText('Not synced: you already have grill in Codex')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Show more' }));
+    expect(within(list).getAllByRole('listitem')).toHaveLength(8);
+    fireEvent.click(screen.getByRole('button', { name: 'Sync now' }));
+    await waitFor(() => expect(screen.getByText('9 skills synced')).toBeTruthy());
+    expect(screen.getByRole('radio', { name: /Claude/ }).getAttribute('aria-checked')).toBe('true');
   });
 });

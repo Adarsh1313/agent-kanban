@@ -19,6 +19,10 @@ import { STOP_REQUEST_FILE, watchStopRequest } from './stop-request.ts';
 import { FolderPicker } from './folder-picker.ts';
 import { FolderOpener } from './folder-opener.ts';
 import { SettingsStore } from './settings.ts';
+import { SkillService } from './skills/service.ts';
+import { skillForm } from './skills/form.ts';
+import { readNotes } from './notes.ts';
+import { folderKey } from '@agent-kanban/shared';
 import { RoutineService } from './routines.ts';
 import { AdapterRegistry } from './adapters/registry.ts';
 import { findBinary } from './binaries.ts';
@@ -91,9 +95,14 @@ for (const id of PROVIDERS) {
 const usage = new UsageService({
   readers, store, onUpdate: (reading) => broadcast({ type: 'usage.updated', reading }),
 });
+// Set once skills exists: a `/skill` the user picked is sent in each provider's own form.
+let skillNames: () => string[] = () => [];
 const chats = new ChatService({
   store, adapters, usage, broadcast: (e) => broadcast(e), claudeHome: join(home, '.claude'),
   suggestNextSteps: () => settings.get().suggestNextSteps,
+  outgoing: (provider, text) => skillForm(provider, text, skillNames()),
+  // Notes go with a handoff only when the user turned them on for the project.
+  notes: (cwd) => (settings.get().notesProjects ?? []).some((k) => folderKey(k) === folderKey(cwd)) ? readNotes(cwd) : null,
 });
 /** Set once ConnectService exists; the monitor's first check runs after that. */
 let connectRef: ConnectService | null = null;
@@ -130,6 +139,9 @@ const connect = new ConnectService({
   accountEnv: (id) => accountStore.env(id),
 });
 connectRef = connect;
+// Skill sync writes into the provider homes; AGENT_KANBAN_SKILLS_HOME points it elsewhere for manual tests.
+const skills = new SkillService({ home: process.env.AGENT_KANBAN_SKILLS_HOME ? resolve(process.env.AGENT_KANBAN_SKILLS_HOME) : home, settings: () => settings.get() });
+skillNames = () => skills.names();
 const accounts = new AccountService({
   accounts: accountStore,
   // A turn in progress (Running), not merely a chat the helper still has open: those continue on the new account.
@@ -164,11 +176,12 @@ const hookEndpoint = join(dataDir, 'hook-endpoint.json');
 const hookSecret = randomBytes(24).toString('hex');
 const claudeHooks = new ClaudeHooks({ settingsPath: join(home, '.claude', 'settings.json'), scriptPath: join(dataDir, 'agent-kanban-hook.mjs'), endpointPath: hookEndpoint, runner: nodeRunner });
 const outside = new OutsideSessions({ store, emit: (e) => broadcast(e), runningHere: (id) => chats.runningHere(id), claudeHome: join(home, '.claude') });
-const api = createApi({ codexResets, accounts, routines, hooks: claudeHooks, outside, hookSecret, chats, usage, history: () => readAllHistory(home), token, connections, adapters, connect, settings, folderPicker: new FolderPicker(), folderOpener: new FolderOpener(),
+const api = createApi({ codexResets, accounts, routines, hooks: claudeHooks, outside, hookSecret, chats, usage, history: () => readAllHistory(home), token, connections, adapters, connect, settings, skills, folderPicker: new FolderPicker(), folderOpener: new FolderOpener(),
   transcript: (provider, sessionRef) => readTranscript(home, provider, sessionRef) });
 broadcast = api.broadcast;
 
 chats.recoverAfterRestart();
+skills.sync();
 
 const rawPort = process.env.AGENT_KANBAN_PORT;
 let port = 0;
@@ -217,6 +230,7 @@ async function shutdown(): Promise<void> {
   stopping = true;
   usage.stop();
   connections.stop();
+  skills.stop();
   routines.stop();
   // Installs and sign-ins in progress are cancelled; their process trees are killed before we exit.
   const connectDone = connect.dispose().catch(() => {});

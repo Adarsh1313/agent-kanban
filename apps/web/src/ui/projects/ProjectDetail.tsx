@@ -10,6 +10,7 @@ import { copyText } from '../chat/ChatActionsMenu.tsx';
 import { Icon, PROVIDER_IDS, ProviderLogo, providerName, StatusIcon } from '../primitives/index.ts';
 import { cssMs, reducedMotion } from '../primitives/motion.ts';
 import { navigate } from '../shell/route.ts';
+import { ProjectNotes } from './ProjectNotes.tsx';
 import { StarButton } from '../myprojects/StarButton.tsx';
 import {
   agoLabel, cachedProjectInfo, chatsByFolder, findByFolder, folderKey, INSTRUCTION_FILE, isProjectHidden, loadProjectInfo, plural, setProjectHidden, statsOf, workedWith,
@@ -335,6 +336,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
             )}
           </div>
           <ProjectRoutines path={project.path} />
+          <ProjectNotes project={project} />
         </div>
         <About project={project} now={now} />
       </div>

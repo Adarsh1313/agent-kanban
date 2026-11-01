@@ -1,7 +1,7 @@
 import type { ProviderId } from '@agent-kanban/shared';
 import { folderKey } from '@agent-kanban/shared';
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
-import { focusedProvider, hiddenFolders, isArchived, isSnoozed, pinned as pinnedChats, providerCounts } from '../../state/selectors.ts';
+import { chatFolder, focusedProvider, hiddenFolders, isArchived, isSnoozed, pinned as pinnedChats, providerCounts } from '../../state/selectors.ts';
 import { applySettings, type AppState } from '../../state/reducer.ts';
 import { api } from '../../api/client.ts';
 import { uniqueProjects } from '../projects/model.ts';
@@ -62,7 +62,7 @@ function Pinned() {
   if (list.length === 0) return null;
   return (
     <SideSection title="Pinned">
-      {list.map((c) => <ChatRow key={c.id} chat={{ key: c.id, chatId: c.id, provider: c.provider, sessionRef: c.sessionRef, title: c.title, cwd: c.cwd, updatedAt: c.updatedAt, column: c.column }} current={c.id === openChatId} />)}
+      {list.map((c) => <ChatRow key={c.id} chat={{ key: c.id, chatId: c.id, provider: c.provider, sessionRef: c.sessionRef, title: c.title, cwd: chatFolder(c), updatedAt: c.updatedAt, column: c.column }} current={c.id === openChatId} />)}
     </SideSection>
   );
 }

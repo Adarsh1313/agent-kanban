@@ -13,12 +13,12 @@ import { Toasts } from '../src/ui/primitives/toast.tsx';
 import { Dialog } from '../src/ui/primitives/Dialog.tsx';
 import { chat, message } from './helpers.ts';
 
-const FNS = ['listMessages', 'listRequests', 'listToolCalls', 'send', 'answer', 'stop', 'done', 'archive', 'patchChat', 'continueHistory', 'historyMessages', 'openFolder'] as const;
+const FNS = ['listMessages', 'listRequests', 'listToolCalls', 'send', 'answer', 'stop', 'done', 'archive', 'patchChat', 'continueHistory', 'historyMessages', 'openFolder', 'skills'] as const;
 type Fn = (typeof FNS)[number];
 
 vi.mock('../src/api/client.ts', async (orig) => {
   const m = await orig<typeof import('../src/api/client.ts')>();
-  const fns = Object.fromEntries(['listMessages', 'listRequests', 'listToolCalls', 'send', 'answer', 'stop', 'done', 'archive', 'patchChat', 'continueHistory', 'historyMessages', 'openFolder'].map((k) => [k, vi.fn()]));
+  const fns = Object.fromEntries(['listMessages', 'listRequests', 'listToolCalls', 'send', 'answer', 'stop', 'done', 'archive', 'patchChat', 'continueHistory', 'historyMessages', 'openFolder', 'skills'].map((k) => [k, vi.fn()]));
   return { ...m, api: { ...m.api, ...fns } };
 });
 
@@ -50,6 +50,7 @@ function thread(messages: Message[] = [], requests: OpenRequest[] = [], calls: T
 beforeEach(() => {
   for (const k of FNS) mocked[k].mockReset();
   mocked.historyMessages.mockResolvedValue({ messages: [], truncated: false, unavailable: true });
+  mocked.skills.mockResolvedValue({ synced: [], skipped: [], available: [] });
   thread();
 });
 afterEach(() => {
@@ -283,6 +284,75 @@ describe('Chat panel: requests and composer', () => {
     fireEvent.keyDown(box, { key: 'Enter' });
     await waitFor(() => expect(screen.getByText('Chat not found.')).toBeTruthy());
     expect(box.value).toBe('again');
+  });
+
+  it('a leading / lists the skills as a listbox; Enter picks one, then sends it as typed', async () => {
+    mocked.skills.mockResolvedValue({ synced: [], skipped: [], available: ['grill', 'tdd', 'triage'] });
+    mocked.send.mockResolvedValue(undefined);
+    mount(seeded([chat({ title: 'Talk', column: 'review' })]));
+    fireEvent.click(card('Talk'));
+    const box = within(panel()).getByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement;
+    await flush();
+    fireEvent.change(box, { target: { value: '/t' } });
+    const list = await within(panel()).findByRole('listbox', { name: 'Skills' });
+    expect(within(list).getAllByRole('option').map((o) => o.textContent)).toEqual(['/tdd', '/triage']);
+    fireEvent.keyDown(box, { key: 'ArrowDown' });
+    expect(within(list).getByRole('option', { name: '/triage' }).getAttribute('aria-selected')).toBe('true');
+    fireEvent.keyDown(box, { key: 'Enter' });
+    expect(box.value).toBe('/triage ');
+    expect(within(panel()).queryByRole('listbox')).toBeNull();
+    expect(mocked.send).not.toHaveBeenCalled();
+    fireEvent.change(box, { target: { value: '/triage the bug' } });
+    fireEvent.keyDown(box, { key: 'Enter' });
+    expect(mocked.send).toHaveBeenCalledWith('c1', '/triage the bug');
+  });
+
+  it('picking another provider shows the handoff note and switches on send; replies carry their provider', async () => {
+    thread([
+      message({ id: 'u1', role: 'user', text: 'Build it', createdAt: '2026-10-23T10:00:00.000Z' }),
+      message({ id: 'a1', text: 'Built.', createdAt: '2026-10-23T10:01:00.000Z', provider: 'claude' }),
+      message({ id: 'u2', role: 'user', text: 'Review', createdAt: '2026-10-23T10:02:00.000Z' }),
+      message({ id: 'a2', text: 'Looks fine.', createdAt: '2026-10-23T10:03:00.000Z', provider: 'codex' }),
+    ]);
+    mocked.send.mockResolvedValue(undefined);
+    mount(seeded([chat({ title: 'Talk', column: 'review', provider: 'claude' })]));
+    fireEvent.click(card('Talk'));
+    await waitFor(() => expect(within(panel()).getByText('Looks fine.')).toBeTruthy());
+    const who = [...panel().querySelectorAll('.msg.agent .who')].map((w) => w.textContent);
+    expect(who[0]).toContain('Claude');
+    expect(who[1]).toContain('Codex');
+    const pick = within(panel()).getByRole('combobox', { name: 'Provider' });
+    expect(panel().querySelector('.handoff-note')!.textContent).toBe('');
+    fireEvent.change(pick, { target: { value: 'codex' } });
+    expect(within(panel()).getByText("Codex will get the last messages, your spec's progress and project notes.")).toBeTruthy();
+    expect(mocked.send).not.toHaveBeenCalled();
+    const box = within(panel()).getByRole('textbox', { name: 'Message' });
+    fireEvent.change(box, { target: { value: 'carry on' } });
+    fireEvent.keyDown(box, { key: 'Enter' });
+    expect(mocked.send).toHaveBeenCalledWith('c1', 'carry on', 'codex');
+  });
+
+  it('out of usage offers Continue with another provider in one click', async () => {
+    mocked.send.mockResolvedValue(undefined);
+    mount(seeded([chat({ title: 'Lim', column: 'needs_you', needsReason: 'limit', provider: 'claude' })], { suggested: 'codex' }));
+    fireEvent.click(card('Lim'));
+    fireEvent.click(within(panel()).getByRole('button', { name: 'Continue with Codex' }));
+    expect(mocked.send).toHaveBeenCalledWith('c1', expect.any(String), 'codex');
+  });
+
+  it('Move to project lists other projects and patches the label; the panel says where it still runs', async () => {
+    const two = { id: '/w/two', name: 'two', path: '/w/two', providers: [], columns: { running: 0, needs_you: 0, review: 0, done: 0 }, historyOnly: 0, lastActivityAt: '2026-10-23T11:00:00.000Z', hidden: null, folderMissing: false };
+    const c = chat({ title: 'Mv', column: 'review', cwd: '/w/one' });
+    mocked.patchChat.mockResolvedValue({ ...c, projectLabel: '/w/two' });
+    const store = seeded([c]);
+    store.setState((s) => ({ ...s, projects: [two as any] }));
+    mount(store);
+    fireEvent.click(card('Mv'));
+    fireEvent.click(within(panel()).getByRole('button', { name: 'More actions' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: /Move to project/ }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'two' }));
+    await waitFor(() => expect(mocked.patchChat).toHaveBeenCalledWith('c1', { projectLabel: '/w/two' }));
+    await waitFor(() => expect(within(panel()).getByText('Shown under this project. It still runs in /w/one')).toBeTruthy());
   });
 
   it('header shows Stop while running and Mark done in Review', async () => {

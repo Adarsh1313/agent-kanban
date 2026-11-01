@@ -11,6 +11,8 @@ import { Icon, ProviderLogo, StatusIcon, Switch, Tooltip, providerName, toast } 
 import { pushLayer } from '../primitives/layers.ts';
 import { ChatActionsMenu, runAction, type ChatActionsTarget } from './ChatActionsMenu.tsx';
 import { Composer } from './Composer.tsx';
+import { ChatComposer, ContinueWith } from './ChatComposer.tsx';
+import { useSkillNames } from '../skills/SkillSync.tsx';
 import { EffortPicker } from './EffortPicker.tsx';
 import { Thread } from './Thread.tsx';
 import { addAfterStart } from '../myprojects/model.ts';
@@ -175,7 +177,7 @@ export function ChatPanel() {
   });
   const now = useStore((s) => s.now);
   const project = useStore((s) => {
-    const cwd = s.ui.openChatId ? s.chats[s.ui.openChatId]?.cwd : s.ui.openHistory?.cwd;
+    const cwd = s.ui.openChatId ? (s.chats[s.ui.openChatId]?.projectLabel || s.chats[s.ui.openChatId]?.cwd) : s.ui.openHistory?.cwd;
     return cwd ? projectLabel(s, cwd) : '';
   });
 
@@ -269,7 +271,7 @@ export function ChatPanel() {
     setMenu({ target, anchor: e.currentTarget, open: true });
   };
 
-  const sendTo = (c: Chat) => (text: string) => runAction(store, () => api.send(c.id, text));
+  const skills = useSkillNames();
   const continueHistory = (ref: HistoryRef) => async (text: string) => {
     try {
       const created = await api.continueHistory({ provider: ref.provider, sessionRef: ref.sessionRef, text });
@@ -315,20 +317,22 @@ export function ChatPanel() {
         </div>
         <div className="panel-source">
           <span className="source"><span className="live-dot" />Same chat as in {app}</span>
+          {s.kind === 'chat' && s.chat.projectLabel && <span className="moved-note">Shown under this project. It still runs in {s.chat.cwd}</span>}
         </div>
         {s.kind === 'chat' ? (
           <>
             <Thread chat={s.chat} key={`t:${s.chat.id}`} onSuggest={(text) => setFill((f) => ({ chatId: s.chat.id, text, n: (f?.n ?? 0) + 1 }))} />
             {s.chat.column === 'needs_you' && s.chat.needsReason === 'limit' && <OutOfUsage chat={s.chat} />}
+            <ContinueWith chat={s.chat} />
             {s.chat.outsideLive
               ? <p className="panel-outside" role="status">{OUTSIDE_NOTE}</p>
-              : <Composer key={`c:${s.chat.id}`} ref={composerRef} onSend={sendTo(s.chat)} hint={HINT} tools={<EffortPicker chat={s.chat} />} fill={fill?.chatId === s.chat.id ? fill : null}
+              : <ChatComposer key={`c:${s.chat.id}:${s.chat.provider}`} ref={composerRef} chat={s.chat} hint={HINT} skills={skills} tools={<EffortPicker chat={s.chat} />} fill={fill?.chatId === s.chat.id ? fill : null}
                 placeholder={s.chat.column === 'running' ? 'Send a note. It reaches the agent after this step' : s.chat.needsReason === 'limit' ? 'Queue a message. It goes out when it can continue' : s.chat.origin === 'outside' ? 'Continue this chat here' : 'Reply or give a new instruction'} />}
           </>
         ) : (
           <>
             <HistoryThread historyRef={s.ref} app={app} key={`ht:${s.ref.provider}:${s.ref.sessionRef}`} />
-            <Composer key={`h:${s.ref.provider}:${s.ref.sessionRef}`} ref={composerRef} onSend={continueHistory(s.ref)}
+            <Composer key={`h:${s.ref.provider}:${s.ref.sessionRef}`} ref={composerRef} onSend={continueHistory(s.ref)} skills={skills}
               hint="Sending puts this chat on the board" placeholder={`Continue this ${app} chat`} />
           </>
         )}

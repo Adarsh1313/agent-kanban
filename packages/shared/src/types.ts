@@ -73,6 +73,10 @@ export interface Chat {
   routineId?: string | null;
   /** Sticky per chat; applies from the next message. */
   effort: Effort;
+  /** Each provider's own session for this chat, kept across handoffs (#40). */
+  providerRefs?: Partial<Record<ProviderId, string>>;
+  /** "Move to project": the project the chat shows under; it still runs in `cwd`. */
+  projectLabel?: string | null;
 }
 
 /** Days are 0 (Sunday) to 6; time is 'HH:MM' in the machine's local time. Daily is all 7 days, Weekdays 1 to 5. */
@@ -111,6 +115,8 @@ export interface Message {
   effort?: Effort;
   /** Suggested next steps parsed from the reply's trailing `Next:` lines (last assistant message of a turn). */
   suggestions?: string[];
+  /** Who wrote it (each reply shows its provider after a handoff). */
+  provider?: ProviderId;
 }
 
 /** A permission or question the agent is waiting on (read back after a page reload). */
@@ -192,6 +198,20 @@ export interface Settings {
   suggestNextSteps: boolean;
   /** The projects the user works on, shown in the sidebar (folder paths); null until the user has picked. */
   myProjects: string[] | null;
+  /** The provider whose skills and global instructions are copied to the others (null until picked). */
+  homeProvider?: ProviderId | null;
+  /** Skill sync on or off; on by default once a home provider is picked. */
+  skillSync?: boolean;
+  /** Folder keys of projects with project notes turned on. */
+  notesProjects?: string[];
+}
+
+/** What skill sync did: names copied to at least one provider, and copies left out because the name was taken. */
+export interface SkillsReport {
+  synced: string[];
+  skipped: { name: string; provider: ProviderId }[];
+  /** Every home provider skill, for the composer's `/` list (sent by GET /api/skills). */
+  available?: string[];
 }
 
 export interface Project {

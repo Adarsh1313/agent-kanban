@@ -109,3 +109,27 @@ test('one project per folder however it is spelled (drive case, trailing separat
   assert.equal(ps[0]!.providers[0]!.chats, 2);
   assert.equal(ps[0]!.historyOnly, 1);
 });
+
+test('Move to project: PATCH projectLabel regroups the chat; cwd is kept', async () => {
+  const { Store } = await import('../src/store.ts');
+  const { ChatService } = await import('../src/chats.ts');
+  const { createApi } = await import('../src/api.ts');
+  const store = new Store(':memory:');
+  const svc = new ChatService({ store, adapters: {}, usage: { refresh: async () => [] } as any, broadcast: () => {}, claudeHome: '/nowhere' });
+  const chat = store.createChat({ provider: 'claude', cwd: '/w/one', title: 't' });
+  store.createChat({ provider: 'claude', cwd: '/w/two', title: 'u' });
+  const api = createApi({ chats: svc, usage: { latest: () => [] } as any, history: async () => [], token: 'tok' });
+  await new Promise<void>((r) => api.server.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${(api.server.address() as import('node:net').AddressInfo).port}`;
+  const f = (m: string, p: string, b?: unknown) => fetch(base + p, { method: m, headers: { Authorization: 'Bearer tok', 'Content-Type': 'application/json' }, body: b ? JSON.stringify(b) : undefined });
+  try {
+    const moved = (await (await f('PATCH', `/api/chats/${chat.id}`, { projectLabel: '/w/two' })).json()) as any;
+    assert.equal(moved.cwd, '/w/one');
+    assert.equal(moved.projectLabel, '/w/two');
+    const projects = (await (await f('GET', '/api/projects')).json()) as any[];
+    assert.deepEqual(projects.map((p) => [p.path, p.providers[0].chats]), [['/w/two', 2]]);
+    assert.equal((await f('PATCH', `/api/chats/${chat.id}`, { projectLabel: 5 })).status, 400);
+  } finally {
+    api.close(); api.server.closeAllConnections(); api.server.close();
+  }
+});

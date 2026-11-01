@@ -12,9 +12,9 @@ import { chat } from './helpers.ts';
 
 vi.mock('../src/api/client.ts', async (orig) => {
   const m = await orig<typeof import('../src/api/client.ts')>();
-  return { ...m, api: { ...m.api, projectInfo: vi.fn(), patchSettings: vi.fn(), projects: vi.fn(), settings: vi.fn() } };
+  return { ...m, api: { ...m.api, projectInfo: vi.fn(), patchSettings: vi.fn(), projects: vi.fn(), settings: vi.fn(), setNotes: vi.fn(), notes: vi.fn(), saveNotes: vi.fn() } };
 });
-const mocked = api as unknown as Record<'projectInfo' | 'patchSettings' | 'projects' | 'settings', ReturnType<typeof vi.fn>>;
+const mocked = api as unknown as Record<'projectInfo' | 'patchSettings' | 'projects' | 'settings' | 'setNotes' | 'notes' | 'saveNotes', ReturnType<typeof vi.fn>>;
 
 const NOW = Date.parse('2026-10-23T12:00:00.000Z');
 const ago = (min: number) => new Date(NOW - min * 60_000).toISOString();
@@ -422,5 +422,29 @@ describe('Projects: hidden and folder missing', () => {
     mount(store);
     expect(screen.getByText('Regex for dates')).toBeTruthy();
     expect(screen.getByText('Explain zstd')).toBeTruthy();
+  });
+});
+
+describe('Projects: project notes (#40)', () => {
+  const ON = { claude: true, codex: true, antigravity: true };
+  const st = (notesProjects: string[]): Settings => ({ onboarded: true, showChats: ON, suggest: ON, hiddenProjects: [], unhiddenProjects: [], suggestNextSteps: true, myProjects: null, notesProjects });
+  it('the switch says it adds a file; on shows Open notes, which loads and saves the notes', async () => {
+    mocked.projectInfo.mockResolvedValue(INFO);
+    mocked.setNotes.mockResolvedValue(st(['/work/alpha']));
+    mocked.notes.mockResolvedValue({ text: 'Use pnpm.' });
+    mocked.saveNotes.mockResolvedValue({ text: 'x' });
+    const store = seeded([ALPHA], [], [], ALPHA.id);
+    store.setState((s) => ({ ...s, settings: st([]) }));
+    mount(store);
+    expect(screen.getByText(/Adds \.agent-kanban\/notes\.md to this folder/)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Open notes' })).toBeNull();
+    fireEvent.click(screen.getByRole('switch', { name: 'Project notes' }));
+    await waitFor(() => expect(mocked.setNotes).toHaveBeenCalledWith('/work/alpha', true));
+    fireEvent.click(await screen.findByRole('button', { name: 'Open notes' }));
+    const box = await screen.findByRole('textbox', { name: 'Notes' }) as HTMLTextAreaElement;
+    await waitFor(() => expect(box.value).toBe('Use pnpm.'));
+    fireEvent.change(box, { target: { value: 'Use pnpm. Ship Fridays.' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(mocked.saveNotes).toHaveBeenCalledWith('/work/alpha', 'Use pnpm. Ship Fridays.'));
   });
 });
