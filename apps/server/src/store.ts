@@ -8,6 +8,7 @@ const COLS: Record<keyof Chat, string> = {
   id: 'id', provider: 'provider', sessionRef: 'session_ref', cwd: 'cwd', title: 'title', model: 'model',
   column: 'column_name', needsReason: 'needs_reason', createdAt: 'created_at', updatedAt: 'updated_at',
   doneAt: 'done_at', archived: 'archived', pinned: 'pinned', snoozedUntil: 'snoozed_until',
+  origin: 'origin', outsideLive: 'outside_live',
 };
 
 function toChat(r: Row): Chat {
@@ -15,6 +16,7 @@ function toChat(r: Row): Chat {
     id: r.id, provider: r.provider, sessionRef: r.session_ref, cwd: r.cwd, title: r.title, model: r.model,
     column: r.column_name, needsReason: r.needs_reason, createdAt: r.created_at, updatedAt: r.updated_at,
     doneAt: r.done_at, archived: r.archived === 1, pinned: r.pinned === 1, snoozedUntil: r.snoozed_until,
+    ...(r.origin === 'outside' ? { origin: 'outside' as const, outsideLive: r.outside_live === 1 } : {}),
   };
 }
 
@@ -71,6 +73,10 @@ export class Store {
     // Added in Plan 3: what a permission request is for. Older databases get the column (NULL = a command).
     const requestCols = (this.db.prepare('PRAGMA table_info(requests)').all() as { name: string }[]).map((c) => c.name);
     if (!requestCols.includes('action')) this.db.exec('ALTER TABLE requests ADD COLUMN action TEXT');
+    // Added for #37: chats run in Claude Code outside the app.
+    const chatCols = (this.db.prepare('PRAGMA table_info(chats)').all() as { name: string }[]).map((c) => c.name);
+    if (!chatCols.includes('origin')) this.db.exec('ALTER TABLE chats ADD COLUMN origin TEXT');
+    if (!chatCols.includes('outside_live')) this.db.exec('ALTER TABLE chats ADD COLUMN outside_live INTEGER NOT NULL DEFAULT 0');
   }
 
   /** Closes the database (tests remove its folder afterwards). */

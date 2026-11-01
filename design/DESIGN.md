@@ -32,6 +32,11 @@ one running-blue card halfway between two ink columns.
 - **One primary (ink) button per view.** On the board that is New chat.
 - **Cards** carry title, provider logo + model, folder, time. Needs-you adds one reason badge; running
   adds the activity line. Detail lives in the side panel, never a new page.
+- **Outside the app:** a Claude Code chat the user runs in a terminal shows as an ordinary card with a muted
+  "Outside the app" label in its meta line (no new colour) while it runs there. It has no Stop, and the panel shows
+  one muted line instead of the composer until it stops; then the composer offers "Continue this chat here".
+  "Waiting for you" is its needs-you reason when Claude Code waits for a reply. Turned on from Claude's
+  Connections card: "Show chats you run outside the app".
 - **Card actions appear on hover/focus.** Undoable actions (Stop, Archive) never confirm; Archive shows
   an Undo toast. Only the user moves cards to Done; drops on agent-owned columns snap back with a toast.
 - **Shadows only for floating things** (dragged card, menus, panel, dialog). Cards use a border.

@@ -52,6 +52,7 @@ export function ReasonBadge({ chat }: { chat: Chat }) {
   switch (chat.needsReason) {
     case 'permission': { const t = permissionText(action); return <span className="badge needs">{t[0]!.toUpperCase() + t.slice(1)}</span>; }
     case 'question': return <span className="badge needs">Asked you a question</span>;
+    case 'waiting': return <span className="badge needs">Waiting for you</span>;
     case 'stopped': return <span className="badge quiet"><Icon name="stop" size="sm" />Stopped</span>;
     case 'limit': return <span className="badge danger">{resets ? `Limit reached · resets ${clockTime(resets, now)}` : 'Limit reached'}</span>;
     case 'error': return <span className="badge danger">Something went wrong</span>;
@@ -232,6 +233,7 @@ export function Card({ id, fresh, onArrived }: { id: string; fresh: boolean; onA
         <span>{chat.model ?? providerName(chat.provider)}</span><span className="sep">·</span>
         <span className="card-proj"><Icon name="folder" size="sm" />{project}</span><span className="sep">·</span>
         <span className="tnum">{relativeTime(chat.updatedAt, now)}</span>
+        {chat.outsideLive && <><span className="sep">·</span><span className="card-outside">Outside the app</span></>}
       </div>
       {column === 'needs_you' && reason && <div className="card-meta"><ReasonBadge chat={chat} /></div>}
       {finished && (
@@ -242,7 +244,7 @@ export function Card({ id, fresh, onArrived }: { id: string; fresh: boolean; onA
       )}
       {column === 'running' && <ActivityLine calls={calls} starting={startingText(chat)} />}
       <div className="card-actions">
-        {column === 'running' && <ActionButton label={busy === 'stop' ? 'Stopping…' : 'Stop agent'} icon="stop" disabled={busy === 'stop'} onClick={() => void run('stop')} />}
+        {column === 'running' && !chat.outsideLive && <ActionButton label={busy === 'stop' ? 'Stopping…' : 'Stop agent'} icon="stop" disabled={busy === 'stop'} onClick={() => void run('stop')} />}
         {resumable && <ActionButton label="Resume" icon="resume" text="Resume" disabled={busy === 'resume'} onClick={() => void run('resume')} />}
         {column !== 'done' && <ActionButton label="Mark done" icon="check" disabled={busy === 'done'} onClick={() => void run('done')} />}
         {column === 'done' && <ActionButton label="Back to Review" icon="back" disabled={busy === 'done'} onClick={() => void run('undone')} />}

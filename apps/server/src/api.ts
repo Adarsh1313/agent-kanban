@@ -14,6 +14,7 @@ import { PickerBusyError } from './folder-picker.ts';
 import type { Transcript } from './history/transcript.ts';
 import type { ConnectService } from './connect/service.ts';
 import { SettingsError } from './settings.ts';
+import { parseHookPayload, type HookPayload } from './outside/sessions.ts';
 import type { SettingsStore } from './settings.ts';
 import type { ChatService } from './chats.ts';
 import type { UsageService } from './usage/service.ts';
@@ -104,6 +105,11 @@ export function createApi(opts: {
   folderPicker?: { pick(): Promise<string | null> };
   /** A chat's "Open folder": shows a project folder in the file manager (#15). */
   folderOpener?: { open(path: string): Promise<void> };
+  /** Claude Code hooks that put outside chats on the board (#37). */
+  hooks?: { installed(): boolean; install(): void; remove(): void };
+  /** Receives Claude Code hook events; `hookSecret` is the value the hook script sends with them. */
+  outside?: { handle(p: HookPayload): void };
+  hookSecret?: string;
   /** Folder holding the built web app (default apps/web/dist). */
   webDist?: string;
   token: string;
@@ -179,6 +185,19 @@ export function createApi(opts: {
     };
     let m: string[] | null;
     if (match('GET', '/api/chats')) return { status: 200, body: chats.listChats() };
+    if (url.pathname.startsWith('/api/hooks/claude') && opts.hooks) {
+      const hooks = opts.hooks;
+      if (match('GET', '/api/hooks/claude')) return { status: 200, body: { installed: hooks.installed() } };
+      const act = match('POST', '/api/hooks/claude/:action');
+      if (act && (act[0] === 'install' || act[0] === 'remove')) {
+        try { if (act[0] === 'install') hooks.install(); else hooks.remove(); } catch {
+          throw new HttpError(409, "Couldn't change Claude Code's settings file. Check that it isn't open in another program and is valid.");
+        }
+        const installed = hooks.installed();
+        broadcast({ type: 'hooks.updated', installed });
+        return { status: 200, body: { installed } };
+      }
+    }
     if ((m = match('GET', '/api/chats/:id/messages'))) return { status: 200, body: chats.listMessages(m[0]!) };
     if ((m = match('GET', '/api/chats/:id/requests'))) return { status: 200, body: chats.listOpenRequests(m[0]!) };
     if ((m = match('GET', '/api/chats/:id/tool-calls'))) return { status: 200, body: chats.listToolCalls(m[0]!) };
@@ -368,6 +387,21 @@ export function createApi(opts: {
       const file = url.pathname === '/' ? null : staticFile(dist, url.pathname);
       if (file) return sendFile(file, url.pathname.startsWith('/assets/') ? 'public, max-age=31536000, immutable' : 'no-cache');
       if (shell && wantsHtml) return sendFile(shell, 'no-store');
+    }
+    // Claude Code's hook script posts events with its own secret instead of the page token. A browser page
+    // can't read that secret, and anything with an Origin header (a web page) is refused outright.
+    if (req.method === 'POST' && url.pathname === '/api/hooks/claude/event') {
+      if (!opts.outside || !opts.hookSecret || req.headers.origin !== undefined || !tokenOk(req.headers['x-agent-kanban-hook'] as string | undefined, opts.hookSecret)) {
+        req.resume();
+        return send(401);
+      }
+      readJson(req).then((body) => {
+        const p = parseHookPayload(body);
+        if (!p) return send(400);
+        try { opts.outside!.handle(p); } catch (e) { console.error('[agent-kanban] outside chat', e); }
+        send(204);
+      }, () => send(400));
+      return;
     }
     const auth = req.headers.authorization;
     let given = auth?.startsWith('Bearer ') ? auth.slice(7) : null;
