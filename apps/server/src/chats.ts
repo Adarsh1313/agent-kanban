@@ -28,6 +28,29 @@ function readable(msg: string): string {
   return out.length > 300 ? out.slice(0, 300) + '…' : out;
 }
 
+/** Added to the agent's instructions so it ends a reply with suggested next steps we can parse. */
+export const NEXT_STEPS_PREFACE = 'At the very end of each reply, add up to 3 lines of the form "Next: <short instruction>", '
+  + 'each a follow-up the user could ask you to do next, written as an instruction to you. Nothing after them.';
+const NEXT_MAX = 3;
+const NEXT_LEN = 120;
+const NEXT_LINE = /^\s*(?:[-*]\s+)?(?:\*\*|__)?Next:(?:\*\*|__)?\s*(.*?)\s*$/i;
+
+/** Splits a reply's trailing `Next:` lines off: the text without them, and up to 3 suggestions of at most 120 characters. */
+export function parseNextSteps(text: string): { text: string; suggestions: string[] } {
+  const lines = text.split(/\r?\n/);
+  let end = lines.length;
+  while (end > 0 && lines[end - 1]!.trim() === '') end--;
+  let start = end;
+  while (start > 0 && NEXT_LINE.test(lines[start - 1]!)) start--;
+  if (start === end) return { text, suggestions: [] };
+  const suggestions = lines.slice(start, end)
+    .map((l) => NEXT_LINE.exec(l)![1]!.replace(/(\*\*|__)$/, '').trim())
+    .filter((s) => s !== '')
+    .slice(0, NEXT_MAX)
+    .map((s) => (s.length > NEXT_LEN ? s.slice(0, NEXT_LEN - 1).trimEnd() + '…' : s));
+  return { text: lines.slice(0, start).join('\n').trimEnd(), suggestions };
+}
+
 export class ActiveElsewhereError extends Error {
   constructor() {
     super("This chat is active in Claude Code right now. Try again when it's idle.");
@@ -55,6 +78,7 @@ export class ChatService {
   private emit: (e: ServerEvent) => void;
   private claudeHome: string;
   private now: () => Date;
+  private suggestNextSteps: () => boolean;
   private buffers = new Map<ProviderId, { at: number; event: AdapterEvent }[]>();
   private messageIds = new Map<string, Map<string, string>>();
   /** Stored ids of assistant messages that received deltas but no message.completed yet, per chat. */
@@ -89,7 +113,10 @@ export class ChatService {
     broadcast: (e: ServerEvent) => void;
     claudeHome: string;
     now?: () => Date;
+    /** The "Suggest next steps" setting (default on). */
+    suggestNextSteps?: () => boolean;
   }) {
+    this.suggestNextSteps = opts.suggestNextSteps ?? (() => true);
     this.store = opts.store;
     this.adapters = typeof (opts.adapters as AdapterSource).onAdapter === 'function' ? (opts.adapters as AdapterSource) : AdapterRegistry.of(opts.adapters as Partial<Record<ProviderId, ProviderAdapter>>);
     this.usage = opts.usage;
@@ -427,9 +454,11 @@ export class ChatService {
   /** Reads the chat's effort now (a change applies from the next message) and remembers it for the turn's replies. */
   private turnOptions(chatId: string, adapter: ProviderAdapter): TurnOptions {
     const effort = this.store.getChat(chatId)?.effort ?? 'normal';
-    if (!adapter.capabilities?.effort) { this.turnEffort.delete(chatId); return {}; }
+    // '' tells the adapter to drop instructions it was given earlier (the setting was turned off).
+    const instructions = this.suggestNextSteps() ? NEXT_STEPS_PREFACE : '';
+    if (!adapter.capabilities?.effort) { this.turnEffort.delete(chatId); return { instructions }; }
     this.turnEffort.set(chatId, effort);
-    return { effort };
+    return { effort, instructions };
   }
 
   /** A new assistant reply: notes the turn's effort when it wasn't Normal. */
@@ -550,6 +579,7 @@ export class ChatService {
         return;
       }
       case 'turn.completed': {
+        this.takeNextSteps(chatId);
         this.settle(chatId);
         this.transition(chatId, e);
         this.broadcast({ type: 'notification', chatId, kind: 'finished' });
@@ -580,6 +610,18 @@ export class ChatService {
       case 'session.started':
         return;
     }
+  }
+
+  /** At turn end: strip the last reply's trailing `Next:` lines and store them as its suggestions. */
+  private takeNextSteps(chatId: string): void {
+    if (!this.suggestNextSteps()) return;
+    const last = this.store.listMessages(chatId).at(-1);
+    if (!last || last.role !== 'assistant') return;
+    const { text, suggestions } = parseNextSteps(last.text);
+    if (suggestions.length === 0) return;
+    this.store.setMessageText(last.id, text);
+    this.store.setMessageSuggestions(last.id, suggestions);
+    this.broadcast({ type: 'message.completed', chatId, message: this.store.getMessage(last.id)! });
   }
 
   /** The turn is over: forget its open requests and message-id mapping. */

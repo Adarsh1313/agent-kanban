@@ -14,7 +14,7 @@ export class SettingsError extends Error {}
 const allOn = (): Record<ProviderId, boolean> => ({ claude: true, codex: true, antigravity: true });
 
 export function defaultSettings(): Settings {
-  return { onboarded: false, showChats: allOn(), suggest: allOn(), hiddenProjects: [], unhiddenProjects: [] };
+  return { onboarded: false, showChats: allOn(), suggest: allOn(), hiddenProjects: [], unhiddenProjects: [], suggestNextSteps: true };
 }
 
 function readJson(backend: SettingsBackend, key: string): unknown {
@@ -48,12 +48,14 @@ export class SettingsStore {
 
   get(): Settings {
     const onboarded = readJson(this.backend, 'onboarded');
+    const nextSteps = readJson(this.backend, 'suggestNextSteps');
     return {
       onboarded: typeof onboarded === 'boolean' ? onboarded : false,
       showChats: readFlags(readJson(this.backend, 'showChats')),
       suggest: readFlags(readJson(this.backend, 'suggest')),
       hiddenProjects: readPaths(readJson(this.backend, 'hiddenProjects')),
       unhiddenProjects: readPaths(readJson(this.backend, 'unhiddenProjects')),
+      suggestNextSteps: typeof nextSteps === 'boolean' ? nextSteps : true,
     };
   }
 
@@ -64,9 +66,9 @@ export class SettingsStore {
   patch(body: Record<string, unknown>): Settings {
     const next = this.get();
     for (const [key, value] of Object.entries(body)) {
-      if (key === 'onboarded') {
-        if (typeof value !== 'boolean') throw new SettingsError('Onboarded must be true or false.');
-        next.onboarded = value;
+      if (key === 'onboarded' || key === 'suggestNextSteps') {
+        if (typeof value !== 'boolean') throw new SettingsError(`"${key}" must be true or false.`);
+        next[key] = value;
       } else if (key === 'showChats' || key === 'suggest') {
         if (!value || typeof value !== 'object' || Array.isArray(value)) throw new SettingsError(`"${key}" must be an object like { "codex": false }.`);
         for (const [id, flag] of Object.entries(value as Record<string, unknown>)) {
@@ -86,6 +88,7 @@ export class SettingsStore {
     this.backend.setSetting('suggest', JSON.stringify(next.suggest));
     this.backend.setSetting('hiddenProjects', JSON.stringify(next.hiddenProjects));
     this.backend.setSetting('unhiddenProjects', JSON.stringify(next.unhiddenProjects));
+    this.backend.setSetting('suggestNextSteps', JSON.stringify(next.suggestNextSteps));
     return next;
   }
 

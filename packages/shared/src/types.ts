@@ -143,6 +143,8 @@ export interface Settings {
   hiddenProjects: string[];
   /** Folders under the temp folder the user chose to show again (they would otherwise be hidden automatically). */
   unhiddenProjects: string[];
+  /** Ask agents for up to 3 suggested next steps after each reply (shown as chips). */
+  suggestNextSteps: boolean;
 }
 
 export interface Project {
