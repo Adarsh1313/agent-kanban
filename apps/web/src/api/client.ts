@@ -105,6 +105,7 @@ export interface SettingsPatch {
   suggest?: Partial<Record<ProviderId, boolean>>;
   hiddenProjects?: string[];
   unhiddenProjects?: string[];
+  myProjects?: string[] | null;
 }
 
 export interface Transcript {
@@ -157,6 +158,9 @@ export const api = {
   codexResets: () => get<{ available: number }>('/api/usage/codex/resets'),
   useCodexReset: () => post<{ outcome: string }>('/api/usage/codex/resets/use'),
   resumeNow: (id: string) => post<void>(`/api/chats/${enc(id)}/resume-now`),
+  /** Whether Claude Code tells the app about chats run outside it (#37). */
+  claudeHooks: () => get<{ installed: boolean }>('/api/hooks/claude'),
+  setClaudeHooks: (on: boolean) => post<{ installed: boolean }>(`/api/hooks/claude/${on ? 'install' : 'remove'}`),
   settings: () => get<Settings>('/api/settings'),
   patchSettings: (patch: SettingsPatch) => request<Settings>('PATCH', '/api/settings', patch),
   projects: () => get<Project[]>('/api/projects'),

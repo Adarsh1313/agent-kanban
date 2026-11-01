@@ -12,6 +12,7 @@ import { pushLayer } from '../primitives/layers.ts';
 import { ChatActionsMenu, runAction, type ChatActionsTarget } from './ChatActionsMenu.tsx';
 import { Composer } from './Composer.tsx';
 import { Thread } from './Thread.tsx';
+import { addAfterStart } from '../myprojects/model.ts';
 import { HistoryThread } from './HistoryThread.tsx';
 
 const STATE_TEXT: Record<Column, string> = { running: 'Running', needs_you: 'Needs you', review: 'Ready for review', done: 'Done' };
@@ -127,6 +128,8 @@ export function OutOfUsage({ chat }: { chat: Chat }) {
     </div>
   );
 }
+/** Shown instead of the composer while a chat runs in Claude Code outside the app (#37). */
+export const OUTSIDE_NOTE = 'This chat is running in Claude Code outside the app. Reply there, or continue here once it stops.';
 
 /** The header button for the chat's state: Stop while running, Resume when stopped, Mark done in Review. */
 function StateAction({ chat }: { chat: Chat }) {
@@ -139,7 +142,7 @@ function StateAction({ chat }: { chat: Chat }) {
     setBusy(false);
   };
   const reason = chat.needsReason;
-  if (chat.column === 'running') {
+  if (chat.column === 'running' && !chat.outsideLive) {
     return <button className="btn danger" type="button" disabled={busy} onClick={() => void run(() => api.stop(chat.id))}><Icon name="stop" size="sm" />{busy ? 'Stopping…' : 'Stop'}</button>;
   }
   if (chat.column === 'needs_you' && (reason === 'stopped' || reason === 'interrupted')) {
@@ -273,6 +276,7 @@ export function ChatPanel() {
       // The history list and projects still count it as history-only until they are asked again.
       void refreshHistory(store, api).catch(() => {});
       noteChatFolder(store, api, created);
+      addAfterStart(store, created.cwd);
       return true;
     } catch (err) {
       toast(errorText(err));
@@ -314,8 +318,10 @@ export function ChatPanel() {
           <>
             <Thread chat={s.chat} key={`t:${s.chat.id}`} />
             {s.chat.column === 'needs_you' && s.chat.needsReason === 'limit' && <OutOfUsage chat={s.chat} />}
-            <Composer key={`c:${s.chat.id}`} ref={composerRef} onSend={sendTo(s.chat)} hint={HINT}
-              placeholder={s.chat.column === 'running' ? 'Send a note. It reaches the agent after this step' : s.chat.needsReason === 'limit' ? 'Queue a message. It goes out when it can continue' : 'Reply or give a new instruction'} />
+            {s.chat.outsideLive
+              ? <p className="panel-outside" role="status">{OUTSIDE_NOTE}</p>
+              : <Composer key={`c:${s.chat.id}`} ref={composerRef} onSend={sendTo(s.chat)} hint={HINT}
+                placeholder={s.chat.column === 'running' ? 'Send a note. It reaches the agent after this step' : s.chat.needsReason === 'limit' ? 'Queue a message. It goes out when it can continue' : s.chat.origin === 'outside' ? 'Continue this chat here' : 'Reply or give a new instruction'} />}
           </>
         ) : (
           <>

@@ -2,7 +2,7 @@ export type ProviderId = 'claude' | 'codex' | 'antigravity';
 
 export type Column = 'running' | 'needs_you' | 'review' | 'done';
 
-export type NeedsReason = 'permission' | 'question' | 'limit' | 'error' | 'interrupted' | 'stopped';
+export type NeedsReason = 'permission' | 'question' | 'limit' | 'error' | 'interrupted' | 'stopped' | 'waiting';
 
 export interface ChatState {
   column: Column;
@@ -56,6 +56,10 @@ export interface Chat {
   autoResume?: boolean;
   /** Messages written while out of usage, sent in order when it can continue (left out when empty). */
   queue?: QueuedMessage[];
+  /** Set on a Claude Code chat the user ran outside the app (#37); left out for the app's own chats. */
+  origin?: 'outside';
+  /** True while that outside chat is still running in Claude Code: it can only be watched, not replied to. */
+  outsideLive?: boolean;
 }
 
 export interface QueuedMessage { id: string; text: string }
@@ -104,6 +108,7 @@ export type ServerEvent =
   | { type: 'connect.updated'; state: ConnectState }
   | { type: 'settings.updated'; settings: Settings }
   | { type: 'accounts.updated'; provider: AccountProvider; accounts: Account[] }
+  | { type: 'hooks.updated'; installed: boolean }
   | { type: 'notification'; chatId: string; kind: 'permission' | 'question' | 'finished' | 'limit' | 'error'; action?: RequestAction };
 
 export type ConnectPhase = 'idle' | 'installing' | 'signing_in' | 'signing_out' | 'updating' | 'error';
@@ -140,6 +145,8 @@ export interface Settings {
   hiddenProjects: string[];
   /** Folders under the temp folder the user chose to show again (they would otherwise be hidden automatically). */
   unhiddenProjects: string[];
+  /** The projects the user works on, shown in the sidebar (folder paths); null until the user has picked. */
+  myProjects: string[] | null;
 }
 
 export interface Project {

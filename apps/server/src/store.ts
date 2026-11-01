@@ -9,6 +9,7 @@ const COLS: Record<keyof Chat, string> = {
   column: 'column_name', needsReason: 'needs_reason', createdAt: 'created_at', updatedAt: 'updated_at',
   doneAt: 'done_at', archived: 'archived', pinned: 'pinned', snoozedUntil: 'snoozed_until',
   resumeAt: 'resume_at', autoResume: 'auto_resume', queue: 'queue',
+  origin: 'origin', outsideLive: 'outside_live',
 };
 
 function toChat(r: Row): Chat {
@@ -20,6 +21,7 @@ function toChat(r: Row): Chat {
     ...(r.resume_at ? { resumeAt: r.resume_at } : {}),
     ...(r.auto_resume === 0 ? { autoResume: false } : {}),
     ...(r.queue && r.queue !== '[]' ? { queue: JSON.parse(r.queue) } : {}),
+    ...(r.origin === 'outside' ? { origin: 'outside' as const, outsideLive: r.outside_live === 1 } : {}),
   };
 }
 
@@ -81,6 +83,9 @@ export class Store {
     if (!chatCols.includes('resume_at')) this.db.exec('ALTER TABLE chats ADD COLUMN resume_at TEXT');
     if (!chatCols.includes('auto_resume')) this.db.exec('ALTER TABLE chats ADD COLUMN auto_resume INTEGER NOT NULL DEFAULT 1');
     if (!chatCols.includes('queue')) this.db.exec("ALTER TABLE chats ADD COLUMN queue TEXT NOT NULL DEFAULT '[]'");
+    // Added for #37: chats run in Claude Code outside the app.
+    if (!chatCols.includes('origin')) this.db.exec('ALTER TABLE chats ADD COLUMN origin TEXT');
+    if (!chatCols.includes('outside_live')) this.db.exec('ALTER TABLE chats ADD COLUMN outside_live INTEGER NOT NULL DEFAULT 0');
   }
 
   /** Closes the database (tests remove its folder afterwards). */

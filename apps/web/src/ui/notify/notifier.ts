@@ -170,12 +170,21 @@ export const primeAudio = (): void => {
   audioContext();
 };
 
+/**
+ * The chime's volume: 200%, through one gain node. Each note peaks at 0.06, so even both notes at once peak at
+ * 0.24 after it, far under full scale (1): louder, without clipping.
+ */
+const CHIME_VOLUME = 2;
+
 /** Two sine notes, 880 Hz then 1320 Hz (1100 Hz, softer, for a finished chat). Failures are silent. */
 export function chime(soft = false): void {
   const ctx = audioContext();
   if (!ctx) return;
   try {
     const t0 = ctx.currentTime;
+    const volume = ctx.createGain();
+    volume.gain.value = CHIME_VOLUME;
+    volume.connect(ctx.destination);
     for (const [f, t] of [[880, 0], [soft ? 1100 : 1320, 0.09]] as const) {
       const o = ctx.createOscillator();
       const g = ctx.createGain();
@@ -184,7 +193,7 @@ export function chime(soft = false): void {
       g.gain.setValueAtTime(0, t0 + t);
       g.gain.linearRampToValueAtTime(0.06, t0 + t + 0.01);
       g.gain.exponentialRampToValueAtTime(0.0001, t0 + t + 0.35);
-      o.connect(g).connect(ctx.destination);
+      o.connect(g).connect(volume);
       o.start(t0 + t);
       o.stop(t0 + t + 0.4);
     }

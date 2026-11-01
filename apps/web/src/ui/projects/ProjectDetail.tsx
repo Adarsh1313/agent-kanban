@@ -9,6 +9,7 @@ import { copyText } from '../chat/ChatActionsMenu.tsx';
 import { Icon, PROVIDER_IDS, ProviderLogo, providerName, StatusIcon } from '../primitives/index.ts';
 import { cssMs, reducedMotion } from '../primitives/motion.ts';
 import { navigate } from '../shell/route.ts';
+import { StarButton } from '../myprojects/StarButton.tsx';
 import {
   agoLabel, cachedProjectInfo, chatsByFolder, findByFolder, folderKey, INSTRUCTION_FILE, isProjectHidden, loadProjectInfo, plural, setProjectHidden, statsOf, workedWith,
   type ProjectChat, type ProjectStats,
@@ -285,6 +286,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
           <h2 className="page-title"><span className="folder-glyph big-glyph proj-glyph" aria-hidden="true">{(project.name || '?')[0]!.toUpperCase()}</span>{project.name}</h2>
           <p className="mono path-line">{project.path}</p>
         </div>
+        {!hidden && <StarButton project={project} labelled />}
         {hidden
           ? <button className="btn" type="button" onClick={() => void setProjectHidden(store, project, false)}>Unhide</button>
           : <button className="btn ghost" type="button" onClick={() => { void setProjectHidden(store, project, true).then((ok) => { if (ok) navigate('projects'); }); }}>Hide project</button>}

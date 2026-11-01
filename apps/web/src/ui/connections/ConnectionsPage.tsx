@@ -94,7 +94,7 @@ export function connectDoneToast(prev: ConnectState | undefined, next: ConnectSt
   if (Date.parse(next.updatedAt) < Date.parse(prev.updatedAt)) return null; // an older state the store ignores
   const name = providerName(next.provider);
   switch (next.lastOp) {
-    case 'signin': return `${name} is connected. Its chats now show in Recent chats`;
+    case 'signin': return `${name} is connected. Its chats now show in the sidebar and All chats`;
     case 'update': return health?.latestVersion ? `${name} updated to ${health.latestVersion}` : `${name} updated`;
     case 'signout': return `Signed out of ${name}`;
     default: return null;
@@ -311,6 +311,32 @@ function AccountsSection({ provider }: { provider: 'claude' | 'codex' }) {
   );
 }
 
+/** Claude Code's hooks put the chats the user runs outside the app on the board (#37). */
+function OutsideToggle() {
+  const store = useStoreInstance();
+  const installed = useStore((s) => s.claudeHooks);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (installed !== null) return;
+    api.claudeHooks().then((r) => store.setState((s) => ({ ...s, claudeHooks: r.installed })), () => {});
+  }, [installed, store]);
+  const change = async (on: boolean) => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const r = await api.setClaudeHooks(on);
+      store.setState((s) => ({ ...s, claudeHooks: r.installed }));
+    } catch (e) { toast(errText(e)); }
+    setBusy(false);
+  };
+  return (
+    <div className="toggle-row">
+      <span>Show chats you run outside the app<small className="conn-note">Adds Agent Kanban to Claude Code's settings so outside chats show on your board.</small></span>
+      <Switch checked={installed ?? false} disabled={installed === null || busy} label="Show Claude Code chats you run outside the app" onChange={(on) => void change(on)} />
+    </div>
+  );
+}
+
 function ConnectionCard({ id }: { id: ProviderId }) {
   const store = useStoreInstance();
   const { health, connect, showChats, suggest, chats, usage, now, loaded } = useStore(cardState(id));
@@ -388,9 +414,10 @@ function ConnectionCard({ id }: { id: ProviderId }) {
           )}
           <div className="conn-toggles">
             <div className="toggle-row">
-              <span>Show its chats in Recent chats</span>
-              <Switch checked={intent.showChats ?? showChats ?? true} disabled={showChats === null} label={`Show ${name} chats in Recent chats`} onChange={(on) => void toggle('showChats', on)} />
+              <span>Show its chats in the sidebar</span>
+              <Switch checked={intent.showChats ?? showChats ?? true} disabled={showChats === null} label={`Show ${name} chats in the sidebar`} onChange={(on) => void toggle('showChats', on)} />
             </div>
+            {id === 'claude' && <OutsideToggle />}
             <div className="toggle-row">
               <span>Suggest it for new chats</span>
               <Switch checked={intent.suggest ?? suggest ?? true} disabled={suggest === null} label={`Suggest ${name} for new chats`} onChange={(on) => void toggle('suggest', on)} />
