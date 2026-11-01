@@ -14,7 +14,7 @@ import type {
   ServerEvent,
   Settings,
   ToolCall,
-  UsageReading,
+  UsageReading, Account, AccountProvider,
 } from '@agent-kanban/shared';
 import { suggest } from '@agent-kanban/shared';
 
@@ -63,6 +63,12 @@ export interface UiState {
   chatsFilters: Filters;
   /** Bumped by the sidebar's search icon: All chats focuses its search box. */
   chatsSearchFocus: number;
+  /** The My projects picker dialog is open (from the sidebar's pick card, Edit or empty state). */
+  pickProjects: boolean;
+  /** The global search palette is open (sidebar field, Ctrl+K). */
+  searchOpen: boolean;
+  /** Text "See all results" hands to All chats' search box (with chatsSearchFocus bumped). */
+  chatsSearchText: string;
 }
 
 export interface SyncState {
@@ -89,6 +95,10 @@ export interface AppState {
   connect: Partial<Record<ProviderId, ConnectState>>;
   /** null until loaded. */
   settings: Settings | null;
+  /** Each provider's accounts once asked (#39). */
+  accounts: Partial<Record<AccountProvider, Account[]>>;
+  /** Claude Code's outside-chat hooks are installed; null until asked (#37). */
+  claudeHooks: boolean | null;
   history: HistoryChat[];
   projects: Project[];
   routines: Routine[];
@@ -138,6 +148,8 @@ export function initialState(): AppState {
     connections: {},
     connect: {},
     settings: null,
+    accounts: {},
+    claudeHooks: null,
     history: [],
     projects: [],
     routines: [],
@@ -158,6 +170,9 @@ export function initialState(): AppState {
       filters: { provider: null, project: null, status: null, model: null, reason: null, activity: null, source: null },
       chatsFilters: { provider: null, project: null, status: null, model: null, reason: null, activity: null, source: null },
       chatsSearchFocus: 0,
+      pickProjects: false,
+      searchOpen: false,
+      chatsSearchText: '',
     },
   };
 }
@@ -338,6 +353,10 @@ export function applyEvent(s: AppState, e: ServerEvent, now: Date = new Date()):
       return mk([], { connections: { ...s.connections, [e.health.provider]: e.health } });
     case 'connect.updated':
       return mk([], { connect: mergeConnect(s.connect, [e.state]) });
+    case 'accounts.updated':
+      return mk([], { accounts: { ...s.accounts, [e.provider]: e.accounts } });
+    case 'hooks.updated':
+      return mk([], { claudeHooks: e.installed });
     case 'settings.updated':
       // Saved in another tab (or onboarding): every open page follows.
       return { ...applySettings(s, e.settings), sync: bump(s, []) };

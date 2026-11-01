@@ -103,8 +103,12 @@ createInterface({ input: process.stdin }).on('line', (line) => {
       }
     case 'account/rateLimits/read':
       return scenario === 'limits'
-        ? send({ id: m.id, result: limits })
+        ? send({ id: m.id, result: { ...limits, rateLimitResetCredits: { availableCount: 2, credits: null } } })
         : send({ id: m.id, error: { code: -32000, message: 'not signed in' } });
+    case 'account/rateLimitResetCredit/consume':
+      return typeof m.params?.idempotencyKey === 'string' && scenario === 'limits'
+        ? send({ id: m.id, result: { outcome: 'reset' } })
+        : send({ id: m.id, error: { code: -32000, message: 'no key' } });
     default: return send({ id: m.id, error: { code: -32601, message: 'unknown method' } });
   }
 });

@@ -8,6 +8,8 @@ const COLS: Record<keyof Chat, string> = {
   id: 'id', provider: 'provider', sessionRef: 'session_ref', cwd: 'cwd', title: 'title', model: 'model',
   column: 'column_name', needsReason: 'needs_reason', createdAt: 'created_at', updatedAt: 'updated_at',
   doneAt: 'done_at', archived: 'archived', pinned: 'pinned', snoozedUntil: 'snoozed_until', routineId: 'routine_id',
+  resumeAt: 'resume_at', autoResume: 'auto_resume', queue: 'queue',
+  origin: 'origin', outsideLive: 'outside_live',
 };
 
 function toChat(r: Row): Chat {
@@ -16,6 +18,11 @@ function toChat(r: Row): Chat {
     column: r.column_name, needsReason: r.needs_reason, createdAt: r.created_at, updatedAt: r.updated_at,
     doneAt: r.done_at, archived: r.archived === 1, pinned: r.pinned === 1, snoozedUntil: r.snoozed_until,
     routineId: r.routine_id ?? null,
+    // Out-of-usage fields appear only when they differ from the default (#39).
+    ...(r.resume_at ? { resumeAt: r.resume_at } : {}),
+    ...(r.auto_resume === 0 ? { autoResume: false } : {}),
+    ...(r.queue && r.queue !== '[]' ? { queue: JSON.parse(r.queue) } : {}),
+    ...(r.origin === 'outside' ? { origin: 'outside' as const, outsideLive: r.outside_live === 1 } : {}),
   };
 }
 
@@ -99,6 +106,13 @@ export class Store {
     // Added for routines (#45): the routine that started a chat.
     const chatCols = (this.db.prepare('PRAGMA table_info(chats)').all() as { name: string }[]).map((c) => c.name);
     if (!chatCols.includes('routine_id')) this.db.exec('ALTER TABLE chats ADD COLUMN routine_id TEXT');
+    // Added for #39: out of usage, auto-resume and the follow-up queue.
+    if (!chatCols.includes('resume_at')) this.db.exec('ALTER TABLE chats ADD COLUMN resume_at TEXT');
+    if (!chatCols.includes('auto_resume')) this.db.exec('ALTER TABLE chats ADD COLUMN auto_resume INTEGER NOT NULL DEFAULT 1');
+    if (!chatCols.includes('queue')) this.db.exec("ALTER TABLE chats ADD COLUMN queue TEXT NOT NULL DEFAULT '[]'");
+    // Added for #37: chats run in Claude Code outside the app.
+    if (!chatCols.includes('origin')) this.db.exec('ALTER TABLE chats ADD COLUMN origin TEXT');
+    if (!chatCols.includes('outside_live')) this.db.exec('ALTER TABLE chats ADD COLUMN outside_live INTEGER NOT NULL DEFAULT 0');
   }
 
   /** Closes the database (tests remove its folder afterwards). */
@@ -137,7 +151,7 @@ export class Store {
     for (const [k, v] of Object.entries(patch) as [keyof Chat, unknown][]) {
       if (k === 'id' || k === 'updatedAt' || !(k in COLS) || v === undefined) continue;
       sets.push(`${COLS[k]} = ?`);
-      vals.push(typeof v === 'boolean' ? (v ? 1 : 0) : v);
+      vals.push(typeof v === 'boolean' ? (v ? 1 : 0) : Array.isArray(v) ? JSON.stringify(v) : v);
     }
     if (opts.touch !== false) {
       sets.push('updated_at = ?');

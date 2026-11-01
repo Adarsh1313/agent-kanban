@@ -68,6 +68,9 @@ export function AllChatsPage() {
   useEffect(() => {
     if (focusAsked > focusHandled) {
       focusHandled = focusAsked;
+      // Global search's "See all results" hands over its query.
+      setQuery(store.getState().ui.chatsSearchText);
+      setShown(PAGE);
       box.current?.focus();
     }
   }, [focusAsked]);

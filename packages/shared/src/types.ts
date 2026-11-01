@@ -2,7 +2,7 @@ export type ProviderId = 'claude' | 'codex' | 'antigravity';
 
 export type Column = 'running' | 'needs_you' | 'review' | 'done';
 
-export type NeedsReason = 'permission' | 'question' | 'limit' | 'error' | 'interrupted' | 'stopped';
+export type NeedsReason = 'permission' | 'question' | 'limit' | 'error' | 'interrupted' | 'stopped' | 'waiting';
 
 export interface ChatState {
   column: Column;
@@ -50,6 +50,16 @@ export interface Chat {
   archived: boolean;
   pinned: boolean;
   snoozedUntil: string | null;
+  /** Out of usage: when it continues on its own (left out when not waiting on a reset, #39). */
+  resumeAt?: string | null;
+  /** False when the user chose "Don't resume" (left out = resume, the default). */
+  autoResume?: boolean;
+  /** Messages written while out of usage, sent in order when it can continue (left out when empty). */
+  queue?: QueuedMessage[];
+  /** Set on a Claude Code chat the user ran outside the app (#37); left out for the app's own chats. */
+  origin?: 'outside';
+  /** True while that outside chat is still running in Claude Code: it can only be watched, not replied to. */
+  outsideLive?: boolean;
   /** The routine that started this chat, if any (#45). */
   routineId?: string | null;
 }
@@ -78,6 +88,13 @@ export interface Routine {
   nextRunAt: string | null;
   createdAt: string;
 }
+
+export interface QueuedMessage { id: string; text: string }
+
+/** Providers that can have several accounts (#39); Antigravity has one in v1. */
+export type AccountProvider = 'claude' | 'codex';
+/** One sign-in to a provider; "default" is the one the provider's own folder holds. */
+export interface Account { id: string; provider: AccountProvider; name: string; active: boolean }
 
 export interface Message { id: string; chatId: string; role: 'user' | 'assistant'; text: string; createdAt: string }
 
@@ -118,6 +135,8 @@ export type ServerEvent =
   | { type: 'connect.updated'; state: ConnectState }
   | { type: 'settings.updated'; settings: Settings }
   | { type: 'routines.updated'; routines: Routine[] }
+  | { type: 'accounts.updated'; provider: AccountProvider; accounts: Account[] }
+  | { type: 'hooks.updated'; installed: boolean }
   | { type: 'notification'; chatId: string; kind: 'permission' | 'question' | 'finished' | 'limit' | 'error'; action?: RequestAction };
 
 export type ConnectPhase = 'idle' | 'installing' | 'signing_in' | 'signing_out' | 'updating' | 'error';
@@ -154,6 +173,8 @@ export interface Settings {
   hiddenProjects: string[];
   /** Folders under the temp folder the user chose to show again (they would otherwise be hidden automatically). */
   unhiddenProjects: string[];
+  /** The projects the user works on, shown in the sidebar (folder paths); null until the user has picked. */
+  myProjects: string[] | null;
 }
 
 export interface Project {

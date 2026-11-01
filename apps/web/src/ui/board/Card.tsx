@@ -52,8 +52,14 @@ export function ReasonBadge({ chat }: { chat: Chat }) {
   switch (chat.needsReason) {
     case 'permission': { const t = permissionText(action); return <span className="badge needs">{t[0]!.toUpperCase() + t.slice(1)}</span>; }
     case 'question': return <span className="badge needs">Asked you a question</span>;
+    case 'waiting': return <span className="badge needs">Waiting for you</span>;
     case 'stopped': return <span className="badge quiet"><Icon name="stop" size="sm" />Stopped</span>;
-    case 'limit': return <span className="badge danger">{resets ? `Limit reached · resets ${clockTime(resets, now)}` : 'Limit reached'}</span>;
+    case 'limit': {
+      // Out of usage (#39): it continues on its own at resumeAt unless the user said not to.
+      const at = chat.resumeAt && chat.autoResume !== false ? chat.resumeAt : null;
+      const text = at ? `Out of usage · resumes ${clockTime(at, now)}` : resets ? `Out of usage · resets ${clockTime(resets, now)}` : 'Out of usage · resets later';
+      return <span className="badge needs">{text}</span>;
+    }
     case 'error': return <span className="badge danger">Something went wrong</span>;
     case 'interrupted': return <span className="badge quiet">Interrupted</span>;
     default: return null;
@@ -232,8 +238,9 @@ export function Card({ id, fresh, onArrived }: { id: string; fresh: boolean; onA
         <span>{chat.model ?? providerName(chat.provider)}</span><span className="sep">·</span>
         <span className="card-proj"><Icon name="folder" size="sm" />{project}</span><span className="sep">·</span>
         <span className="tnum">{relativeTime(chat.updatedAt, now)}</span>
+        {chat.outsideLive && <><span className="sep">·</span><span className="card-outside">Outside the app</span></>}
       </div>
-      {column === 'needs_you' && reason && <div className="card-meta"><ReasonBadge chat={chat} /></div>}
+      {column === 'needs_you' && reason && <div className="card-meta"><ReasonBadge chat={chat} />{chat.queue?.length ? <span className="tnum">{chat.queue.length} queued</span> : null}</div>}
       {finished && (
         <div className="card-meta">
           {steps !== undefined && <><Icon name="check" size="sm" /><span>{steps === 0 ? 'No steps' : `${steps} step${steps === 1 ? '' : 's'}`}</span><span className="sep">·</span></>}
@@ -242,7 +249,7 @@ export function Card({ id, fresh, onArrived }: { id: string; fresh: boolean; onA
       )}
       {column === 'running' && <ActivityLine calls={calls} starting={startingText(chat)} />}
       <div className="card-actions">
-        {column === 'running' && <ActionButton label={busy === 'stop' ? 'Stopping…' : 'Stop agent'} icon="stop" disabled={busy === 'stop'} onClick={() => void run('stop')} />}
+        {column === 'running' && !chat.outsideLive && <ActionButton label={busy === 'stop' ? 'Stopping…' : 'Stop agent'} icon="stop" disabled={busy === 'stop'} onClick={() => void run('stop')} />}
         {resumable && <ActionButton label="Resume" icon="resume" text="Resume" disabled={busy === 'resume'} onClick={() => void run('resume')} />}
         {column !== 'done' && <ActionButton label="Mark done" icon="check" disabled={busy === 'done'} onClick={() => void run('done')} />}
         {column === 'done' && <ActionButton label="Back to Review" icon="back" disabled={busy === 'done'} onClick={() => void run('undone')} />}

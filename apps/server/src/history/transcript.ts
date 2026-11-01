@@ -1,9 +1,8 @@
-import { readdir, readFile } from 'node:fs/promises';
+import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import { zstdDecompressSync } from 'node:zlib';
 import type { ProviderId } from '@agent-kanban/shared';
 import { readJsonl } from './jsonl.ts';
-import { findRollout } from './codex.ts';
+import { findRollout, readRollout } from './codex.ts';
 
 /** A message from a chat that lives only in the provider's own history (#16). Read-only; nothing is ever written. */
 export interface TranscriptMessage { role: 'user' | 'assistant'; text: string; at: string | null }
@@ -90,7 +89,7 @@ async function readCodex(codexHome: string, sessionRef: string, limit: number): 
   const path = await findRollout(codexHome, sessionRef);
   if (!path) return NONE;
   let text: string;
-  try { text = zstdDecompressSync(await readFile(path)).toString('utf8'); } catch { return NONE; }
+  try { text = await readRollout(path); } catch { return NONE; }
   const out: TranscriptMessage[] = [];
   for (const line of text.split('\n')) {
     if (!line.trim()) continue;

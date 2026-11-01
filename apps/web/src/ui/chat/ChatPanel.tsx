@@ -7,11 +7,12 @@ import { loadChat, noteChatFolder, refreshHistory, useStore, useStoreInstance } 
 import { setHistoryHandler, setRowMenuHandler } from '../actions.ts';
 import { errorText, RESUME_TEXT } from '../board/Card.tsx';
 import { relativeTime } from '../board/format.ts';
-import { Icon, ProviderLogo, StatusIcon, Tooltip, providerName, toast } from '../primitives/index.ts';
+import { Icon, ProviderLogo, StatusIcon, Switch, Tooltip, providerName, toast } from '../primitives/index.ts';
 import { pushLayer } from '../primitives/layers.ts';
 import { ChatActionsMenu, runAction, type ChatActionsTarget } from './ChatActionsMenu.tsx';
 import { Composer } from './Composer.tsx';
 import { Thread } from './Thread.tsx';
+import { addAfterStart } from '../myprojects/model.ts';
 import { HistoryThread } from './HistoryThread.tsx';
 
 const STATE_TEXT: Record<Column, string> = { running: 'Running', needs_you: 'Needs you', review: 'Ready for review', done: 'Done' };
@@ -55,6 +56,81 @@ function TitleEdit({ chat, onDone }: { chat: Chat; onDone: () => void }) {
   );
 }
 
+/** Out of usage (#39): what waits for the reset, and the switch that stops it continuing on its own. */
+export function OutOfUsage({ chat }: { chat: Chat }) {
+  const store = useStoreInstance();
+  const [editing, setEditing] = useState<string | null>(null);
+  const [draft, setDraft] = useState('');
+  const queue = chat.queue ?? [];
+  // Another signed-in account of this provider can carry on now; the user picks it, it never switches by itself.
+  const accounts = useStore((s) => (chat.provider === 'claude' || chat.provider === 'codex' ? s.accounts[chat.provider] : undefined));
+  const others = (accounts ?? []).filter((a) => !a.active);
+  const canSwitch = chat.provider === 'claude' || chat.provider === 'codex';
+  const [resets, setResets] = useState(0);
+  useEffect(() => {
+    if (chat.provider !== 'codex') return;
+    let live = true;
+    api.codexResets().then((r) => { if (live) setResets(r.available); }, () => {});
+    return () => { live = false; };
+  }, [chat.provider]);
+  const redeemReset = async () => {
+    try {
+      const { outcome } = await api.useCodexReset();
+      toast(outcome === 'reset' ? 'Used a free reset. Codex chats carry on now.' : outcome === 'nothingToReset' ? 'Nothing to reset right now.' : outcome === 'noCredit' ? 'No free resets left.' : "Couldn't use a free reset. Try again.");
+      if (outcome === 'reset' || outcome === 'noCredit') setResets((n) => Math.max(0, n - (outcome === 'reset' ? 1 : n)));
+    } catch (e) { toast(errorText(e)); }
+  };
+  useEffect(() => {
+    if (!canSwitch || accounts) return;
+    api.accounts().then((all) => store.setState((s) => ({ ...s, accounts: { ...s.accounts, ...all } })), () => {});
+  }, [canSwitch, accounts, store]);
+  const act = (fn: () => Promise<Chat | void>) => void runAction(store, fn);
+  const save = (id: string) => { setEditing(null); if (draft.trim()) act(() => api.editQueued(chat.id, id, draft.trim())); };
+  return (
+    <div className="out-of-usage">
+      {resets > 0 && (
+        <div className="toggle-row">
+          <span>{resets === 1 ? '1 free reset' : `${resets} free resets`}</span>
+          <button className="btn" type="button" onClick={() => void redeemReset()}>Use reset</button>
+        </div>
+      )}
+      {others.length > 0 && (
+        <div className="switch-accounts">
+          {others.map((a) => (
+            <button key={a.id} className="btn" type="button" onClick={() => act(async () => {
+              const list = await api.activateAccount(chat.provider as 'claude' | 'codex', a.id);
+              store.setState((s) => ({ ...s, accounts: { ...s.accounts, [chat.provider]: list } }));
+              await api.resumeNow(chat.id);
+            })}>Switch to {a.name} and continue</button>
+          ))}
+        </div>
+      )}
+      {chat.resumeAt && (
+        <div className="toggle-row">
+          <span>Continue on its own when usage resets</span>
+          <Switch checked={chat.autoResume !== false} label="Continue on its own when usage resets" onChange={(on) => act(() => api.patchChat(chat.id, { autoResume: on }))} />
+        </div>
+      )}
+      {queue.length > 0 && (
+        <ul className="queue" aria-label="Queued messages">
+          {queue.map((q) => (
+            <li key={q.id} className="queue-chip">
+              {editing === q.id
+                ? <input className="queue-edit" aria-label="Edit queued message" value={draft} autoFocus onChange={(e) => setDraft(e.target.value)}
+                    onBlur={() => save(q.id)} onKeyDown={(e) => { if (e.key === 'Enter') save(q.id); if (e.key === 'Escape') setEditing(null); }} />
+                : <button type="button" className="queue-text" aria-label={`Edit queued message: ${q.text}`} onClick={() => { setEditing(q.id); setDraft(q.text); }}>{q.text}</button>}
+              <button type="button" className="btn ghost" onClick={() => act(() => api.sendQueuedNow(chat.id, q.id))}>Send now</button>
+              <button type="button" className="btn ghost icon-only" aria-label={`Remove queued message: ${q.text}`} onClick={() => act(() => api.removeQueued(chat.id, q.id))}><Icon name="x" size="sm" /></button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+/** Shown instead of the composer while a chat runs in Claude Code outside the app (#37). */
+export const OUTSIDE_NOTE = 'This chat is running in Claude Code outside the app. Reply there, or continue here once it stops.';
+
 /** The header button for the chat's state: Stop while running, Resume when stopped, Mark done in Review. */
 function StateAction({ chat }: { chat: Chat }) {
   const store = useStoreInstance();
@@ -66,7 +142,7 @@ function StateAction({ chat }: { chat: Chat }) {
     setBusy(false);
   };
   const reason = chat.needsReason;
-  if (chat.column === 'running') {
+  if (chat.column === 'running' && !chat.outsideLive) {
     return <button className="btn danger" type="button" disabled={busy} onClick={() => void run(() => api.stop(chat.id))}><Icon name="stop" size="sm" />{busy ? 'Stopping…' : 'Stop'}</button>;
   }
   if (chat.column === 'needs_you' && (reason === 'stopped' || reason === 'interrupted')) {
@@ -200,6 +276,7 @@ export function ChatPanel() {
       // The history list and projects still count it as history-only until they are asked again.
       void refreshHistory(store, api).catch(() => {});
       noteChatFolder(store, api, created);
+      addAfterStart(store, created.cwd);
       return true;
     } catch (err) {
       toast(errorText(err));
@@ -240,8 +317,11 @@ export function ChatPanel() {
         {s.kind === 'chat' ? (
           <>
             <Thread chat={s.chat} key={`t:${s.chat.id}`} />
-            <Composer key={`c:${s.chat.id}`} ref={composerRef} onSend={sendTo(s.chat)} hint={HINT}
-              placeholder={s.chat.column === 'running' ? 'Send a note. It reaches the agent after this step' : 'Reply or give a new instruction'} />
+            {s.chat.column === 'needs_you' && s.chat.needsReason === 'limit' && <OutOfUsage chat={s.chat} />}
+            {s.chat.outsideLive
+              ? <p className="panel-outside" role="status">{OUTSIDE_NOTE}</p>
+              : <Composer key={`c:${s.chat.id}`} ref={composerRef} onSend={sendTo(s.chat)} hint={HINT}
+                placeholder={s.chat.column === 'running' ? 'Send a note. It reaches the agent after this step' : s.chat.needsReason === 'limit' ? 'Queue a message. It goes out when it can continue' : s.chat.origin === 'outside' ? 'Continue this chat here' : 'Reply or give a new instruction'} />}
           </>
         ) : (
           <>

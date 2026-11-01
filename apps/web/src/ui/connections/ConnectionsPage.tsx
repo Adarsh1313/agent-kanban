@@ -94,7 +94,7 @@ export function connectDoneToast(prev: ConnectState | undefined, next: ConnectSt
   if (Date.parse(next.updatedAt) < Date.parse(prev.updatedAt)) return null; // an older state the store ignores
   const name = providerName(next.provider);
   switch (next.lastOp) {
-    case 'signin': return `${name} is connected. Its chats now show in Recent chats`;
+    case 'signin': return `${name} is connected. Its chats now show in the sidebar and All chats`;
     case 'update': return health?.latestVersion ? `${name} updated to ${health.latestVersion}` : `${name} updated`;
     case 'signout': return `Signed out of ${name}`;
     default: return null;
@@ -250,6 +250,93 @@ function Progress({ value, label, step }: { value: number | null; label: string;
   );
 }
 
+/** Several sign-ins for one provider (#39): one is active, switching takes one click, never automatic. */
+function AccountsSection({ provider }: { provider: 'claude' | 'codex' }) {
+  const store = useStoreInstance();
+  const accounts = useStore((s) => s.accounts[provider]);
+  const [adding, setAdding] = useState(false);
+  const [name, setName] = useState('');
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (accounts) return;
+    api.accounts().then((all) => store.setState((s) => ({ ...s, accounts: { ...s.accounts, ...all } })), () => {});
+  }, [accounts, store]);
+  const run = async (fn: () => Promise<import('@agent-kanban/shared').Account[]>, done?: string) => {
+    if (busy) return false;
+    setBusy(true);
+    try {
+      const list = await fn();
+      store.setState((s) => ({ ...s, accounts: { ...s.accounts, [provider]: list } }));
+      if (done) toast(done);
+      return true;
+    } catch (e) { toast(errText(e)); return false; } finally { setBusy(false); }
+  };
+  const add = async (e: FormEvent) => {
+    e.preventDefault();
+    if (await run(() => api.addAccount(provider, name), `Added ${name.trim()}. Sign in to finish.`)) { setAdding(false); setName(''); }
+  };
+  if (!accounts) return null;
+  const app = providerName(provider);
+  return (
+    <section className="accounts" aria-label={`${app} accounts`}>
+      {accounts.length > 1 && (
+        <ul className="account-list">
+          {accounts.map((a) => (
+            <li key={a.id} className="account-row">
+              <span className="account-name">{a.name}</span>
+              {a.active
+                ? <span className="badge quiet">Active</span>
+                : <button className="btn ghost" type="button" disabled={busy} onClick={() => void run(() => api.activateAccount(provider, a.id), `Now using ${a.name} for new ${app} chats.`)}>Use this account</button>}
+              {a.id !== 'default' && (
+                <button className="btn ghost icon-only" type="button" aria-label={`Remove ${a.name}`} disabled={busy}
+                  onClick={() => { if (window.confirm(`Remove ${a.name}? Its chats stay readable. You'll need to sign in again to use it.`)) void run(() => api.removeAccount(provider, a.id), `Removed ${a.name}.`); }}>
+                  <Icon name="x" size="sm" />
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      {adding ? (
+        <form className="account-add" onSubmit={(e) => void add(e)}>
+          <input aria-label="Account name" placeholder="Name it, like Work" value={name} maxLength={40} autoFocus onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Escape') setAdding(false); }} />
+          <button className="btn" type="submit" disabled={busy || name.trim() === ''}>Add</button>
+          <button className="btn ghost" type="button" onClick={() => setAdding(false)}>Cancel</button>
+        </form>
+      ) : (
+        <button className="btn ghost" type="button" onClick={() => setAdding(true)}><Icon name="plus" size="sm" />Add another account</button>
+      )}
+    </section>
+  );
+}
+
+/** Claude Code's hooks put the chats the user runs outside the app on the board (#37). */
+function OutsideToggle() {
+  const store = useStoreInstance();
+  const installed = useStore((s) => s.claudeHooks);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (installed !== null) return;
+    api.claudeHooks().then((r) => store.setState((s) => ({ ...s, claudeHooks: r.installed })), () => {});
+  }, [installed, store]);
+  const change = async (on: boolean) => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const r = await api.setClaudeHooks(on);
+      store.setState((s) => ({ ...s, claudeHooks: r.installed }));
+    } catch (e) { toast(errText(e)); }
+    setBusy(false);
+  };
+  return (
+    <div className="toggle-row">
+      <span>Show chats you run outside the app<small className="conn-note">Adds Agent Kanban to Claude Code's settings so outside chats show on your board.</small></span>
+      <Switch checked={installed ?? false} disabled={installed === null || busy} label="Show Claude Code chats you run outside the app" onChange={(on) => void change(on)} />
+    </div>
+  );
+}
+
 function ConnectionCard({ id }: { id: ProviderId }) {
   const store = useStoreInstance();
   const { health, connect, showChats, suggest, chats, usage, now, loaded } = useStore(cardState(id));
@@ -327,15 +414,17 @@ function ConnectionCard({ id }: { id: ProviderId }) {
           )}
           <div className="conn-toggles">
             <div className="toggle-row">
-              <span>Show its chats in Recent chats</span>
-              <Switch checked={intent.showChats ?? showChats ?? true} disabled={showChats === null} label={`Show ${name} chats in Recent chats`} onChange={(on) => void toggle('showChats', on)} />
+              <span>Show its chats in the sidebar</span>
+              <Switch checked={intent.showChats ?? showChats ?? true} disabled={showChats === null} label={`Show ${name} chats in the sidebar`} onChange={(on) => void toggle('showChats', on)} />
             </div>
+            {id === 'claude' && <OutsideToggle />}
             <div className="toggle-row">
               <span>Suggest it for new chats</span>
               <Switch checked={intent.suggest ?? suggest ?? true} disabled={suggest === null} label={`Suggest ${name} for new chats`} onChange={(on) => void toggle('suggest', on)} />
             </div>
           </div>
           {NOTE[id] && <div className="conn-note"><Icon name="help" />{NOTE[id]}</div>}
+          {(id === 'claude' || id === 'codex') && <AccountsSection provider={id} />}
         </>
       );
       foot = (
@@ -374,6 +463,7 @@ function ConnectionCard({ id }: { id: ProviderId }) {
         <>
           <span className="step-text"><span className="done-mark"><Icon name="check" /></span>Installed. Sign in to finish setting up.</span>
           <span>You’ll sign in on {SIGN_IN_ON[id]} in your browser, then come back here.</span>
+          {(id === 'claude' || id === 'codex') && <AccountsSection provider={id} />}
         </>
       );
       foot = <>{checkedText}<span className="grow" />{checkNow}<button className="btn primary" type="button" {...busyProps('signin')}>Sign in{' '}<span className="sr-only">to {name}</span></button></>;

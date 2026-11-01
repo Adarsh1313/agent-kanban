@@ -23,7 +23,8 @@ export interface RunningCommand {
   kill(): void;
 }
 
-export type CommandRunner = (command: string, args: string[]) => RunningCommand;
+/** `env` is added to this process's own environment (the active account's config folder, #39). */
+export type CommandRunner = (command: string, args: string[], env?: Record<string, string>) => RunningCommand;
 
 const EXIT_GRACE_MS = 200;
 const KILL_ESCALATE_MS = 3_000;
@@ -56,7 +57,7 @@ function killGroup(child: ChildProcess): void {
 }
 
 /** The real CommandRunner. */
-export const spawnCommand: CommandRunner = (command, args) => {
+export const spawnCommand: CommandRunner = (command, args, env) => {
   const target = commandTarget(command);
   const fns: Array<(t: string) => void> = [];
   let child: ChildProcess;
@@ -68,6 +69,7 @@ export const spawnCommand: CommandRunner = (command, args) => {
     child = spawn(target.command, [...target.args, ...args], {
       shell: false,
       windowsHide: true,
+      ...(env && Object.keys(env).length > 0 ? { env: { ...process.env, ...env } } : {}),
       // stdin stays open (nothing is written): some sign-in flows stop when it closes.
       stdio: ['pipe', 'pipe', 'pipe'],
       detached: process.platform !== 'win32',

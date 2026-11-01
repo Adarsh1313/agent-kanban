@@ -14,7 +14,7 @@ export class SettingsError extends Error {}
 const allOn = (): Record<ProviderId, boolean> => ({ claude: true, codex: true, antigravity: true });
 
 export function defaultSettings(): Settings {
-  return { onboarded: false, showChats: allOn(), suggest: allOn(), hiddenProjects: [], unhiddenProjects: [] };
+  return { onboarded: false, showChats: allOn(), suggest: allOn(), hiddenProjects: [], unhiddenProjects: [], myProjects: null };
 }
 
 function readJson(backend: SettingsBackend, key: string): unknown {
@@ -40,6 +40,13 @@ function readPaths(v: unknown): string[] {
   return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && x.trim() !== '') : [];
 }
 
+const isPaths = (v: unknown): v is string[] => Array.isArray(v) && v.every((x) => typeof x === 'string' && x.trim() !== '');
+
+/** My projects: null (never picked) unless a folder list is stored. */
+function readMine(v: unknown): string[] | null {
+  return Array.isArray(v) ? readPaths(v) : null;
+}
+
 /** Agent Kanban's own preferences (onboarding done, which providers' chats to show and suggest, hidden projects), kept in the store. */
 export class SettingsStore {
   private backend: SettingsBackend;
@@ -54,6 +61,7 @@ export class SettingsStore {
       suggest: readFlags(readJson(this.backend, 'suggest')),
       hiddenProjects: readPaths(readJson(this.backend, 'hiddenProjects')),
       unhiddenProjects: readPaths(readJson(this.backend, 'unhiddenProjects')),
+      myProjects: readMine(readJson(this.backend, 'myProjects')),
     };
   }
 
@@ -75,8 +83,11 @@ export class SettingsStore {
           next[key][id as ProviderId] = flag;
         }
       } else if (key === 'hiddenProjects' || key === 'unhiddenProjects') {
-        if (!Array.isArray(value) || !value.every((x) => typeof x === 'string' && x.trim() !== '')) throw new SettingsError(`"${key}" must be a list of folders.`);
+        if (!isPaths(value)) throw new SettingsError(`"${key}" must be a list of folders.`);
         next[key] = value as string[];
+      } else if (key === 'myProjects') {
+        if (value !== null && !isPaths(value)) throw new SettingsError('"myProjects" must be a list of folders, or null.');
+        next.myProjects = value as string[] | null;
       } else {
         throw new SettingsError(`You can't change "${key}".`);
       }
@@ -86,6 +97,7 @@ export class SettingsStore {
     this.backend.setSetting('suggest', JSON.stringify(next.suggest));
     this.backend.setSetting('hiddenProjects', JSON.stringify(next.hiddenProjects));
     this.backend.setSetting('unhiddenProjects', JSON.stringify(next.unhiddenProjects));
+    this.backend.setSetting('myProjects', JSON.stringify(next.myProjects));
     return next;
   }
 
