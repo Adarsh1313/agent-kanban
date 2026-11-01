@@ -14,6 +14,7 @@ import type {
   ServerEvent,
   Settings,
   ToolCall,
+  TrashEntry,
   UsageReading, Account, AccountProvider,
 } from '@agent-kanban/shared';
 import { suggest } from '@agent-kanban/shared';
@@ -61,6 +62,8 @@ export interface UiState {
   filters: Filters;
   /** All chats keeps its own Project / Provider filters, apart from the board's. */
   chatsFilters: Filters;
+  /** Which lifecycle bucket All chats is showing. Trash is populated by the later delete slice. */
+  chatsMode: 'active' | 'archived' | 'trash';
   /** Bumped by the sidebar's search icon: All chats focuses its search box. */
   chatsSearchFocus: number;
   /** The My projects picker dialog is open (from the sidebar's pick card, Edit or empty state). */
@@ -100,6 +103,7 @@ export interface AppState {
   /** Claude Code's outside-chat hooks are installed; null until asked (#37). */
   claudeHooks: boolean | null;
   history: HistoryChat[];
+  trash: TrashEntry[];
   projects: Project[];
   routines: Routine[];
   notifications: AppNotification[];
@@ -128,6 +132,7 @@ export interface Snapshot {
   suggested: ProviderId | null;
   connections: ConnectionHealth[];
   history: HistoryChat[];
+  trash?: TrashEntry[];
   projects: Project[];
   connect?: ConnectState[];
   settings?: Settings | null;
@@ -151,6 +156,7 @@ export function initialState(): AppState {
     accounts: {},
     claudeHooks: null,
     history: [],
+    trash: [],
     projects: [],
     routines: [],
     notifications: [],
@@ -169,6 +175,7 @@ export function initialState(): AppState {
       archiving: {},
       filters: { provider: null, project: null, status: null, model: null, reason: null, activity: null, source: null },
       chatsFilters: { provider: null, project: null, status: null, model: null, reason: null, activity: null, source: null },
+      chatsMode: 'active',
       chatsSearchFocus: 0,
       pickProjects: false,
       searchOpen: false,
@@ -431,6 +438,7 @@ export function applySnapshot(s: AppState, snap: Snapshot, since: number = s.syn
     settings: snap.settings === undefined ? s.settings : snap.settings,
     suggested: snap.suggested,
     history: snap.history,
+    trash: snap.trash ?? s.trash,
     projects: snap.projects,
     routines: snap.routines ?? s.routines,
   };

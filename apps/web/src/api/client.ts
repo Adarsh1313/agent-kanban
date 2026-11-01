@@ -14,6 +14,7 @@ import type {
   Settings,
   SkillsReport,
   ToolCall,
+  TrashEntry,
   UsageReading, Account, AccountProvider,
 } from '@agent-kanban/shared';
 
@@ -100,6 +101,7 @@ const post = <T>(path: string, body?: unknown) => request<T>('POST', path, body)
 export type AnswerDecision = 'allow' | 'deny' | { reply: string };
 export interface ChatPatch { title?: string; pinned?: boolean; snoozedUntil?: string | null; effort?: Effort; autoResume?: boolean; projectLabel?: string | null }
 export interface UsageResponse { readings: UsageReading[]; suggested: ProviderId | null }
+export interface BulkResult { done: string[]; skipped: { id: string; reason: string }[] }
 /** What the Connections page can ask the server to do for a provider (`open` re-opens the sign-in page the server holds). */
 export type ConnectAction = 'install' | 'signin' | 'signout' | 'update' | 'cancel' | 'open';
 export interface SettingsPatch {
@@ -125,7 +127,7 @@ export interface Transcript {
 }
 
 export const api = {
-  listChats: () => get<Chat[]>('/api/chats'),
+  listChats: () => get<Chat[]>('/api/chats?archived=all'),
   listMessages: (id: string) => get<Message[]>(`/api/chats/${enc(id)}/messages`),
   listRequests: (id: string) => get<OpenRequest[]>(`/api/chats/${enc(id)}/requests`),
   listToolCalls: (id: string) => get<ToolCall[]>(`/api/chats/${enc(id)}/tool-calls`),
@@ -142,12 +144,22 @@ export const api = {
   done: (id: string) => post<Chat>(`/api/chats/${enc(id)}/done`),
   undone: (id: string) => post<Chat>(`/api/chats/${enc(id)}/undone`),
   archive: (id: string, opts: RequestOptions = {}) => request<Chat>('POST', `/api/chats/${enc(id)}/archive`, undefined, opts),
+  unarchive: (id: string) => post<Chat>(`/api/chats/${enc(id)}/unarchive`),
+  deleteChat: (id: string) => post<TrashEntry>(`/api/chats/${enc(id)}/delete`),
+  bulkChats: (ids: string[], action: 'archive' | 'unarchive' | 'delete' | 'move', projectLabel?: string) =>
+    post<BulkResult>('/api/chats/bulk', { ids, action, ...(projectLabel ? { projectLabel } : {}) }),
   /** The follow-up queue of an out-of-usage chat (#39). */
   editQueued: (id: string, queued: string, text: string) => request<Chat>('PATCH', `/api/chats/${enc(id)}/queue/${enc(queued)}`, { text }),
   removeQueued: (id: string, queued: string) => request<Chat>('DELETE', `/api/chats/${enc(id)}/queue/${enc(queued)}`),
   sendQueuedNow: (id: string, queued: string) => post<void>(`/api/chats/${enc(id)}/queue/${enc(queued)}/send-now`),
   patchChat: (id: string, patch: ChatPatch) => request<Chat>('PATCH', `/api/chats/${enc(id)}`, patch),
-  history: () => get<HistoryChat[]>('/api/history'),
+  history: () => get<HistoryChat[]>('/api/history?archived=all'),
+  archiveHistory: (provider: ProviderId, sessionRef: string) => post<HistoryChat>(`/api/history/${provider}/${enc(sessionRef)}/archive`),
+  unarchiveHistory: (provider: ProviderId, sessionRef: string) => post<HistoryChat>(`/api/history/${provider}/${enc(sessionRef)}/unarchive`),
+  deleteHistory: (provider: ProviderId, sessionRef: string) => post<TrashEntry>(`/api/history/${provider}/${enc(sessionRef)}/delete`),
+  trash: () => get<TrashEntry[]>('/api/trash'),
+  restoreTrash: (id: string) => post<TrashEntry>(`/api/trash/${enc(id)}/restore`),
+  emptyTrash: () => request<void>('DELETE', '/api/trash'),
   continueHistory: (body: { provider: ProviderId; sessionRef: string; text: string }) => post<Chat>('/api/history/continue', body),
   /** Past messages of a history-only chat, read-only (#16). */
   historyMessages: (provider: ProviderId, sessionRef: string) =>

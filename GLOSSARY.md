@@ -110,6 +110,10 @@ _Avoid_: Reasoning effort, thinking budget, Ultrathink
 Up to 3 follow-ups offered after a reply; clicking one fills the composer.
 _Avoid_: Suggestions, quick replies
 
+**Archived**:
+Set aside from the board and the default All chats view, but kept and restorable with Unarchive; applies to history-only chats too.
+_Avoid_: Hidden chat, closed chat
+
 **Trash**:
 Where deleted chats wait 30 days before they are gone for good; they can be restored from there.
 _Avoid_: Recycle bin, deleted items

@@ -82,12 +82,13 @@ async function tracked<T>(store: Store, run: (since: number) => Promise<T>): Pro
 }
 
 export async function fetchSnapshot(api: Api): Promise<Snapshot> {
-  const [chats, usage, connections, history, projects, connect, settings, routines] = await Promise.all([
+  const [chats, usage, connections, history, projects, connect, settings, routines, trash] = await Promise.all([
     api.listChats(), api.usage(), api.connections(), api.history(), api.projects(), api.connectStates(), api.settings(),
     // An older server (or a test double) without routines still loads the board.
     Promise.resolve().then(() => api.routines()).catch(() => undefined),
+    Promise.resolve().then(() => api.trash()).catch(() => []),
   ]);
-  return { chats, usage: usage.readings, suggested: usage.suggested, connections, history, projects, connect, settings, ...(routines ? { routines } : {}) };
+  return { chats, usage: usage.readings, suggested: usage.suggested, connections, history, projects, connect, settings, trash, ...(routines ? { routines } : {}) };
 }
 
 const apply = (store: Store, chatId: string, part: FetchedThread, since: number) =>

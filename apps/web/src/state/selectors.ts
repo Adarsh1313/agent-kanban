@@ -86,7 +86,7 @@ const byRecent = (a: { updatedAt: string }, b: { updatedAt: string }) => (a.upda
 /** Board chats that pass the filters; archived and snoozed ones are hidden. */
 export function visibleChats(s: AppState, now: number = Date.now()): Chat[] {
   return Object.values(s.chats)
-    .filter((c) => c.column !== null && !isArchived(s, c) && !isSnoozed(c, now) && !inHiddenProject(s, chatFolder(c)) && passes(c, s.ui.filters, now))
+    .filter((c) => !c.deletedAt && c.column !== null && !isArchived(s, c) && !isSnoozed(c, now) && !inHiddenProject(s, chatFolder(c)) && passes(c, s.ui.filters, now))
     .sort(byRecent);
 }
 
@@ -101,21 +101,21 @@ const toSidebar = (c: Chat): SidebarChat => ({
 });
 
 export function pinned(s: AppState, now: number = Date.now()): Chat[] {
-  return Object.values(s.chats).filter((c) => c.pinned && !isArchived(s, c) && !isSnoozed(c, now) && !inHiddenProject(s, chatFolder(c))).sort(byRecent);
+  return Object.values(s.chats).filter((c) => !c.deletedAt && c.pinned && !isArchived(s, c) && !isSnoozed(c, now) && !inHiddenProject(s, chatFolder(c))).sort(byRecent);
 }
 
 /**
  * Board chats (not archived) and history-only chats outside hidden projects that pass the filters. The sidebar
  * leaves out pinned and snoozed ones (`everything` false); All chats lists them too.
  */
-function listedChats(s: AppState, now: number, f: Filters = s.ui.filters, everything = false): SidebarChat[] {
+function listedChats(s: AppState, now: number, f: Filters = s.ui.filters, everything = false, archived = false): SidebarChat[] {
   const known = new Set<string>();
   for (const c of Object.values(s.chats)) if (c.sessionRef) known.add(`${c.provider}\u0000${c.sessionRef}`);
   const fromBoard = Object.values(s.chats)
-    .filter((c) => !isArchived(s, c) && (everything || (!c.pinned && !isSnoozed(c, now))) && !inHiddenProject(s, chatFolder(c)) && passes(c, f, now))
+    .filter((c) => !c.deletedAt && isArchived(s, c) === archived && (everything || (!c.pinned && !isSnoozed(c, now))) && !inHiddenProject(s, chatFolder(c)) && passes(c, f, now))
     .map(toSidebar);
   const fromHistory: SidebarChat[] = s.history
-    .filter((h) => !known.has(`${h.provider}\u0000${h.sessionRef}`) && !inHiddenProject(s, h.cwd) && passes({ ...h, column: null, model: null, needsReason: null }, f, now))
+    .filter((h) => Boolean(h.archived) === archived && !known.has(`${h.provider}\u0000${h.sessionRef}`) && !inHiddenProject(s, h.cwd) && passes({ ...h, column: null, model: null, needsReason: null }, f, now))
     .map((h) => ({ key: `h:${h.provider}:${h.sessionRef}`, chatId: null, provider: h.provider, sessionRef: h.sessionRef, title: h.title, cwd: h.cwd, updatedAt: h.updatedAt, column: null, pinned: false }));
   return [...fromBoard, ...fromHistory];
 }
@@ -124,6 +124,27 @@ function listedChats(s: AppState, now: number, f: Filters = s.ui.filters, everyt
 export interface ListedChat extends SidebarChat {
   projectId: string;
   projectName: string;
+}
+
+export type ChatDayLabel = 'Today' | 'Yesterday' | 'This week' | 'This month' | 'Older';
+export interface ChatDayGroup { label: ChatDayLabel; chats: ListedChat[] }
+
+/** Groups an already newest-first chat list by local calendar boundaries, in the fixed product order. */
+export function groupByDay(chats: ListedChat[], now: number): ChatDayGroup[] {
+  const today = new Date(now);
+  const dayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+  const yesterday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1).getTime();
+  const mondayOffset = (today.getDay() + 6) % 7;
+  const weekStart = new Date(today.getFullYear(), today.getMonth(), today.getDate() - mondayOffset).getTime();
+  const monthStart = new Date(today.getFullYear(), today.getMonth(), 1).getTime();
+  const labels: ChatDayLabel[] = ['Today', 'Yesterday', 'This week', 'This month', 'Older'];
+  const by = new Map<ChatDayLabel, ListedChat[]>(labels.map((label) => [label, []]));
+  for (const chat of chats) {
+    const at = Date.parse(chat.updatedAt);
+    const label: ChatDayLabel = at >= dayStart ? 'Today' : at >= yesterday ? 'Yesterday' : at >= weekStart ? 'This week' : at >= monthStart ? 'This month' : 'Older';
+    by.get(label)!.push(chat);
+  }
+  return labels.map((label) => ({ label, chats: by.get(label)! })).filter((group) => group.chats.length > 0);
 }
 
 /** The chats the sidebar's project cards draw from: not pinned, archived or snoozed, after the Filter, newest first. */
@@ -181,7 +202,8 @@ export const searchableChats = memoState((s) => [s.chats, s.history, s.projects,
 
 /** All chats: every chat on the board (pinned and snoozed too) or only in a provider's history, newest first, with All chats' own filters. */
 export function allChats(s: AppState, now: number = Date.now()): ListedChat[] {
-  return listedChats(s, now, s.ui.chatsFilters, true).sort(byRecent).map((c) => withProject(s, c));
+  if (s.ui.chatsMode === 'trash') return [];
+  return listedChats(s, now, s.ui.chatsFilters, true, s.ui.chatsMode === 'archived').sort(byRecent).map((c) => withProject(s, c));
 }
 
 const withProject = (s: AppState, c: SidebarChat): ListedChat =>
@@ -220,7 +242,7 @@ function countProviders(s: AppState): Record<ProviderId, number> {
   const known = new Set<string>();
   for (const c of Object.values(s.chats)) {
     if (c.sessionRef) known.add(`${c.provider}\u0000${c.sessionRef}`);
-    if (!isArchived(s, c) && !inHiddenProject(s, chatFolder(c))) counts[c.provider] += 1;
+    if (!c.deletedAt && !isArchived(s, c) && !inHiddenProject(s, chatFolder(c))) counts[c.provider] += 1;
   }
   for (const h of s.history) if (!known.has(`${h.provider}\u0000${h.sessionRef}`) && !inHiddenProject(s, h.cwd)) counts[h.provider] += 1;
   return counts;

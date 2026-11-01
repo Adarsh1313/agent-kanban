@@ -61,7 +61,7 @@ describe('api', () => {
     const f = mockFetch(Response.json([{ id: 'c1' }]));
     expect(await api.listChats()).toEqual([{ id: 'c1' }]);
     const [url, init] = f.mock.calls[0]!;
-    expect(url).toBe('/api/chats');
+    expect(url).toBe('/api/chats?archived=all');
     expect(new Headers(init.headers).get('authorization')).toBe('Bearer tok');
   });
 

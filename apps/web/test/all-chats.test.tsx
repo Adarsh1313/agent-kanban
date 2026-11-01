@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { Chat, HistoryChat, Project } from '@agent-kanban/shared';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { applySnapshot, initialState } from '../src/state/reducer.ts';
 import { createStore, StoreProvider, type Store } from '../src/state/store.ts';
 import { Shell } from '../src/ui/shell/Shell.tsx';
@@ -29,7 +29,7 @@ function seeded(): Store {
 }
 const mount = (store: Store) => render(<StoreProvider store={store}><Shell /></StoreProvider>);
 const page = () => screen.getByRole('list', { name: 'All chats' });
-const titles = () => within(page()).queryAllByRole('button').map((r) => r.querySelector('.t')!.textContent);
+const titles = () => [...page().querySelectorAll('.crow .t')].map((r) => r.textContent);
 
 beforeEach(() => { location.hash = '#/chats'; });
 afterEach(() => { cleanup(); location.hash = ''; });
@@ -39,9 +39,55 @@ describe('All chats', () => {
     mount(seeded());
     expect(screen.getByRole('heading', { level: 1 }).textContent).toContain('All chats');
     expect(titles()).toEqual(['Fix login redirect', 'Pricing copy', 'Old login idea']);
-    const row = within(page()).getAllByRole('button')[1]!;
+    const row = page().querySelectorAll('.crow')[1]! as HTMLElement;
     expect(within(row).getByText('site')).toBeTruthy();
     expect(within(row).getByText('1h')).toBeTruthy();
+    expect(within(page()).getAllByText('On board')).toHaveLength(2);
+    expect(within(page()).getByText('In history')).toBeTruthy();
+  });
+
+  it('groups rows under the five local date buckets in order', () => {
+    const dates = [
+      ['Today chat', new Date(2026, 9, 23, 10)],
+      ['Yesterday chat', new Date(2026, 9, 22, 10)],
+      ['Week chat', new Date(2026, 9, 20, 10)],
+      ['Month chat', new Date(2026, 9, 10, 10)],
+      ['Older chat', new Date(2026, 8, 30, 10)],
+    ] as const;
+    const history = dates.map(([title, at], i) => hist({ sessionRef: `g${i}`, title, updatedAt: at.toISOString() }));
+    const s = applySnapshot(initialState(), { chats: [], usage: [], suggested: null, connections: [], history, projects: [] });
+    render(<StoreProvider store={createStore({ ...s, now: NOW })}><AllChatsPage /></StoreProvider>);
+    expect(screen.getAllByRole('heading', { level: 3 }).map((h) => h.textContent)).toEqual(['Today', 'Yesterday', 'This week', 'This month', 'Older']);
+  });
+
+  it('switches to Archived and offers the same row menu for board and history chats', () => {
+    const store = seeded();
+    store.setState((s) => ({
+      ...s,
+      chats: { ...s.chats, a: { ...s.chats.a!, archived: true } },
+      history: s.history.map((h) => h.sessionRef === 'h1' ? { ...h, archived: true } : h),
+    }));
+    mount(store);
+    fireEvent.click(screen.getByRole('tab', { name: 'Archived' }));
+    expect(titles()).toEqual(['Fix login redirect', 'Old login idea']);
+    expect(within(page()).getAllByRole('button', { name: 'More actions' })).toHaveLength(2);
+  });
+
+  it('Trash shows days left, restores a chat, and confirms Empty trash', async () => {
+    const store = seeded();
+    store.setState((s) => ({ ...s, trash: [{ id: 'claude-s1', chatId: 'a', provider: 'claude', sessionRef: 's1', title: 'Deleted work', deletedAt: ago(60), daysLeft: 29 }] }));
+    const fetch = vi.fn().mockResolvedValue(Response.json(store.getState().trash[0]));
+    vi.stubGlobal('fetch', fetch);
+    mount(store);
+    fireEvent.click(screen.getByRole('tab', { name: 'Trash' }));
+    expect(screen.getByRole('list', { name: 'Trash' }).textContent).toContain('29 days left');
+    fireEvent.click(screen.getByRole('button', { name: 'Restore' }));
+    await waitFor(() => expect(store.getState().trash).toHaveLength(0));
+    expect(fetch.mock.calls.some((call) => call[0] === '/api/trash/claude-s1/restore')).toBe(true);
+
+    store.setState((s) => ({ ...s, trash: [{ id: 'codex-s2', chatId: null, provider: 'codex', sessionRef: 's2', title: 'Another', deletedAt: ago(60), daysLeft: 29 }] }));
+    fireEvent.click(document.querySelector<HTMLButtonElement>('.trash-empty')!);
+    expect(screen.getByRole('dialog', { name: 'Empty trash?' }).textContent).toContain('gone for good');
   });
 
   it('search matches the title or the project and highlights the match; nothing matching shows an empty state', () => {

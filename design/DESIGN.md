@@ -66,6 +66,15 @@ one running-blue card halfway between two ink columns.
 - **Project picker tiles** (onboarding's "Your projects" step and the Edit dialog): a 3-column grid (2 on phones)
   of cards with glyph, name, chat count · last active, provider logos and a check box in the corner; ticked tiles
   get an ink border. Older projects fold behind one row; search looks through all of them.
+- **All chats** (#41): rows grouped under Today · Yesterday · This week · This month · Older by last activity,
+  taller calmer rows, and a plain status word ("On board" / "In history") instead of colour. A segmented
+  filter switches Active · Archived · Trash. Every row has the shared `…` menu: Archive (Undo toast, never
+  confirms) or Unarchive, Move to project, Delete. Delete always confirms ("moves to Trash for 30 days");
+  it is disabled with an in-place reason for a running chat or an Antigravity chat. Trash rows show days left and
+  Restore; "Empty trash" confirms ("gone for good").
+- **Selecting several:** each row has a checkbox; Shift-click selects a range; "Select all in view" and `Esc`
+  clears. A bottom action bar shows the count with Archive / Unarchive, Move to project, Delete. One Undo
+  covers a bulk archive; the result toast summarises how many succeeded and how many were skipped.
 - **Focusing a provider** filters the board, adds a "Provider is X" chip, and swaps the top-bar usage
   for that provider's meters plus "Usage for all providers".
 - **Filters** follow Linear: categories, then an options pane; active filters become chips; F opens it.

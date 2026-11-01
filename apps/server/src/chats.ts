@@ -363,6 +363,36 @@ ${typed}` : typed;
     return chat;
   }
 
+  unarchive(chatId: string): Chat {
+    this.mustGet(chatId);
+    const chat = this.store.updateChat(chatId, { archived: false });
+    this.broadcast({ type: 'chat.updated', chat });
+    return chat;
+  }
+
+  markDeleted(chatId: string, deletedAt: string): Chat {
+    this.mustGet(chatId);
+    const chat = this.store.updateChat(chatId, { deletedAt }, { touch: false });
+    this.partials.delete(chatId);
+    this.broadcast({ type: 'chat.updated', chat });
+    return chat;
+  }
+
+  restoreDeleted(chatId: string): Chat {
+    this.mustGet(chatId);
+    const chat = this.store.updateChat(chatId, { deletedAt: null }, { touch: false });
+    this.broadcast({ type: 'chat.updated', chat });
+    return chat;
+  }
+
+  setHistoryArchived(provider: ProviderId, sessionRef: string, archived: boolean): void {
+    this.store.setHistoryArchived(provider, sessionRef, archived);
+  }
+
+  historyArchived(provider: ProviderId, sessionRef: string): boolean {
+    return this.store.historyArchived(provider, sessionRef);
+  }
+
   /** Rename, pin, snooze, set the effort of a chat (effort applies from the next message), turn auto-resume on or off, or move it to a project (a label). */
   patch(chatId: string, patch: { title?: string; pinned?: boolean; snoozedUntil?: string | null; effort?: Effort; autoResume?: boolean; projectLabel?: string | null }): Chat {
     const current = this.mustGet(chatId);
@@ -420,7 +450,7 @@ ${typed}` : typed;
     return this.store.getChat(chat.id)!;
   }
 
-  listChats(): Chat[] { return this.store.listChats(); }
+  listChats(includeArchived = false): Chat[] { return this.store.listChats(includeArchived); }
 
   getChat(chatId: string): Chat { return this.mustGet(chatId); }
 

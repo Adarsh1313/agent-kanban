@@ -89,7 +89,7 @@ html, body { overflow: hidden; }
 .dlg-chips .chip-btn:disabled { opacity: .5; cursor: default; }
 .dlg-note { font-size: var(--text-caption); color: var(--color-text-muted); display: flex; gap: calc(var(--space-1) * 1.5); align-items: center; }
 .dlg-note .icon { flex: none; }
-.dlg-hint { color: var(--color-text-faint); font-size: var(--text-caption); font-variant-numeric: tabular-nums; }
+.dlg-hint { color: var(--color-text-muted); font-size: var(--text-caption); font-variant-numeric: tabular-nums; }
 .dlg-hint.warn { color: var(--color-needs-text); }
 .dlg-path { display: grid; grid-template-columns: 1fr auto; gap: var(--space-1) var(--space-2); align-items: center; }
 .dlg-path .dlg-path-error { grid-column: 1 / -1; }
@@ -228,12 +228,35 @@ body:has(> .onb[data-state="open"]) > .toasts { z-index: 91; }
 /* All chats: the Projects page head (title, count, one line, search + Filter), then a plain list (prototype variant A). */
 .all-chats-page .page-head .search input { width: var(--search-width); }
 .all-chats-page .filterbar { padding: 0 0 var(--space-3); border-bottom: 0; }
+.all-chats-page .chat-lifecycle { display: flex; gap: var(--space-1); margin-bottom: var(--space-2); }
+.all-chats-page .lifecycle-tabs { display: flex; gap: var(--space-1); }
+.all-chats-page .chat-lifecycle .trash-empty { margin-left: auto; color: var(--color-danger); }
+.all-chats-page .chat-lifecycle .select-view { margin-left: auto; }
+.all-chats-page .chat-lifecycle .btn[aria-selected="true"] { background: var(--color-ink); color: var(--color-ink-contrast); border-color: var(--color-ink); }
+.all-chats-page .crow-main { flex: 1; min-width: 0; align-self: stretch; display: flex; align-items: center; gap: var(--space-3); padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.all-chats-page .crow-main:focus-visible { outline-offset: var(--space-1); }
+.all-chats-page .crow .row-more { flex: none; opacity: 0; transition: opacity var(--duration-hover) var(--ease-colour); }
+.all-chats-page .crow .chat-check { width: var(--space-4); height: var(--space-4); margin: calc(var(--space-2) * -1); padding: var(--space-2); box-sizing: content-box; opacity: 0; accent-color: var(--color-ink); transition: opacity var(--duration-hover) var(--ease-colour); }
+@media (hover: none) { .all-chats-page .crow .chat-check, .all-chats-page .crow .row-more { opacity: 1; } }
+.all-chats-page .chat-groups:has([data-selected]) .chat-check, .all-chats-page .crow:hover .chat-check, .all-chats-page .crow:focus-within .chat-check, .all-chats-page .crow[data-selected] .chat-check { opacity: 1; }
+.all-chats-page .chat-day + .chat-day { margin-top: var(--space-5); }
+.all-chats-page .chat-day > h3 { margin: 0 0 var(--space-2); color: var(--color-text-muted); font-size: var(--text-caption); font-weight: var(--weight-semibold); }
+.all-chats-page .chat-day .crow { min-height: calc(var(--space-8) + var(--space-6)); padding-block: var(--space-2); }
+.all-chats-page .crow .chat-status { flex: none; width: var(--column-when); color: var(--color-text-muted); font-size: var(--text-caption); }
+.all-chats-page .trash-row .trash-days { color: var(--color-text-muted); font-size: var(--text-caption); white-space: nowrap; }
+.all-chats-page .crow:hover .row-more, .all-chats-page .crow:focus-within .row-more { opacity: 1; }
 .all-chats-page .crow .proj { flex: none; display: inline-flex; align-items: center; gap: calc(var(--space-1) * 1.5); width: var(--column-project); min-width: 0; color: var(--color-text-muted); font-size: var(--text-caption); white-space: nowrap; overflow: hidden; }
 .all-chats-page .crow .proj > span:last-child { overflow: hidden; text-overflow: ellipsis; }
 .all-chats-page .crow .proj .folder-glyph { width: var(--glyph-sm); height: var(--glyph-sm); font-size: calc(var(--glyph-sm) * .6); }
 .all-chats-page .crow .when { flex: none; width: var(--column-when); text-align: right; color: var(--color-text-faint); font-size: var(--text-caption); font-variant-numeric: tabular-nums; }
 .all-chats-page mark { background: var(--color-needs-soft); color: inherit; border-radius: var(--radius-badge); }
 .all-chats-page .show-more-row { margin-top: var(--space-2); }
+.bulk-bar { position: fixed; z-index: 50; left: 50%; bottom: var(--space-5); translate: -50% 0; display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2); background: var(--color-surface); border-radius: var(--radius-panel); box-shadow: var(--shadow-pop); transition: opacity var(--duration-dialog) var(--ease-out), transform var(--duration-dialog) var(--ease-out); }
+@starting-style { .bulk-bar { opacity: 0; transform: translateY(var(--space-2)); } }
+body:has(.bulk-bar) > .toasts { bottom: calc(var(--space-5) + var(--space-8)); }
+.bulk-count { padding: 0 var(--space-2); font-size: var(--text-body); font-weight: var(--weight-semibold); white-space: nowrap; }
+.bulk-projects { display: flex; flex-direction: column; gap: var(--space-2); }
+@media (prefers-reduced-motion: reduce) { .bulk-bar { transition: opacity var(--duration-hover) var(--ease-colour); } @starting-style { .bulk-bar { transform: none; } } }
 @media (max-width: 640px) {
   /* Phone: the title keeps most of the row; the project name shrinks first and the time column fits its text. */
   .all-chats-page .crow .proj { width: auto; max-width: 30%; }

@@ -23,6 +23,7 @@ import { parseHookPayload, type HookPayload } from './outside/sessions.ts';
 import type { SettingsStore } from './settings.ts';
 import type { ChatService } from './chats.ts';
 import type { UsageService } from './usage/service.ts';
+import { TrashError, type TrashService } from './trash.ts';
 // suggest() lives in shared so the web app can recompute "Most room" from usage.updated events.
 import { EFFORTS, folderKey, suggest } from '@agent-kanban/shared';
 
@@ -127,6 +128,7 @@ export function createApi(opts: {
   /** Receives Claude Code hook events; `hookSecret` is the value the hook script sends with them. */
   outside?: { handle(p: HookPayload): void };
   hookSecret?: string;
+  trash?: TrashService;
   /** Folder holding the built web app (default apps/web/dist). */
   webDist?: string;
   token: string;
@@ -160,9 +162,12 @@ export function createApi(opts: {
   // The "Suggest it for new chats" switches limit which providers "Most room" may pick.
   const usageBody = (readings: ReturnType<UsageService['latest']>) => ({ readings, suggested: suggest(readings, settings ? settings.suggestable() : PROVIDERS) });
   // History of providers whose "Show its chats" switch is off is left out of Recent chats and Projects.
-  const visibleHistory = async (): Promise<HistoryChat[]> => {
+  const visibleHistory = async (includeArchived = false): Promise<HistoryChat[]> => {
     const all = await history();
-    return settings ? settings.filterHistory(all) : all;
+    const visible = settings ? settings.filterHistory(all) : all;
+    return visible
+      .map((h) => ({ ...h, archived: typeof (chats as any).historyArchived === 'function' ? chats.historyArchived(h.provider, h.sessionRef) : false }))
+      .filter((h) => includeArchived || !h.archived);
   };
 
   // The temp folder as Node reports it and as the file system resolves it (8.3 short names, /var vs /private/var).
@@ -201,7 +206,7 @@ export function createApi(opts: {
       return r ? r.slice(1).map(decodeURIComponent) : null;
     };
     let m: string[] | null;
-    if (match('GET', '/api/chats')) return { status: 200, body: chats.listChats() };
+    if (match('GET', '/api/chats')) return { status: 200, body: chats.listChats(url.searchParams.get('archived') === 'all') };
     if (opts.codexResets && match('GET', '/api/usage/codex/resets')) return { status: 200, body: { available: await opts.codexResets.read() } };
     if (opts.codexResets && match('POST', '/api/usage/codex/resets/use')) return { status: 200, body: { outcome: await opts.codexResets.use() } };
     if (url.pathname.startsWith('/api/accounts') && opts.accounts) {
@@ -337,13 +342,92 @@ export function createApi(opts: {
     if ((m = match('POST', '/api/chats/:id/done'))) return { status: 200, body: chats.markDone(m[0]!) };
     if ((m = match('POST', '/api/chats/:id/undone'))) return { status: 200, body: chats.dragOutOfDone(m[0]!) };
     if ((m = match('POST', '/api/chats/:id/archive'))) return { status: 200, body: chats.archive(m[0]!) };
+    if ((m = match('POST', '/api/chats/:id/unarchive'))) return { status: 200, body: chats.unarchive(m[0]!) };
+    if ((m = match('POST', '/api/chats/:id/delete'))) {
+      if (!opts.trash) throw new HttpError(404, 'Not found.');
+      const entry = await opts.trash.deleteChat(chats.getChat(m[0]!));
+      chats.markDeleted(m[0]!, entry.deletedAt);
+      return { status: 200, body: entry };
+    }
+    if (match('POST', '/api/chats/bulk')) {
+      const b = await readJson(req);
+      if (!Array.isArray(b.ids) || b.ids.length === 0 || b.ids.length > 1000 || !b.ids.every((id) => typeof id === 'string' && id)) throw new HttpError(400, 'Choose 1 to 1,000 chats.');
+      const action = b.action;
+      if (!['archive', 'unarchive', 'delete', 'move'].includes(String(action))) throw new HttpError(400, 'Unknown bulk action.');
+      if (action === 'move' && (typeof b.projectLabel !== 'string' || !b.projectLabel)) throw new HttpError(400, 'Choose a project.');
+      const done: string[] = [];
+      const skipped: { id: string; reason: string }[] = [];
+      const allHistory = await history();
+      for (const id of b.ids as string[]) {
+        try {
+          if (id.startsWith('h:')) {
+            const [, p, ...rest] = id.split(':');
+            const ref = rest.join(':');
+            const providerId = p as ProviderId;
+            const item = allHistory.find((h) => h.provider === providerId && h.sessionRef === ref);
+            if (!item) throw new TrashError(404, 'Chat not found.');
+            if (action === 'archive' || action === 'unarchive') chats.setHistoryArchived(providerId, ref, action === 'archive');
+            else if (action === 'delete') {
+              if (!opts.trash) throw new TrashError(404, 'Not found.');
+              await opts.trash.deleteHistory(item);
+            } else throw new TrashError(422, 'History-only chats cannot be moved yet.');
+          } else {
+            const chat = chats.getChat(id);
+            if (action === 'archive') chats.archive(id);
+            else if (action === 'unarchive') chats.unarchive(id);
+            else if (action === 'move') chats.patch(id, { projectLabel: b.projectLabel as string });
+            else {
+              if (!opts.trash) throw new TrashError(404, 'Not found.');
+              const entry = await opts.trash.deleteChat(chat);
+              chats.markDeleted(id, entry.deletedAt);
+            }
+          }
+          done.push(id);
+        } catch (err) {
+          skipped.push({ id, reason: err instanceof Error ? err.message : 'Could not complete that action.' });
+        }
+      }
+      return { status: 200, body: { done, skipped } };
+    }
+    if ((m = match('POST', '/api/history/:provider/:ref/delete'))) {
+      if (!opts.trash) throw new HttpError(404, 'Not found.');
+      const id = m[0] as ProviderId;
+      if (!PROVIDERS.includes(id)) throw new HttpError(400, 'Unknown provider. Use claude, codex or antigravity.');
+      const item = (await history()).find((h) => h.provider === id && h.sessionRef === m![1]);
+      if (!item) throw new HttpError(404, 'Chat not found.');
+      return { status: 200, body: await opts.trash.deleteHistory(item) };
+    }
+    if ((m = match('POST', '/api/history/:provider/:ref/archive')) || (m = match('POST', '/api/history/:provider/:ref/unarchive'))) {
+      const id = m[0] as ProviderId;
+      if (!PROVIDERS.includes(id)) throw new HttpError(400, 'Unknown provider. Use claude, codex or antigravity.');
+      const item = (await history()).find((h) => h.provider === id && h.sessionRef === m![1]);
+      if (!item) throw new HttpError(404, 'Chat not found.');
+      const archived = url.pathname.endsWith('/archive');
+      chats.setHistoryArchived(id, m[1]!, archived);
+      return { status: 200, body: { ...item, archived } };
+    }
     if ((m = match('GET', '/api/history/:provider/:ref/messages'))) {
       const id = m[0] as ProviderId;
       if (!PROVIDERS.includes(id)) throw new HttpError(400, 'Unknown provider. Use claude, codex or antigravity.');
       if (!opts.transcript) throw new HttpError(404, 'Not found.');
       return { status: 200, body: await opts.transcript(id, m[1]!) };
     }
-    if (match('GET', '/api/history')) return { status: 200, body: await visibleHistory() };
+    if (match('GET', '/api/history')) return { status: 200, body: await visibleHistory(url.searchParams.get('archived') === 'all') };
+    if (match('GET', '/api/trash')) {
+      if (!opts.trash) throw new HttpError(404, 'Not found.');
+      return { status: 200, body: await opts.trash.list() };
+    }
+    if ((m = match('POST', '/api/trash/:id/restore'))) {
+      if (!opts.trash) throw new HttpError(404, 'Not found.');
+      const entry = await opts.trash.restore(m[0]!);
+      if (entry.chatId) chats.restoreDeleted(entry.chatId);
+      return { status: 200, body: entry };
+    }
+    if (match('DELETE', '/api/trash')) {
+      if (!opts.trash) throw new HttpError(404, 'Not found.');
+      await opts.trash.empty();
+      return { status: 204 };
+    }
     if (match('POST', '/api/history/continue')) {
       const b = await readJson(req);
       const p = provider(b); const ref = str(b, 'sessionRef'); const text = str(b, 'text');
@@ -516,7 +600,7 @@ export function createApi(opts: {
         if (err instanceof URIError) return send(404, { error: 'Not found.' });
         if (err instanceof AccountError) return send(400, { error: err.message });
         if (err instanceof AccountBusyError) return send(409, { error: err.message });
-        if (err instanceof HttpError) {
+        if (err instanceof HttpError || err instanceof TrashError) {
           if (err.status === 413) return reject413(err.message);
           return send(err.status, { error: err.message });
         }

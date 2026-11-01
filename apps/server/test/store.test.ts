@@ -46,6 +46,17 @@ test('listChats newest first, excludes archived', async () => {
   const d = s.createChat({ provider: 'claude', cwd: '/x', title: 'd' });
   s.updateChat(d.id, { archived: true });
   assert.deepEqual(s.listChats().map((x) => x.id), [c.id, b.id, a.id]);
+  assert.equal(s.listChats(true).some((x) => x.id === d.id), true);
+});
+
+test('history archive labels persist by provider and session ref', () => {
+  const s = new Store(':memory:');
+  assert.equal(s.historyArchived('claude', 'h1'), false);
+  s.setHistoryArchived('claude', 'h1', true);
+  assert.equal(s.historyArchived('claude', 'h1'), true);
+  assert.equal(s.historyArchived('codex', 'h1'), false);
+  s.setHistoryArchived('claude', 'h1', false);
+  assert.equal(s.historyArchived('claude', 'h1'), false);
 });
 
 test('findBySessionRef', () => {
