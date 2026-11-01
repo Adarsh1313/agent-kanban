@@ -48,6 +48,7 @@ const STATUS: [Column, string][] = [['running', 'Running'], ['needs_you', 'Needs
 const REASONS: [string, string][] = [
   ['permission', 'Permission to run a command'],
   ['question', 'An answer to a question'],
+  ['waiting', 'Waiting for you'],
   ['stopped', 'You stopped it'],
   ['limit', 'Usage limit reached'],
   ['error', 'Something went wrong'],

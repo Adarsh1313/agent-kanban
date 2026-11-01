@@ -144,6 +144,9 @@ export const api = {
   connectStates: () => get<ConnectState[]>('/api/connect'),
   /** Starts (or cancels) an operation; the answer is the provider's state right after, and progress follows as connect.updated events. */
   connect: (provider: ProviderId, action: ConnectAction) => post<ConnectState>(`/api/connect/${enc(provider)}/${action}`),
+  /** Whether Claude Code tells the app about chats run outside it (#37). */
+  claudeHooks: () => get<{ installed: boolean }>('/api/hooks/claude'),
+  setClaudeHooks: (on: boolean) => post<{ installed: boolean }>(`/api/hooks/claude/${on ? 'install' : 'remove'}`),
   settings: () => get<Settings>('/api/settings'),
   patchSettings: (patch: SettingsPatch) => request<Settings>('PATCH', '/api/settings', patch),
   projects: () => get<Project[]>('/api/projects'),

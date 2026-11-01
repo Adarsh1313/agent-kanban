@@ -127,6 +127,7 @@ export class ChatService {
     this.mustGet(chatId);
     while (this.pending.has(chatId)) await this.pending.get(chatId);
     const chat = this.mustGet(chatId);
+    if (chat.outsideLive) throw new ActiveElsewhereError();
     if (chat.sessionRef && !this.live.has(chat.id) && chat.provider === 'claude' && this.isActiveElsewhere(chat.sessionRef, chat.id)) {
       throw new ActiveElsewhereError();
     }
@@ -260,6 +261,11 @@ export class ChatService {
   listChats(): Chat[] { return this.store.listChats(); }
 
   getChat(chatId: string): Chat { return this.mustGet(chatId); }
+
+  /** True while this app runs the chat (or is starting or resuming it): outside hooks leave its card alone (#37). */
+  runningHere(chatId: string): boolean {
+    return this.live.has(chatId) || this.pending.has(chatId) || this.resuming.has(chatId);
+  }
 
   listMessages(chatId: string): Message[] {
     this.mustGet(chatId);

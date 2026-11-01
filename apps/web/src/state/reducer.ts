@@ -94,6 +94,8 @@ export interface AppState {
   connect: Partial<Record<ProviderId, ConnectState>>;
   /** null until loaded. */
   settings: Settings | null;
+  /** Claude Code's outside-chat hooks are installed; null until asked (#37). */
+  claudeHooks: boolean | null;
   history: HistoryChat[];
   projects: Project[];
   notifications: AppNotification[];
@@ -141,6 +143,7 @@ export function initialState(): AppState {
     connections: {},
     connect: {},
     settings: null,
+    claudeHooks: null,
     history: [],
     projects: [],
     notifications: [],
@@ -343,6 +346,8 @@ export function applyEvent(s: AppState, e: ServerEvent, now: Date = new Date()):
       return mk([], { connections: { ...s.connections, [e.health.provider]: e.health } });
     case 'connect.updated':
       return mk([], { connect: mergeConnect(s.connect, [e.state]) });
+    case 'hooks.updated':
+      return mk([], { claudeHooks: e.installed });
     case 'settings.updated':
       // Saved in another tab (or onboarding): every open page follows.
       return { ...applySettings(s, e.settings), sync: bump(s, []) };
