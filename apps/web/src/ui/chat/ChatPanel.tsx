@@ -11,6 +11,7 @@ import { Icon, ProviderLogo, StatusIcon, Switch, Tooltip, providerName, toast } 
 import { pushLayer } from '../primitives/layers.ts';
 import { ChatActionsMenu, runAction, type ChatActionsTarget } from './ChatActionsMenu.tsx';
 import { Composer } from './Composer.tsx';
+import { EffortPicker } from './EffortPicker.tsx';
 import { Thread } from './Thread.tsx';
 import { addAfterStart } from '../myprojects/model.ts';
 import { HistoryThread } from './HistoryThread.tsx';
@@ -187,6 +188,7 @@ export function ChatPanel() {
 
   const panelRef = useRef<HTMLElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
+  const [fill, setFill] = useState<{ chatId: string; text: string; n: number } | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [menu, setMenu] = useState<{ target: ChatActionsTarget; anchor: HTMLElement; open: boolean } | null>(null);
   const loading = useRef(new Set<string>());
@@ -316,11 +318,11 @@ export function ChatPanel() {
         </div>
         {s.kind === 'chat' ? (
           <>
-            <Thread chat={s.chat} key={`t:${s.chat.id}`} />
+            <Thread chat={s.chat} key={`t:${s.chat.id}`} onSuggest={(text) => setFill((f) => ({ chatId: s.chat.id, text, n: (f?.n ?? 0) + 1 }))} />
             {s.chat.column === 'needs_you' && s.chat.needsReason === 'limit' && <OutOfUsage chat={s.chat} />}
             {s.chat.outsideLive
               ? <p className="panel-outside" role="status">{OUTSIDE_NOTE}</p>
-              : <Composer key={`c:${s.chat.id}`} ref={composerRef} onSend={sendTo(s.chat)} hint={HINT}
+              : <Composer key={`c:${s.chat.id}`} ref={composerRef} onSend={sendTo(s.chat)} hint={HINT} tools={<EffortPicker chat={s.chat} />} fill={fill?.chatId === s.chat.id ? fill : null}
                 placeholder={s.chat.column === 'running' ? 'Send a note. It reaches the agent after this step' : s.chat.needsReason === 'limit' ? 'Queue a message. It goes out when it can continue' : s.chat.origin === 'outside' ? 'Continue this chat here' : 'Reply or give a new instruction'} />}
           </>
         ) : (

@@ -22,7 +22,7 @@ const mocked = api as unknown as { checkConnections: Fn; connect: Fn; patchSetti
 const NOW = Date.parse('2026-10-23T12:00:00.000Z');
 const ago = (min: number) => new Date(NOW - min * 60_000).toISOString();
 const ON = { claude: true, codex: true, antigravity: true };
-const settings = (over: Partial<Settings> = {}): Settings => ({ onboarded: false, showChats: { ...ON }, suggest: { ...ON }, hiddenProjects: [], unhiddenProjects: [], myProjects: null, ...over });
+const settings = (over: Partial<Settings> = {}): Settings => ({ onboarded: false, showChats: { ...ON }, suggest: { ...ON }, hiddenProjects: [], unhiddenProjects: [], suggestNextSteps: true, myProjects: null, ...over });
 
 const conn = (provider: ProviderId, over: Partial<ConnectionHealth> = {}): ConnectionHealth => ({
   provider, installed: true, path: `/bin/${provider}`, version: '1.0.0', latestVersion: '1.0.0', updateAvailable: false,

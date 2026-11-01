@@ -15,7 +15,7 @@ const project = (path: string, hoursAgo: number, over: Partial<Project> = {}): P
   historyOnly: 0, lastActivityAt: at(hoursAgo), hidden: null, folderMissing: false, ...over,
 });
 const settings = (myProjects: string[] | null, over: Partial<Settings> = {}): Settings =>
-  ({ onboarded: true, showChats: ON, suggest: ON, hiddenProjects: [], unhiddenProjects: [], myProjects, ...over });
+  ({ onboarded: true, showChats: ON, suggest: ON, hiddenProjects: [], unhiddenProjects: [], suggestNextSteps: true, myProjects, ...over });
 const hist = (cwd: string, sessionRef: string, title: string, hoursAgo: number): HistoryChat => ({ provider: 'codex', sessionRef, title, cwd, updatedAt: at(hoursAgo) });
 
 const PROJECTS = [project('/work/alpha', 1), project('/work/beta', 0.5), project('/work/gamma', 3), project('/work/old', 900)];

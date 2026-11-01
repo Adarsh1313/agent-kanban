@@ -1,5 +1,14 @@
 export type ProviderId = 'claude' | 'codex' | 'antigravity';
 
+/** How hard the agent thinks on a turn; each adapter maps it to its provider's own setting. */
+export type Effort = 'quick' | 'normal' | 'thorough';
+export const EFFORTS: Effort[] = ['quick', 'normal', 'thorough'];
+
+/** What each provider supports. Antigravity has no effort setting yet, so the picker is hidden for it. */
+export const PROVIDER_CAPABILITIES: Record<ProviderId, { effort: boolean }> = {
+  claude: { effort: true }, codex: { effort: true }, antigravity: { effort: false },
+};
+
 export type Column = 'running' | 'needs_you' | 'review' | 'done';
 
 export type NeedsReason = 'permission' | 'question' | 'limit' | 'error' | 'interrupted' | 'stopped' | 'waiting';
@@ -62,10 +71,10 @@ export interface Chat {
   outsideLive?: boolean;
   /** The routine that started this chat, if any (#45). */
   routineId?: string | null;
+  /** Sticky per chat; applies from the next message. */
+  effort: Effort;
 }
 
-/** Composer effort (#42). Routines store it now; adapters map it once effort is built. */
-export type Effort = 'quick' | 'normal' | 'thorough';
 /** Days are 0 (Sunday) to 6; time is 'HH:MM' in the machine's local time. Daily is all 7 days, Weekdays 1 to 5. */
 export interface RoutineSchedule { days: number[]; time: string }
 /** How the last run went: started on time, ran late (caught up on open), skipped while the last run was still going, or the folder was missing. */
@@ -96,7 +105,13 @@ export type AccountProvider = 'claude' | 'codex';
 /** One sign-in to a provider; "default" is the one the provider's own folder holds. */
 export interface Account { id: string; provider: AccountProvider; name: string; active: boolean }
 
-export interface Message { id: string; chatId: string; role: 'user' | 'assistant'; text: string; createdAt: string }
+export interface Message {
+  id: string; chatId: string; role: 'user' | 'assistant'; text: string; createdAt: string;
+  /** The effort the reply ran at, when it wasn't Normal. */
+  effort?: Effort;
+  /** Suggested next steps parsed from the reply's trailing `Next:` lines (last assistant message of a turn). */
+  suggestions?: string[];
+}
 
 /** A permission or question the agent is waiting on (read back after a page reload). */
 export interface OpenRequest { requestId: string; kind: 'permission' | 'question'; summary: string; createdAt: string; action?: RequestAction }
@@ -173,6 +188,8 @@ export interface Settings {
   hiddenProjects: string[];
   /** Folders under the temp folder the user chose to show again (they would otherwise be hidden automatically). */
   unhiddenProjects: string[];
+  /** Ask agents for up to 3 suggested next steps after each reply (shown as chips). */
+  suggestNextSteps: boolean;
   /** The projects the user works on, shown in the sidebar (folder paths); null until the user has picked. */
   myProjects: string[] | null;
 }

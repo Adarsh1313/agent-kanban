@@ -2,8 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import type { AdapterEvent, ModelOption, UsageReading } from '@agent-kanban/shared';
-import type { PingResult, ProviderAdapter } from './adapter.ts';
+import type { AdapterEvent, Effort, ModelOption, UsageReading } from '@agent-kanban/shared';
+import type { PingResult, ProviderAdapter, TurnOptions } from './adapter.ts';
 import { JsonRpcProcess } from './jsonrpc.ts';
 import { codexLimitsToReading } from '../usage/parse.ts';
 
@@ -25,8 +25,14 @@ const STOP_WAIT_MS = 10_000;
  *   (or, if turn/start was already sent, both the rejection and the error event may occur).
  *   Task 8 should treat a startChat/sendMessage rejection as the failure signal for that call.
  */
+/** app-server turn/start `effort` (a ReasoningEffort) for Quick, Normal and Thorough. */
+export const CODEX_EFFORT: Record<Effort, 'low' | 'medium' | 'high'> = { quick: 'low', normal: 'medium', thorough: 'high' };
+
 export class CodexAdapter implements ProviderAdapter {
   id = 'codex' as const;
+  capabilities = { effort: true };
+  /** Developer instructions per thread, sent when a thread is started or resumed. */
+  private instructions = new Map<string, string>();
   private listeners = new Set<Listener>();
   private proc: JsonRpcProcess | null = null;
   private starting: Promise<JsonRpcProcess> | null = null;
@@ -261,19 +267,25 @@ export class CodexAdapter implements ProviderAdapter {
     });
   }
 
-  async startChat(input: { cwd: string; prompt: string; model?: string }): Promise<{ sessionRef: string }> {
+  async startChat(input: { cwd: string; prompt: string; model?: string } & TurnOptions): Promise<{ sessionRef: string }> {
     const p = await this.ensureProcess();
-    const r = await p.request<{ thread: { id: string } }>('thread/start', { cwd: input.cwd, model: input.model ?? this.fallbackModel.get(p) ?? null, ...AUTO_MODE });
+    const r = await p.request<{ thread: { id: string } }>('thread/start', {
+      cwd: input.cwd, model: input.model ?? this.fallbackModel.get(p) ?? null, ...AUTO_MODE,
+      ...(input.instructions ? { developerInstructions: input.instructions } : {}),
+    });
     const sessionRef = r.thread.id;
+    if (input.instructions) this.instructions.set(sessionRef, input.instructions);
     this.threadCwd.set(sessionRef, input.cwd);
     this.loaded.get(p)?.add(sessionRef);
     this.emit({ type: 'session.started', sessionRef });
     this.claims.add(sessionRef);
-    try { await this.startTurn(p, sessionRef, input.prompt); } finally { this.claims.delete(sessionRef); }
+    try { await this.startTurn(p, sessionRef, input.prompt, undefined, input.effort); } finally { this.claims.delete(sessionRef); }
     return { sessionRef };
   }
 
-  async sendMessage(sessionRef: string, text: string): Promise<void> {
+  async sendMessage(sessionRef: string, text: string, opts: TurnOptions = {}): Promise<void> {
+    if (opts.instructions) this.instructions.set(sessionRef, opts.instructions);
+    else if (opts.instructions === '') this.instructions.delete(sessionRef);
     // Claim the turn before respawning/re-attaching, so a stop() that arrives meanwhile is queued, not dropped.
     const owned = !this.activeTurns.has(sessionRef);
     if (owned) this.activeTurns.set(sessionRef, null);
@@ -281,7 +293,7 @@ export class CodexAdapter implements ProviderAdapter {
     try {
       const p = await this.ensureProcess();
       await this.attach(p, sessionRef);
-      await this.startTurn(p, sessionRef, text, owned);
+      await this.startTurn(p, sessionRef, text, owned, opts.effort);
     } catch (e) {
       if (owned) { this.activeTurns.delete(sessionRef); this.pendingStops.delete(sessionRef); }
       throw e;
@@ -295,14 +307,21 @@ export class CodexAdapter implements ProviderAdapter {
     const known = this.loaded.get(p);
     if (known?.has(sessionRef)) return;
     const cwd = this.threadCwd.get(sessionRef);
-    await p.request('thread/resume', { threadId: sessionRef, ...(cwd ? { cwd } : {}), ...this.modelParam(p), ...AUTO_MODE });
+    await p.request('thread/resume', { threadId: sessionRef, ...(cwd ? { cwd } : {}), ...this.modelParam(p), ...AUTO_MODE, ...this.instructionsParam(sessionRef) });
     known?.add(sessionRef);
   }
 
-  private async startTurn(p: JsonRpcProcess, sessionRef: string, text: string, owned = !this.activeTurns.has(sessionRef)): Promise<void> {
+  private instructionsParam(sessionRef: string): { developerInstructions?: string } {
+    const i = this.instructions.get(sessionRef);
+    return i ? { developerInstructions: i } : {};
+  }
+
+  private async startTurn(p: JsonRpcProcess, sessionRef: string, text: string, owned = !this.activeTurns.has(sessionRef), effort?: Effort): Promise<void> {
     if (owned) this.activeTurns.set(sessionRef, null);
     try {
-      const r = await p.request<{ turn: { id: string } }>('turn/start', { threadId: sessionRef, input: [{ type: 'text', text }] });
+      const r = await p.request<{ turn: { id: string } }>('turn/start', {
+        threadId: sessionRef, input: [{ type: 'text', text }], ...(effort ? { effort: CODEX_EFFORT[effort] } : {}),
+      });
       this.setTurnId(p, sessionRef, r.turn.id);
     } catch (e) {
       if (owned) { this.activeTurns.delete(sessionRef); this.pendingStops.delete(sessionRef); }
@@ -346,7 +365,7 @@ export class CodexAdapter implements ProviderAdapter {
   async resume(sessionRef: string, cwd: string): Promise<void> {
     const p = await this.ensureProcess();
     this.threadCwd.set(sessionRef, cwd);
-    await p.request('thread/resume', { threadId: sessionRef, cwd, ...this.modelParam(p), ...AUTO_MODE });
+    await p.request('thread/resume', { threadId: sessionRef, cwd, ...this.modelParam(p), ...AUTO_MODE, ...this.instructionsParam(sessionRef) });
     this.loaded.get(p)?.add(sessionRef);
   }
 

@@ -77,13 +77,13 @@ describe('applyEvent', () => {
     const on = { claude: true, codex: true, antigravity: true };
     let s = applySnapshot(initialState(), {
       chats: [], usage: [rd('codex', 40)], suggested: 'codex', connections: [], history: [], projects: [],
-      settings: { onboarded: true, showChats: on, suggest: { ...on, claude: false }, hiddenProjects: [], unhiddenProjects: [], myProjects: null },
+      settings: { onboarded: true, showChats: on, suggest: { ...on, claude: false }, hiddenProjects: [], unhiddenProjects: [], suggestNextSteps: true, myProjects: null },
     });
     s = applyEvent(s, { type: 'usage.updated', reading: rd('claude', 90) });
     expect(s.suggested).toBe('codex');
-    s = applySettings(s, { onboarded: true, showChats: on, suggest: on, hiddenProjects: [], unhiddenProjects: [], myProjects: null });
+    s = applySettings(s, { onboarded: true, showChats: on, suggest: on, hiddenProjects: [], unhiddenProjects: [], suggestNextSteps: true, myProjects: null });
     expect(s.suggested).toBe('claude');
-    s = applySettings(s, { onboarded: true, showChats: on, suggest: { ...on, claude: false, codex: false }, hiddenProjects: [], unhiddenProjects: [], myProjects: null });
+    s = applySettings(s, { onboarded: true, showChats: on, suggest: { ...on, claude: false, codex: false }, hiddenProjects: [], unhiddenProjects: [], suggestNextSteps: true, myProjects: null });
     expect(s.suggested).toBeNull();
   });
 
@@ -270,9 +270,9 @@ describe('settings.updated', () => {
     });
     let s = applySnapshot(initialState(), {
       chats: [], usage: [rd('claude', 80), rd('codex', 40)], suggested: 'claude', connections: [], history: [], projects: [],
-      settings: { onboarded: true, showChats: on, suggest: on, hiddenProjects: [], unhiddenProjects: [], myProjects: null },
+      settings: { onboarded: true, showChats: on, suggest: on, hiddenProjects: [], unhiddenProjects: [], suggestNextSteps: true, myProjects: null },
     });
-    const next = { onboarded: true, showChats: { ...on, antigravity: false }, suggest: { ...on, claude: false }, hiddenProjects: [], unhiddenProjects: [], myProjects: null };
+    const next = { onboarded: true, showChats: { ...on, antigravity: false }, suggest: { ...on, claude: false }, hiddenProjects: [], unhiddenProjects: [], suggestNextSteps: true, myProjects: null };
     s = applyEvent(s, { type: 'settings.updated', settings: next });
     expect(s.settings).toEqual(next);
     expect(s.suggested).toBe('codex');

@@ -1,4 +1,4 @@
-import type { AdapterEvent, ModelOption, ProviderId, UsageReading } from '@agent-kanban/shared';
+import type { AdapterEvent, Effort, ModelOption, ProviderId, UsageReading } from '@agent-kanban/shared';
 
 export interface PingResult {
   ok: boolean;
@@ -8,10 +8,15 @@ export interface PingResult {
   gaveUp?: boolean;
 }
 
+/** Per-turn settings: the effort to map, and extra instructions for the agent (e.g. ask for `Next:` lines). */
+export interface TurnOptions { effort?: Effort; instructions?: string }
+
 export interface ProviderAdapter {
   id: ProviderId;
-  startChat(input: { cwd: string; prompt: string; model?: string }): Promise<{ sessionRef: string }>;
-  sendMessage(sessionRef: string, text: string): Promise<void>;
+  /** `effort: false` means the adapter ignores TurnOptions.effort. */
+  capabilities: { effort: boolean };
+  startChat(input: { cwd: string; prompt: string; model?: string } & TurnOptions): Promise<{ sessionRef: string }>;
+  sendMessage(sessionRef: string, text: string, opts?: TurnOptions): Promise<void>;
   respondToRequest(sessionRef: string, requestId: string, decision: 'allow' | 'deny' | { reply: string }): Promise<void>;
   stop(sessionRef: string): Promise<void>;
   resume(sessionRef: string, cwd: string): Promise<void>;

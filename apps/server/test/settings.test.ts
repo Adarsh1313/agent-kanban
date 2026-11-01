@@ -19,6 +19,7 @@ test('defaults: not onboarded, every provider shown and suggested', () => {
     suggest: { claude: true, codex: true, antigravity: true },
     hiddenProjects: [],
     unhiddenProjects: [],
+    suggestNextSteps: true,
     myProjects: null,
   });
   assert.deepEqual(s.get(), defaultSettings());
@@ -37,6 +38,7 @@ test('patch round-trips through the store (partial per-provider updates) and sur
     suggest: { claude: true, codex: false, antigravity: true },
     hiddenProjects: ['/work/old'],
     unhiddenProjects: [],
+    suggestNextSteps: true,
     myProjects: null,
   };
   assert.deepEqual(out, want);
@@ -132,4 +134,12 @@ test('PATCH /api/settings broadcasts settings.updated so other open pages follow
     ws.terminate();
     api.close(); api.server.closeAllConnections(); api.server.close();
   }
+});
+
+test('suggestNextSteps defaults on, can be turned off, and rejects non-booleans', () => {
+  const backend = new Map<string, string>();
+  const s = new SettingsStore({ getSetting: (k) => backend.get(k), setSetting: (k, v) => { backend.set(k, v); } });
+  assert.equal(s.get().suggestNextSteps, true);
+  assert.equal(s.patch({ suggestNextSteps: false }).suggestNextSteps, false);
+  assert.throws(() => s.patch({ suggestNextSteps: 'no' }), SettingsError);
 });

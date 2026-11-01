@@ -25,7 +25,7 @@ function projectsOf(chats: Chat[], history: HistoryChat[]): Project[] {
 function seeded(chats = [chat()], history: HistoryChat[] = [], extra: Partial<AppState> = {}): Store {
   const projects = projectsOf(chats, history);
   const on = { claude: true, codex: true, antigravity: true };
-  const settings = { onboarded: true, showChats: on, suggest: on, hiddenProjects: [], unhiddenProjects: [], myProjects: projects.map((p) => p.id) };
+  const settings = { onboarded: true, showChats: on, suggest: on, hiddenProjects: [], unhiddenProjects: [], suggestNextSteps: true, myProjects: projects.map((p) => p.id) };
   const s = applySnapshot(initialState(), { chats, usage: [], suggested: null, connections: [], history, projects, settings });
   return createStore({ ...s, now: NOW, ...extra });
 }

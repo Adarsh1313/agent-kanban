@@ -7,7 +7,7 @@ type Row = Record<string, any>;
 const COLS: Record<keyof Chat, string> = {
   id: 'id', provider: 'provider', sessionRef: 'session_ref', cwd: 'cwd', title: 'title', model: 'model',
   column: 'column_name', needsReason: 'needs_reason', createdAt: 'created_at', updatedAt: 'updated_at',
-  doneAt: 'done_at', archived: 'archived', pinned: 'pinned', snoozedUntil: 'snoozed_until', routineId: 'routine_id',
+  doneAt: 'done_at', archived: 'archived', pinned: 'pinned', snoozedUntil: 'snoozed_until', routineId: 'routine_id', effort: 'effort',
   resumeAt: 'resume_at', autoResume: 'auto_resume', queue: 'queue',
   origin: 'origin', outsideLive: 'outside_live',
 };
@@ -17,6 +17,7 @@ function toChat(r: Row): Chat {
     id: r.id, provider: r.provider, sessionRef: r.session_ref, cwd: r.cwd, title: r.title, model: r.model,
     column: r.column_name, needsReason: r.needs_reason, createdAt: r.created_at, updatedAt: r.updated_at,
     doneAt: r.done_at, archived: r.archived === 1, pinned: r.pinned === 1, snoozedUntil: r.snoozed_until,
+    effort: r.effort ?? 'normal',
     routineId: r.routine_id ?? null,
     // Out-of-usage fields appear only when they differ from the default (#39).
     ...(r.resume_at ? { resumeAt: r.resume_at } : {}),
@@ -45,7 +46,10 @@ const ROUTINE_COLS: Partial<Record<keyof StoredRoutine, string>> = {
 };
 
 function toMessage(r: Row): Message {
-  return { id: r.id, chatId: r.chat_id, role: r.role, text: r.text, createdAt: r.created_at };
+  const m: Message = { id: r.id, chatId: r.chat_id, role: r.role, text: r.text, createdAt: r.created_at };
+  if (r.effort) m.effort = r.effort;
+  if (r.suggestions) m.suggestions = JSON.parse(r.suggestions) as string[];
+  return m;
 }
 
 function requestKey(chatId: string, requestId: string): string {
@@ -103,8 +107,13 @@ export class Store {
     // Added in Plan 3: what a permission request is for. Older databases get the column (NULL = a command).
     const requestCols = (this.db.prepare('PRAGMA table_info(requests)').all() as { name: string }[]).map((c) => c.name);
     if (!requestCols.includes('action')) this.db.exec('ALTER TABLE requests ADD COLUMN action TEXT');
-    // Added for routines (#45): the routine that started a chat.
+    // Added for the composer (#42): effort per chat (NULL = normal), and per reply with its suggested next steps.
     const chatCols = (this.db.prepare('PRAGMA table_info(chats)').all() as { name: string }[]).map((c) => c.name);
+    if (!chatCols.includes('effort')) this.db.exec('ALTER TABLE chats ADD COLUMN effort TEXT');
+    const messageCols = (this.db.prepare('PRAGMA table_info(messages)').all() as { name: string }[]).map((c) => c.name);
+    if (!messageCols.includes('effort')) this.db.exec('ALTER TABLE messages ADD COLUMN effort TEXT');
+    if (!messageCols.includes('suggestions')) this.db.exec('ALTER TABLE messages ADD COLUMN suggestions TEXT');
+    // Added for routines (#45): the routine that started a chat.
     if (!chatCols.includes('routine_id')) this.db.exec('ALTER TABLE chats ADD COLUMN routine_id TEXT');
     // Added for #39: out of usage, auto-resume and the follow-up queue.
     if (!chatCols.includes('resume_at')) this.db.exec('ALTER TABLE chats ADD COLUMN resume_at TEXT');
@@ -124,14 +133,14 @@ export class Store {
     return new Date(this.lastStamp).toISOString();
   }
 
-  createChat(input: { provider: ProviderId; cwd: string; title: string; model?: string | null; sessionRef?: string | null; routineId?: string | null }): Chat {
+  createChat(input: { provider: ProviderId; cwd: string; title: string; model?: string | null; sessionRef?: string | null; effort?: Effort; routineId?: string | null }): Chat {
     const id = randomUUID();
     const now = this.now();
     const title = chatTitle(input.title.split(/\r?\n/).map((l) => l.trim()).find((l) => l !== '') ?? 'Untitled chat');
     this.db.prepare(
-      `INSERT INTO chats (id, provider, session_ref, cwd, title, model, column_name, needs_reason, created_at, updated_at, archived, pinned, routine_id)
-       VALUES (?, ?, ?, ?, ?, ?, 'running', NULL, ?, ?, 0, 0, ?)`,
-    ).run(id, input.provider, input.sessionRef ?? null, input.cwd, title, input.model ?? null, now, now, input.routineId ?? null);
+      `INSERT INTO chats (id, provider, session_ref, cwd, title, model, column_name, needs_reason, created_at, updated_at, archived, pinned, effort, routine_id)
+       VALUES (?, ?, ?, ?, ?, ?, 'running', NULL, ?, ?, 0, 0, ?, ?)`,
+    ).run(id, input.provider, input.sessionRef ?? null, input.cwd, title, input.model ?? null, now, now, input.effort ?? 'normal', input.routineId ?? null);
     return this.getChat(id)!;
   }
 
@@ -181,6 +190,15 @@ export class Store {
 
   appendToMessage(messageId: string, delta: string): void {
     this.db.prepare('UPDATE messages SET text = text || ? WHERE id = ?').run(delta, messageId);
+  }
+
+  /** The effort a reply ran at (only stored when it wasn't Normal). */
+  setMessageEffort(id: string, effort: Effort): void {
+    this.db.prepare('UPDATE messages SET effort = ? WHERE id = ?').run(effort, id);
+  }
+
+  setMessageSuggestions(id: string, suggestions: string[]): void {
+    this.db.prepare('UPDATE messages SET suggestions = ? WHERE id = ?').run(JSON.stringify(suggestions), id);
   }
 
   setMessageText(id: string, text: string): void {

@@ -14,7 +14,7 @@ const project = (path: string, hoursAgo: number, over: Partial<Project> = {}): P
   id: path, name: path.split('/').pop()!, path, providers: [], columns: { running: 0, needs_you: 0, review: 0, done: 0 },
   historyOnly: 0, lastActivityAt: at(hoursAgo), hidden: null, folderMissing: false, ...over,
 });
-const settings: Settings = { onboarded: true, showChats: ON, suggest: ON, hiddenProjects: ['/work/secret'], unhiddenProjects: [], myProjects: ['/work/localflow'] };
+const settings: Settings = { onboarded: true, showChats: ON, suggest: ON, hiddenProjects: ['/work/secret'], unhiddenProjects: [], suggestNextSteps: true, myProjects: ['/work/localflow'] };
 const hist = (cwd: string, sessionRef: string, title: string, hoursAgo: number): HistoryChat => ({ provider: 'codex', sessionRef, title, cwd, updatedAt: at(hoursAgo) });
 
 function seeded(): Store {

@@ -590,3 +590,59 @@ describe('buildTurns', () => {
     expect(turns[1]!.replies.map((r) => r.text)).toEqual(['partial']);
   });
 });
+
+describe('Composer: effort', () => {
+  it('offers Quick, Normal and Thorough and saves the pick for the chat', async () => {
+    mocked.patchChat.mockResolvedValue(chat({ title: 'Talk', column: 'review', effort: 'thorough' }));
+    mount(seeded([chat({ title: 'Talk', column: 'review' })]));
+    fireEvent.click(card('Talk'));
+    fireEvent.click(within(panel()).getByRole('button', { name: 'Effort: Normal' }));
+    const items = screen.getAllByRole('menuitemcheckbox');
+    expect(items.map((i) => i.textContent?.split(/(?=[A-Z][a-z]+ )/)[0])).toEqual(['Quick', 'Normal', 'Thorough']);
+    expect(items[1]!.getAttribute('aria-checked')).toBe('true');
+    fireEvent.click(items[2]!);
+    await waitFor(() => expect(mocked.patchChat).toHaveBeenCalledWith('c1', { effort: 'thorough' }));
+    await waitFor(() => expect(within(panel()).getByRole('button', { name: 'Effort: Thorough' })).toBeTruthy());
+  });
+
+  it('is hidden for a provider without an effort setting', async () => {
+    mount(seeded([chat({ title: 'Anti', provider: 'antigravity', column: 'review' })]));
+    fireEvent.click(card('Anti'));
+    await flush();
+    expect(within(panel()).queryByRole('button', { name: /^Effort/ })).toBeNull();
+  });
+
+  it('notes a reply that ran at an effort other than Normal', async () => {
+    thread([message({ id: 'u', role: 'user', text: 'go' }), message({ id: 'a', text: 'done', effort: 'quick' })]);
+    mount(seeded([chat({ title: 'Talk', column: 'review' })]));
+    fireEvent.click(card('Talk'));
+    await waitFor(() => expect(within(panel()).getByText('Quick effort')).toBeTruthy());
+  });
+});
+
+describe('Suggested next steps', () => {
+  const withSteps = () => thread([message({ id: 'u', role: 'user', text: 'go' }), message({ id: 'a', text: 'done', suggestions: ['Run the tests', 'Open a PR'] })]);
+
+  it('shows chips under the last reply; a click fills the composer without sending', async () => {
+    withSteps();
+    mount(seeded([chat({ title: 'Talk', column: 'review' })]));
+    fireEvent.click(card('Talk'));
+    const group = await within(panel()).findByRole('group', { name: 'Suggested next steps' });
+    fireEvent.click(within(group).getByRole('button', { name: 'Open a PR' }));
+    const box = within(panel()).getByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement;
+    await waitFor(() => expect(box.value).toBe('Open a PR'));
+    expect(document.activeElement).toBe(box);
+    expect(mocked.send).not.toHaveBeenCalled();
+  });
+
+  it('are gone once the user sends', async () => {
+    withSteps();
+    mocked.send.mockResolvedValue(undefined);
+    const store = seeded([chat({ title: 'Talk', column: 'review' })]);
+    mount(store);
+    fireEvent.click(card('Talk'));
+    await within(panel()).findByRole('group', { name: 'Suggested next steps' });
+    act(() => { store.setState((s) => applyEvent(s, { type: 'message.completed', chatId: 'c1', message: message({ id: 'u2', role: 'user', text: 'next', createdAt: '2026-10-23T11:00:00.000Z' }) })); });
+    expect(within(panel()).queryByRole('group', { name: 'Suggested next steps' })).toBeNull();
+  });
+});

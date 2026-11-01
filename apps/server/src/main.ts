@@ -91,7 +91,10 @@ for (const id of PROVIDERS) {
 const usage = new UsageService({
   readers, store, onUpdate: (reading) => broadcast({ type: 'usage.updated', reading }),
 });
-const chats = new ChatService({ store, adapters, usage, broadcast: (e) => broadcast(e), claudeHome: join(home, '.claude') });
+const chats = new ChatService({
+  store, adapters, usage, broadcast: (e) => broadcast(e), claudeHome: join(home, '.claude'),
+  suggestNextSteps: () => settings.get().suggestNextSteps,
+});
 /** Set once ConnectService exists; the monitor's first check runs after that. */
 let connectRef: ConnectService | null = null;
 const connections = new ConnectionMonitor({

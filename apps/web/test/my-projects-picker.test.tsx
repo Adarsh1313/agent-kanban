@@ -23,7 +23,7 @@ const project = (path: string, days: number, over: Partial<Project> = {}): Proje
   id: path, name: path.split('/').pop()!, path, providers: [{ provider: 'claude', chats: 2, lastUsedAt: daysAgo(days), lastModel: null }],
   columns: { running: 0, needs_you: 0, review: 0, done: 0 }, historyOnly: 2, lastActivityAt: daysAgo(days), hidden: null, folderMissing: false, ...over,
 });
-const settings = (myProjects: string[] | null): Settings => ({ onboarded: true, showChats: ON, suggest: ON, hiddenProjects: [], unhiddenProjects: [], myProjects });
+const settings = (myProjects: string[] | null): Settings => ({ onboarded: true, showChats: ON, suggest: ON, hiddenProjects: [], unhiddenProjects: [], suggestNextSteps: true, myProjects });
 
 // Seven recent projects (only five get pre-ticked), one at 20 days (not pre-ticked), two older than 30 days, one hidden.
 const PROJECTS = [
