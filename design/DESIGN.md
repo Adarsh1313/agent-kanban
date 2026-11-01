@@ -57,8 +57,14 @@ one running-blue card halfway between two ink columns.
   A moved or deleted folder says "Folder missing": chats readable, New chat disabled.
 - **Connections:** one card per agent, every state a dot and a word: Not installed → Installing →
   Signed out → Waiting for sign-in → Connected. Sign out asks first and says what stops working.
-- **Onboarding:** full screen, Welcome + 4 counted steps (Connect, Bring in your chats, Notifications,
-  Ready), 4-segment progress bar.
+- **Onboarding:** full screen, Welcome + 5 counted steps (Connect, Bring in your chats, Home provider,
+  Notifications, Ready), 5-segment progress bar.
+- **Home provider step:** provider tiles reuse the Connections card, as a radio group (arrow keys move).
+  The selected tile takes a text-colour border. The same tiles sit in Connections → Skill sync.
+- **Handoff note:** picking another provider in the composer shows one muted caption line above it:
+  "Codex will get the last messages, your spec's progress and project notes." Nothing happens until send.
+- **Provider mark on replies:** every agent reply shows the logo and name of the provider that wrote it,
+  so a handed-over chat reads as one thread with clear authors.
 - **Empty board:** dimmed columns with dashed placeholders, a card explaining what happens, Start a
   chat / Browse projects, and the 3 most recent chats to pick up.
 

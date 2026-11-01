@@ -2,7 +2,7 @@ import type { Chat, Column, NeedsReason, Project, ProjectInfo, ProviderId } from
 import { folderKey, projectFolder } from '@agent-kanban/shared';
 import { api } from '../../api/client.ts';
 import { applySettings, type AppState } from '../../state/reducer.ts';
-import { hiddenFolders, isArchived, isSnoozed, memoState } from '../../state/selectors.ts';
+import { chatFolder, hiddenFolders, isArchived, isSnoozed, memoState } from '../../state/selectors.ts';
 import { refreshProjects, type Store } from '../../state/store.ts';
 import { errorText } from '../board/Card.tsx';
 import { toast } from '../primitives/index.ts';
@@ -41,7 +41,7 @@ function buildIndex(s: AppState): Record<string, ProjectChat[]> {
     if (c.sessionRef) known.add(`${c.provider}\u0000${c.sessionRef}`);
     if (isArchived(s, c)) continue;
     add({
-      key: c.id, chatId: c.id, chat: c, provider: c.provider, sessionRef: c.sessionRef, title: c.title, cwd: c.cwd, model: c.model,
+      key: c.id, chatId: c.id, chat: c, provider: c.provider, sessionRef: c.sessionRef, title: c.title, cwd: chatFolder(c), model: c.model,
       column: c.column, needsReason: c.needsReason, snoozed: isSnoozed(c, s.now), updatedAt: c.updatedAt,
     });
   }

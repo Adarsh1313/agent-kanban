@@ -238,7 +238,7 @@ ${typed}` : typed;
   }
 
   /** Rename, pin or snooze a chat. */
-  patch(chatId: string, patch: { title?: string; pinned?: boolean; snoozedUntil?: string | null }): Chat {
+  patch(chatId: string, patch: { title?: string; pinned?: boolean; snoozedUntil?: string | null; projectLabel?: string | null }): Chat {
     const current = this.mustGet(chatId);
     if (Object.values(patch).every((v) => v === undefined)) return current;
     // Not activity: the card keeps its place and its "5m ago".

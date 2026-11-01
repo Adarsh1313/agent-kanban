@@ -100,7 +100,7 @@ export function ChatPanel() {
   });
   const now = useStore((s) => s.now);
   const project = useStore((s) => {
-    const cwd = s.ui.openChatId ? s.chats[s.ui.openChatId]?.cwd : s.ui.openHistory?.cwd;
+    const cwd = s.ui.openChatId ? (s.chats[s.ui.openChatId]?.projectLabel || s.chats[s.ui.openChatId]?.cwd) : s.ui.openHistory?.cwd;
     return cwd ? projectLabel(s, cwd) : '';
   });
 
@@ -238,6 +238,7 @@ export function ChatPanel() {
         </div>
         <div className="panel-source">
           <span className="source"><span className="live-dot" />Same chat as in {app}</span>
+          {s.kind === 'chat' && s.chat.projectLabel && <span className="moved-note">Shown under this project. It still runs in {s.chat.cwd}</span>}
         </div>
         {s.kind === 'chat' ? (
           <>

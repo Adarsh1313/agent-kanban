@@ -96,7 +96,7 @@ const get = <T>(path: string) => request<T>('GET', path);
 const post = <T>(path: string, body?: unknown) => request<T>('POST', path, body);
 
 export type AnswerDecision = 'allow' | 'deny' | { reply: string };
-export interface ChatPatch { title?: string; pinned?: boolean; snoozedUntil?: string | null }
+export interface ChatPatch { title?: string; pinned?: boolean; snoozedUntil?: string | null; projectLabel?: string | null }
 export interface UsageResponse { readings: UsageReading[]; suggested: ProviderId | null }
 /** What the Connections page can ask the server to do for a provider (`open` re-opens the sign-in page the server holds). */
 export type ConnectAction = 'install' | 'signin' | 'signout' | 'update' | 'cancel' | 'open';

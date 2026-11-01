@@ -187,7 +187,7 @@ export function createApi(opts: {
     if ((m = match('GET', '/api/chats/:id/tool-calls'))) return { status: 200, body: chats.listToolCalls(m[0]!) };
     if ((m = match('PATCH', '/api/chats/:id'))) {
       const b = await readJson(req);
-      const patch: { title?: string; pinned?: boolean; snoozedUntil?: string | null } = {};
+      const patch: { title?: string; pinned?: boolean; snoozedUntil?: string | null; projectLabel?: string | null } = {};
       for (const [k, v] of Object.entries(b)) {
         if (k === 'title') {
           const t = typeof v === 'string' ? v.trim() : '';
@@ -202,6 +202,10 @@ export function createApi(opts: {
             if (typeof v !== 'string' || Number.isNaN(Date.parse(v))) throw new HttpError(400, 'Snooze time must be a date.');
             patch.snoozedUntil = new Date(v).toISOString();
           }
+        } else if (k === 'projectLabel') {
+          // A label only: the chat shows under that project and still runs in its own folder (decision 9).
+          if (v !== null && (typeof v !== 'string' || v.trim() === '')) throw new HttpError(400, 'Project must be a folder or null.');
+          patch.projectLabel = v === null ? null : v;
         } else throw new HttpError(400, `You can't change "${k}".`);
       }
       return { status: 200, body: chats.patch(m[0]!, patch) };

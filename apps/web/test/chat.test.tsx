@@ -340,6 +340,21 @@ describe('Chat panel: requests and composer', () => {
     expect(mocked.send).toHaveBeenCalledWith('c1', expect.any(String), 'codex');
   });
 
+  it('Move to project lists other projects and patches the label; the panel says where it still runs', async () => {
+    const two = { id: '/w/two', name: 'two', path: '/w/two', providers: [], columns: { running: 0, needs_you: 0, review: 0, done: 0 }, historyOnly: 0, lastActivityAt: '2026-10-23T11:00:00.000Z', hidden: null, folderMissing: false };
+    const c = chat({ title: 'Mv', column: 'review', cwd: '/w/one' });
+    mocked.patchChat.mockResolvedValue({ ...c, projectLabel: '/w/two' });
+    const store = seeded([c]);
+    store.setState((s) => ({ ...s, projects: [two as any] }));
+    mount(store);
+    fireEvent.click(card('Mv'));
+    fireEvent.click(within(panel()).getByRole('button', { name: 'More actions' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: /Move to project/ }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'two' }));
+    await waitFor(() => expect(mocked.patchChat).toHaveBeenCalledWith('c1', { projectLabel: '/w/two' }));
+    await waitFor(() => expect(within(panel()).getByText('Shown under this project. It still runs in /w/one')).toBeTruthy());
+  });
+
   it('header shows Stop while running and Mark done in Review', async () => {
     mocked.stop.mockResolvedValue(chat({ column: 'needs_you', needsReason: 'stopped', updatedAt: '2026-10-23T12:01:00.000Z' }));
     const store = seeded([chat({ title: 'Head', column: 'running' })]);

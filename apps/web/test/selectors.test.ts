@@ -171,3 +171,11 @@ describe('one folder, however it is spelled', () => {
     expect(filterOptions(s, 'project')).toHaveLength(1);
   });
 });
+
+describe('Move to project (#40)', () => {
+  it('a labelled chat is grouped under its label, not where it runs', async () => {
+    const { chatFolder } = await import('../src/state/selectors.ts');
+    expect(chatFolder({ cwd: '/w/one', projectLabel: '/w/two' })).toBe('/w/two');
+    expect(chatFolder({ cwd: '/w/one', projectLabel: null })).toBe('/w/one');
+  });
+});
