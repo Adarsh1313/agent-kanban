@@ -256,3 +256,4 @@ body:has(> .onb[data-state="open"]) > .toasts { z-index: 91; }
 .effort-item { display: flex; flex-direction: column; align-items: flex-start; }
 .effort-item small { color: var(--color-text-faint); font-size: var(--text-caption); }
 .effort-note { margin-top: var(--space-1); font-size: var(--text-caption); color: var(--color-text-faint); }
+.suggestions { display: flex; flex-wrap: wrap; gap: var(--space-1); margin-top: var(--space-2); }
