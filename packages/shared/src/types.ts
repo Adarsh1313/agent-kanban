@@ -127,7 +127,15 @@ export interface ToolCall { id: string; chatId: string; name: string; summary: s
 export interface UsageWindow { kind: 'five_hour' | 'weekly' | 'model'; label: string; leftPct: number; resetsAt: string | null }
 export interface UsageReading { provider: ProviderId; status: 'ok' | 'unavailable' | 'signed_out' | 'error'; windows: UsageWindow[]; readAt: string; message?: string }
 
-export interface HistoryChat { provider: ProviderId; sessionRef: string; title: string; cwd: string; updatedAt: string }
+export interface HistoryChat {
+  provider: ProviderId;
+  sessionRef: string;
+  title: string;
+  cwd: string;
+  updatedAt: string;
+  /** App-side label; provider history files are left untouched when a history-only chat is archived. */
+  archived?: boolean;
+}
 
 export interface ConnectionHealth {
   provider: ProviderId;

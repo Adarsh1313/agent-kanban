@@ -99,7 +99,7 @@ The layout follows ChatGPT's and Claude.ai's history (date groups, one line per 
 
 ## Progress
 
-- [ ] Slice 1: archive/unarchive (incl. history rows) + Archived filter + menu wiring with Undo
+- [x] Slice 1: archive/unarchive (incl. history rows) + Archived filter + menu wiring with Undo
 - [ ] Slice 2: delete to trash for Claude and Codex, restore, purge, empty trash (API + tests)
 - [ ] Slice 3: web: Delete confirm, disabled reasons, Trash filter with Restore
 - [ ] Slice 4: All chats layout: day groups, calmer rows, status words

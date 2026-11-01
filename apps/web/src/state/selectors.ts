@@ -108,14 +108,14 @@ export function pinned(s: AppState, now: number = Date.now()): Chat[] {
  * Board chats (not archived) and history-only chats outside hidden projects that pass the filters. The sidebar
  * leaves out pinned and snoozed ones (`everything` false); All chats lists them too.
  */
-function listedChats(s: AppState, now: number, f: Filters = s.ui.filters, everything = false): SidebarChat[] {
+function listedChats(s: AppState, now: number, f: Filters = s.ui.filters, everything = false, archived = false): SidebarChat[] {
   const known = new Set<string>();
   for (const c of Object.values(s.chats)) if (c.sessionRef) known.add(`${c.provider}\u0000${c.sessionRef}`);
   const fromBoard = Object.values(s.chats)
-    .filter((c) => !isArchived(s, c) && (everything || (!c.pinned && !isSnoozed(c, now))) && !inHiddenProject(s, chatFolder(c)) && passes(c, f, now))
+    .filter((c) => isArchived(s, c) === archived && (everything || (!c.pinned && !isSnoozed(c, now))) && !inHiddenProject(s, chatFolder(c)) && passes(c, f, now))
     .map(toSidebar);
   const fromHistory: SidebarChat[] = s.history
-    .filter((h) => !known.has(`${h.provider}\u0000${h.sessionRef}`) && !inHiddenProject(s, h.cwd) && passes({ ...h, column: null, model: null, needsReason: null }, f, now))
+    .filter((h) => Boolean(h.archived) === archived && !known.has(`${h.provider}\u0000${h.sessionRef}`) && !inHiddenProject(s, h.cwd) && passes({ ...h, column: null, model: null, needsReason: null }, f, now))
     .map((h) => ({ key: `h:${h.provider}:${h.sessionRef}`, chatId: null, provider: h.provider, sessionRef: h.sessionRef, title: h.title, cwd: h.cwd, updatedAt: h.updatedAt, column: null, pinned: false }));
   return [...fromBoard, ...fromHistory];
 }
@@ -181,7 +181,8 @@ export const searchableChats = memoState((s) => [s.chats, s.history, s.projects,
 
 /** All chats: every chat on the board (pinned and snoozed too) or only in a provider's history, newest first, with All chats' own filters. */
 export function allChats(s: AppState, now: number = Date.now()): ListedChat[] {
-  return listedChats(s, now, s.ui.chatsFilters, true).sort(byRecent).map((c) => withProject(s, c));
+  if (s.ui.chatsMode === 'trash') return [];
+  return listedChats(s, now, s.ui.chatsFilters, true, s.ui.chatsMode === 'archived').sort(byRecent).map((c) => withProject(s, c));
 }
 
 const withProject = (s: AppState, c: SidebarChat): ListedChat =>

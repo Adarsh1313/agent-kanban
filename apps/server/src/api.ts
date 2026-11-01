@@ -160,9 +160,12 @@ export function createApi(opts: {
   // The "Suggest it for new chats" switches limit which providers "Most room" may pick.
   const usageBody = (readings: ReturnType<UsageService['latest']>) => ({ readings, suggested: suggest(readings, settings ? settings.suggestable() : PROVIDERS) });
   // History of providers whose "Show its chats" switch is off is left out of Recent chats and Projects.
-  const visibleHistory = async (): Promise<HistoryChat[]> => {
+  const visibleHistory = async (includeArchived = false): Promise<HistoryChat[]> => {
     const all = await history();
-    return settings ? settings.filterHistory(all) : all;
+    const visible = settings ? settings.filterHistory(all) : all;
+    return visible
+      .map((h) => ({ ...h, archived: typeof (chats as any).historyArchived === 'function' ? chats.historyArchived(h.provider, h.sessionRef) : false }))
+      .filter((h) => includeArchived || !h.archived);
   };
 
   // The temp folder as Node reports it and as the file system resolves it (8.3 short names, /var vs /private/var).
@@ -201,7 +204,7 @@ export function createApi(opts: {
       return r ? r.slice(1).map(decodeURIComponent) : null;
     };
     let m: string[] | null;
-    if (match('GET', '/api/chats')) return { status: 200, body: chats.listChats() };
+    if (match('GET', '/api/chats')) return { status: 200, body: chats.listChats(url.searchParams.get('archived') === 'all') };
     if (opts.codexResets && match('GET', '/api/usage/codex/resets')) return { status: 200, body: { available: await opts.codexResets.read() } };
     if (opts.codexResets && match('POST', '/api/usage/codex/resets/use')) return { status: 200, body: { outcome: await opts.codexResets.use() } };
     if (url.pathname.startsWith('/api/accounts') && opts.accounts) {
@@ -337,13 +340,23 @@ export function createApi(opts: {
     if ((m = match('POST', '/api/chats/:id/done'))) return { status: 200, body: chats.markDone(m[0]!) };
     if ((m = match('POST', '/api/chats/:id/undone'))) return { status: 200, body: chats.dragOutOfDone(m[0]!) };
     if ((m = match('POST', '/api/chats/:id/archive'))) return { status: 200, body: chats.archive(m[0]!) };
+    if ((m = match('POST', '/api/chats/:id/unarchive'))) return { status: 200, body: chats.unarchive(m[0]!) };
+    if ((m = match('POST', '/api/history/:provider/:ref/archive')) || (m = match('POST', '/api/history/:provider/:ref/unarchive'))) {
+      const id = m[0] as ProviderId;
+      if (!PROVIDERS.includes(id)) throw new HttpError(400, 'Unknown provider. Use claude, codex or antigravity.');
+      const item = (await history()).find((h) => h.provider === id && h.sessionRef === m![1]);
+      if (!item) throw new HttpError(404, 'Chat not found.');
+      const archived = url.pathname.endsWith('/archive');
+      chats.setHistoryArchived(id, m[1]!, archived);
+      return { status: 200, body: { ...item, archived } };
+    }
     if ((m = match('GET', '/api/history/:provider/:ref/messages'))) {
       const id = m[0] as ProviderId;
       if (!PROVIDERS.includes(id)) throw new HttpError(400, 'Unknown provider. Use claude, codex or antigravity.');
       if (!opts.transcript) throw new HttpError(404, 'Not found.');
       return { status: 200, body: await opts.transcript(id, m[1]!) };
     }
-    if (match('GET', '/api/history')) return { status: 200, body: await visibleHistory() };
+    if (match('GET', '/api/history')) return { status: 200, body: await visibleHistory(url.searchParams.get('archived') === 'all') };
     if (match('POST', '/api/history/continue')) {
       const b = await readJson(req);
       const p = provider(b); const ref = str(b, 'sessionRef'); const text = str(b, 'text');

@@ -29,7 +29,7 @@ function seeded(): Store {
 }
 const mount = (store: Store) => render(<StoreProvider store={store}><Shell /></StoreProvider>);
 const page = () => screen.getByRole('list', { name: 'All chats' });
-const titles = () => within(page()).queryAllByRole('button').map((r) => r.querySelector('.t')!.textContent);
+const titles = () => [...page().querySelectorAll('.crow > .t')].map((r) => r.textContent);
 
 beforeEach(() => { location.hash = '#/chats'; });
 afterEach(() => { cleanup(); location.hash = ''; });
@@ -39,9 +39,22 @@ describe('All chats', () => {
     mount(seeded());
     expect(screen.getByRole('heading', { level: 1 }).textContent).toContain('All chats');
     expect(titles()).toEqual(['Fix login redirect', 'Pricing copy', 'Old login idea']);
-    const row = within(page()).getAllByRole('button')[1]!;
+    const row = page().querySelectorAll('.crow')[1]! as HTMLElement;
     expect(within(row).getByText('site')).toBeTruthy();
     expect(within(row).getByText('1h')).toBeTruthy();
+  });
+
+  it('switches to Archived and offers the same row menu for board and history chats', () => {
+    const store = seeded();
+    store.setState((s) => ({
+      ...s,
+      chats: { ...s.chats, a: { ...s.chats.a!, archived: true } },
+      history: s.history.map((h) => h.sessionRef === 'h1' ? { ...h, archived: true } : h),
+    }));
+    mount(store);
+    fireEvent.click(screen.getByRole('tab', { name: 'Archived' }));
+    expect(titles()).toEqual(['Fix login redirect', 'Old login idea']);
+    expect(within(page()).getAllByRole('button', { name: 'More actions' })).toHaveLength(2);
   });
 
   it('search matches the title or the project and highlights the match; nothing matching shows an empty state', () => {

@@ -133,6 +133,46 @@ export function archiveChat(store: Store, id: string): void {
   pendingArchives.set(id, { store, toastId });
 }
 
+export async function unarchiveChat(store: Store, id: string): Promise<void> {
+  const ok = await runAction(store, () => api.unarchive(id));
+  if (ok) toast('Chat unarchived');
+}
+
+const setHistoryArchive = (s: AppState, provider: ProviderId, sessionRef: string, archived: boolean): AppState => ({
+  ...s,
+  history: s.history.map((h) => h.provider === provider && h.sessionRef === sessionRef ? { ...h, archived } : h),
+});
+
+export async function archiveHistoryChat(store: Store, history: HistoryRef): Promise<void> {
+  store.setState((s) => setHistoryArchive(s, history.provider, history.sessionRef, true));
+  try {
+    await api.archiveHistory(history.provider, history.sessionRef);
+    toast('Chat archived', {
+      label: 'Undo',
+      run: () => {
+        store.setState((s) => setHistoryArchive(s, history.provider, history.sessionRef, false));
+        void api.unarchiveHistory(history.provider, history.sessionRef).catch((err: unknown) => {
+          store.setState((s) => setHistoryArchive(s, history.provider, history.sessionRef, true));
+          toast(errorText(err));
+        });
+      },
+    });
+  } catch (err) {
+    store.setState((s) => setHistoryArchive(s, history.provider, history.sessionRef, false));
+    toast(errorText(err));
+  }
+}
+
+export async function unarchiveHistoryChat(store: Store, history: HistoryRef): Promise<void> {
+  try {
+    await api.unarchiveHistory(history.provider, history.sessionRef);
+    store.setState((s) => setHistoryArchive(s, history.provider, history.sessionRef, false));
+    toast('Chat unarchived');
+  } catch (err) {
+    toast(errorText(err));
+  }
+}
+
 export async function snoozeChat(store: Store, id: string, opt: SnoozeOption): Promise<void> {
   const ok = await runAction(store, () => api.patchChat(id, { snoozedUntil: opt.until.toISOString() }));
   if (ok) toast(`Snoozed until ${opt.when}`, { label: 'Undo', run: () => void runAction(store, () => api.patchChat(id, { snoozedUntil: null })) });
@@ -162,6 +202,7 @@ export function ChatActionsMenu({ anchor, open: wanted, target, onClose, onRenam
   const projects = useStore((s) => visibleProjects(s));
   const open = wanted && target !== null && (chat !== undefined || target.history !== null);
   const history = chat ? null : target?.history ?? null;
+  const historyArchived = useStore((s) => history !== null && Boolean(s.history.find((h) => h.provider === history.provider && h.sessionRef === history.sessionRef)?.archived));
   const historyOpen = useStore((s) => history !== null && s.ui.openHistory?.provider === history.provider && s.ui.openHistory.sessionRef === history.sessionRef);
 
   const pick = (fn: () => void) => () => {
@@ -185,10 +226,12 @@ export function ChatActionsMenu({ anchor, open: wanted, target, onClose, onRenam
           <MenuItem icon="folder" onSelect={pick(() => void openFolder(chat.cwd))}>Open folder</MenuItem>
           <MenuItem icon="copy" onSelect={pick(() => void copyText(chat.cwd))}>Copy project path</MenuItem>
           {cmd && <MenuItem icon="terminal" onSelect={pick(() => void copyText(cmd))}>Copy resume command</MenuItem>}
-          {onBoard && (
+          {(onBoard || chat.archived) && (
             <>
               <MenuSep />
-              <MenuItem icon="archive" danger onSelect={pick(() => archiveChat(store, chat.id))}>Archive chat</MenuItem>
+              {chat.archived
+                ? <MenuItem icon="archive" onSelect={pick(() => void unarchiveChat(store, chat.id))}>Unarchive chat</MenuItem>
+                : <MenuItem icon="archive" danger onSelect={pick(() => archiveChat(store, chat.id))}>Archive chat</MenuItem>}
             </>
           )}
         </>
@@ -202,6 +245,10 @@ export function ChatActionsMenu({ anchor, open: wanted, target, onClose, onRenam
         <MenuItem icon="folder" onSelect={pick(() => void openFolder(history.cwd))}>Open folder</MenuItem>
         <MenuItem icon="copy" onSelect={pick(() => void copyText(history.cwd))}>Copy project path</MenuItem>
         {cmd && <MenuItem icon="terminal" onSelect={pick(() => void copyText(cmd))}>Copy resume command</MenuItem>}
+        <MenuSep />
+        {historyArchived
+          ? <MenuItem icon="archive" onSelect={pick(() => void unarchiveHistoryChat(store, history))}>Unarchive chat</MenuItem>
+          : <MenuItem icon="archive" danger onSelect={pick(() => void archiveHistoryChat(store, history))}>Archive chat</MenuItem>}
       </>
     );
   };

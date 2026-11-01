@@ -34,7 +34,8 @@ async function setup(overrides: Record<string, unknown> = {}, pingMs?: number, e
     listMessages: (id: string) => { if (id !== 'c1') throw new Error('Chat not found.'); return []; },
     start: async () => { const c = chat(); emit({ type: 'chat.updated', chat: c }); return c; },
     send: async () => {}, answer: async () => { throw new Error('That request is no longer open.'); },
-    stop: async () => {}, markDone: () => chat(), dragOutOfDone: () => chat(), archive: () => chat(),
+    stop: async () => {}, markDone: () => chat(), dragOutOfDone: () => chat(), archive: () => chat(), unarchive: () => chat(),
+    historyArchived: () => false, setHistoryArchived: () => {},
     continueHistory: async () => { throw new ActiveElsewhereError(); },
     ...overrides,
   };
@@ -424,4 +425,26 @@ test('GET /api/history/:provider/:ref/messages returns the transcript; unknown p
   } finally { s.close(); }
   const none = await setup();
   try { assert.equal((await none.f('/api/history/claude/abc/messages')).status, 404); } finally { none.close(); }
+});
+
+test('archive and unarchive include board and provider-history chats in the explicit archived lists', async () => {
+  let boardArchived = false;
+  const labels = new Set<string>();
+  const h = { provider: 'claude' as const, sessionRef: 'h1', title: 'Old', cwd: dir, updatedAt: '2026-01-01T00:00:00Z' };
+  const s = await setup({
+    listChats: (all = false) => all || !boardArchived ? [{ ...chat(), archived: boardArchived }] : [],
+    archive: () => { boardArchived = true; return { ...chat(), archived: true }; },
+    unarchive: () => { boardArchived = false; return { ...chat(), archived: false }; },
+    historyArchived: (p: string, ref: string) => labels.has(`${p}:${ref}`),
+    setHistoryArchived: (p: string, ref: string, on: boolean) => on ? labels.add(`${p}:${ref}`) : labels.delete(`${p}:${ref}`),
+  }, undefined, { history: async () => [h] });
+  try {
+    assert.equal((await s.f('/api/chats/c1/archive', { method: 'POST' })).status, 200);
+    assert.equal(((await (await s.f('/api/chats?archived=all')).json()) as Chat[])[0]?.archived, true);
+    assert.equal((await s.f('/api/chats/c1/unarchive', { method: 'POST' })).status, 200);
+    assert.equal((await s.f('/api/history/claude/h1/archive', { method: 'POST' })).status, 200);
+    assert.deepEqual(await (await s.f('/api/history')).json(), []);
+    assert.equal(((await (await s.f('/api/history?archived=all')).json()) as any[])[0]?.archived, true);
+    assert.equal((await s.f('/api/history/claude/h1/unarchive', { method: 'POST' })).status, 200);
+  } finally { s.close(); }
 });

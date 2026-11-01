@@ -13,12 +13,12 @@ import { Toasts } from '../src/ui/primitives/toast.tsx';
 import { Dialog } from '../src/ui/primitives/Dialog.tsx';
 import { chat, message } from './helpers.ts';
 
-const FNS = ['listMessages', 'listRequests', 'listToolCalls', 'send', 'answer', 'stop', 'done', 'archive', 'patchChat', 'continueHistory', 'historyMessages', 'openFolder', 'skills'] as const;
+const FNS = ['listMessages', 'listRequests', 'listToolCalls', 'send', 'answer', 'stop', 'done', 'archive', 'unarchive', 'archiveHistory', 'unarchiveHistory', 'patchChat', 'continueHistory', 'historyMessages', 'openFolder', 'skills'] as const;
 type Fn = (typeof FNS)[number];
 
 vi.mock('../src/api/client.ts', async (orig) => {
   const m = await orig<typeof import('../src/api/client.ts')>();
-  const fns = Object.fromEntries(['listMessages', 'listRequests', 'listToolCalls', 'send', 'answer', 'stop', 'done', 'archive', 'patchChat', 'continueHistory', 'historyMessages', 'openFolder', 'skills'].map((k) => [k, vi.fn()]));
+  const fns = Object.fromEntries(['listMessages', 'listRequests', 'listToolCalls', 'send', 'answer', 'stop', 'done', 'archive', 'unarchive', 'archiveHistory', 'unarchiveHistory', 'patchChat', 'continueHistory', 'historyMessages', 'openFolder', 'skills'].map((k) => [k, vi.fn()]));
   return { ...m, api: { ...m.api, ...fns } };
 });
 
@@ -633,7 +633,7 @@ describe('Chat panel: history-only chats', () => {
     const anchor = document.body.appendChild(document.createElement('button'));
     act(() => openRowMenu({ chatId: null, history: ref }, anchor));
     const items = screen.getAllByRole('menuitem').map((m) => m.textContent);
-    expect(items).toEqual(['Continue here', 'Open folder', 'Copy project path', 'Copy resume command']);
+    expect(items).toEqual(['Continue here', 'Open folder', 'Copy project path', 'Copy resume command', 'Archive chat']);
     fireEvent.click(screen.getByRole('menuitem', { name: 'Continue here' }));
     expect(store.getState().ui.openHistory).toEqual(ref);
   });
@@ -643,7 +643,7 @@ describe('Chat panel: history-only chats', () => {
     mount(seeded([]));
     act(() => openHistoryChat(ref));
     fireEvent.click(within(panel()).getByRole('button', { name: 'More actions' }));
-    expect(screen.getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Open folder', 'Copy project path', 'Copy resume command']);
+    expect(screen.getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Open folder', 'Copy project path', 'Copy resume command', 'Archive chat']);
     await waitFor(() => expect(within(panel()).getByText('Hi')).toBeTruthy());
   });
 });

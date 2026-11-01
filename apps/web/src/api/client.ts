@@ -125,7 +125,7 @@ export interface Transcript {
 }
 
 export const api = {
-  listChats: () => get<Chat[]>('/api/chats'),
+  listChats: () => get<Chat[]>('/api/chats?archived=all'),
   listMessages: (id: string) => get<Message[]>(`/api/chats/${enc(id)}/messages`),
   listRequests: (id: string) => get<OpenRequest[]>(`/api/chats/${enc(id)}/requests`),
   listToolCalls: (id: string) => get<ToolCall[]>(`/api/chats/${enc(id)}/tool-calls`),
@@ -142,12 +142,15 @@ export const api = {
   done: (id: string) => post<Chat>(`/api/chats/${enc(id)}/done`),
   undone: (id: string) => post<Chat>(`/api/chats/${enc(id)}/undone`),
   archive: (id: string, opts: RequestOptions = {}) => request<Chat>('POST', `/api/chats/${enc(id)}/archive`, undefined, opts),
+  unarchive: (id: string) => post<Chat>(`/api/chats/${enc(id)}/unarchive`),
   /** The follow-up queue of an out-of-usage chat (#39). */
   editQueued: (id: string, queued: string, text: string) => request<Chat>('PATCH', `/api/chats/${enc(id)}/queue/${enc(queued)}`, { text }),
   removeQueued: (id: string, queued: string) => request<Chat>('DELETE', `/api/chats/${enc(id)}/queue/${enc(queued)}`),
   sendQueuedNow: (id: string, queued: string) => post<void>(`/api/chats/${enc(id)}/queue/${enc(queued)}/send-now`),
   patchChat: (id: string, patch: ChatPatch) => request<Chat>('PATCH', `/api/chats/${enc(id)}`, patch),
-  history: () => get<HistoryChat[]>('/api/history'),
+  history: () => get<HistoryChat[]>('/api/history?archived=all'),
+  archiveHistory: (provider: ProviderId, sessionRef: string) => post<HistoryChat>(`/api/history/${provider}/${enc(sessionRef)}/archive`),
+  unarchiveHistory: (provider: ProviderId, sessionRef: string) => post<HistoryChat>(`/api/history/${provider}/${enc(sessionRef)}/unarchive`),
   continueHistory: (body: { provider: ProviderId; sessionRef: string; text: string }) => post<Chat>('/api/history/continue', body),
   /** Past messages of a history-only chat, read-only (#16). */
   historyMessages: (provider: ProviderId, sessionRef: string) =>

@@ -228,6 +228,10 @@ body:has(> .onb[data-state="open"]) > .toasts { z-index: 91; }
 /* All chats: the Projects page head (title, count, one line, search + Filter), then a plain list (prototype variant A). */
 .all-chats-page .page-head .search input { width: var(--search-width); }
 .all-chats-page .filterbar { padding: 0 0 var(--space-3); border-bottom: 0; }
+.all-chats-page .chat-lifecycle { display: flex; gap: var(--space-1); margin-bottom: var(--space-2); }
+.all-chats-page .chat-lifecycle .btn[aria-selected="true"] { background: var(--color-ink); color: var(--color-ink-contrast); border-color: var(--color-ink); }
+.all-chats-page .crow .row-more { flex: none; opacity: 0; }
+.all-chats-page .crow:hover .row-more, .all-chats-page .crow:focus-within .row-more { opacity: 1; }
 .all-chats-page .crow .proj { flex: none; display: inline-flex; align-items: center; gap: calc(var(--space-1) * 1.5); width: var(--column-project); min-width: 0; color: var(--color-text-muted); font-size: var(--text-caption); white-space: nowrap; overflow: hidden; }
 .all-chats-page .crow .proj > span:last-child { overflow: hidden; text-overflow: ellipsis; }
 .all-chats-page .crow .proj .folder-glyph { width: var(--glyph-sm); height: var(--glyph-sm); font-size: calc(var(--glyph-sm) * .6); }

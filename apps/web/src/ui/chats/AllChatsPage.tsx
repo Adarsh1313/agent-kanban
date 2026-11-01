@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
 import { openChatIn, type AppState } from '../../state/reducer.ts';
 import { allChats, memoState, type ListedChat } from '../../state/selectors.ts';
 import { useStore, useStoreInstance } from '../../state/store.ts';
-import { openHistoryChat } from '../actions.ts';
+import { openHistoryChat, openRowMenu } from '../actions.ts';
 import { relativeTime, dateTime } from '../board/format.ts';
 import { FilterBar } from '../filters/FilterBar.tsx';
 import { FilterButton } from '../filters/FilterMenu.tsx';
@@ -15,7 +15,7 @@ const PAGE = 100;
 /** The search-icon focus request already handled (the counter lives in the store; a later visit must not refocus). */
 let focusHandled = 0;
 
-const select = memoState((s: AppState) => [s.chats, s.history, s.projects, s.settings, s.ui.chatsFilters, s.ui.archiving, s.now], (s) => allChats(s, s.now));
+const select = memoState((s: AppState) => [s.chats, s.history, s.projects, s.settings, s.ui.chatsFilters, s.ui.chatsMode, s.ui.archiving, s.now], (s) => allChats(s, s.now));
 
 /** `text` with the first case-insensitive match of `q` marked. */
 function highlight(text: string, q: string): ReactNode {
@@ -39,6 +39,10 @@ function Row({ c, q, now }: { c: ListedChat; q: string; now: number }) {
     if (c.chatId) store.setState((s) => openChatIn(s, c.chatId!));
     else if (c.sessionRef) openHistoryChat({ provider: c.provider, sessionRef: c.sessionRef, cwd: c.cwd, title: c.title });
   };
+  const more = (e: MouseEvent<HTMLButtonElement>) => {
+    e.stopPropagation();
+    openRowMenu({ chatId: c.chatId, history: c.sessionRef ? { provider: c.provider, sessionRef: c.sessionRef, cwd: c.cwd, title: c.title } : null }, e.currentTarget);
+  };
   return (
     <li>
       <div className="crow" role="button" tabIndex={0} title={`${c.title}\n${c.projectName} · ${providerName(c.provider)} · ${dateTime(c.updatedAt, now)}`}
@@ -48,6 +52,7 @@ function Row({ c, q, now }: { c: ListedChat; q: string; now: number }) {
         <span className="t">{highlight(c.title, q)}</span>
         <span className="proj"><span className="folder-glyph proj-glyph" aria-hidden="true">{(c.projectName || '?')[0]!.toUpperCase()}</span><span>{highlight(c.projectName, q)}</span></span>
         <span className="when">{relativeTime(c.updatedAt, now)}</span>
+        <button className="btn icon-only ghost row-more" type="button" aria-label="More actions" onClick={more}><Icon name="more" size="sm" /></button>
       </div>
     </li>
   );
@@ -60,6 +65,7 @@ export function AllChatsPage() {
   const now = useStore((s) => s.now);
   const loaded = useStore((s) => s.loaded);
   const filtering = useStore((s) => Object.values(s.ui.chatsFilters).some((v) => v !== null));
+  const mode = useStore((s) => s.ui.chatsMode);
   const focusAsked = useStore((s) => s.ui.chatsSearchFocus);
   const [query, setQuery] = useState('');
   const [shown, setShown] = useState(PAGE);
@@ -78,6 +84,10 @@ export function AllChatsPage() {
   const q = query.trim().toLowerCase();
   const rows = useMemo(() => (q ? list.filter((c) => c.title.toLowerCase().includes(q) || c.projectName.toLowerCase().includes(q)) : list), [list, q]);
   const clear = () => { setQuery(''); store.setState((s) => ({ ...s, ui: { ...s.ui, chatsFilters: NO_FILTERS } })); };
+  const setMode = (next: 'active' | 'archived') => {
+    setShown(PAGE);
+    store.setState((s) => ({ ...s, ui: { ...s.ui, chatsMode: next } }));
+  };
 
   return (
     <div className="page all-chats-page">
@@ -94,6 +104,10 @@ export function AllChatsPage() {
           </label>
           <FilterButton scope="chats" />
         </div>
+        <div className="chat-lifecycle" role="tablist" aria-label="Chat lifecycle">
+          <button className="btn" type="button" role="tab" aria-selected={mode === 'active'} onClick={() => setMode('active')}>Active</button>
+          <button className="btn" type="button" role="tab" aria-selected={mode === 'archived'} onClick={() => setMode('archived')}>Archived</button>
+        </div>
         <FilterBar scope="chats" />
         {!loaded ? null : rows.length === 0 ? (
           <div className="page-empty">
@@ -106,8 +120,8 @@ export function AllChatsPage() {
               </>
             ) : (
               <>
-                <h3>No chats yet</h3>
-                <p>Chats from Claude Code, Codex and Antigravity show up here.</p>
+                <h3>{mode === 'archived' ? 'No archived chats' : 'No chats yet'}</h3>
+                <p>{mode === 'archived' ? 'Chats you archive show up here.' : 'Chats from Claude Code, Codex and Antigravity show up here.'}</p>
               </>
             )}
           </div>

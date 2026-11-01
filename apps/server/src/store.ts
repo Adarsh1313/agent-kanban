@@ -101,6 +101,10 @@ export class Store {
         windows TEXT NOT NULL, read_at TEXT NOT NULL, message TEXT
       );
       CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
+      CREATE TABLE IF NOT EXISTS history_labels (
+        provider TEXT NOT NULL, session_ref TEXT NOT NULL, archived INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (provider, session_ref)
+      );
       CREATE TABLE IF NOT EXISTS routines (
         id TEXT PRIMARY KEY, name TEXT NOT NULL, cwd TEXT NOT NULL, provider TEXT NOT NULL, effort TEXT NOT NULL,
         kind TEXT NOT NULL, text TEXT NOT NULL, schedule TEXT NOT NULL, paused INTEGER NOT NULL DEFAULT 0,
@@ -162,8 +166,19 @@ export class Store {
     return r ? toChat(r) : undefined;
   }
 
-  listChats(): Chat[] {
-    return (this.db.prepare('SELECT * FROM chats WHERE archived = 0 ORDER BY updated_at DESC, rowid DESC').all() as Row[]).map(toChat);
+  listChats(includeArchived = false): Chat[] {
+    const sql = `SELECT * FROM chats${includeArchived ? '' : ' WHERE archived = 0'} ORDER BY updated_at DESC, rowid DESC`;
+    return (this.db.prepare(sql).all() as Row[]).map(toChat);
+  }
+
+  historyArchived(provider: ProviderId, sessionRef: string): boolean {
+    const row = this.db.prepare('SELECT archived FROM history_labels WHERE provider = ? AND session_ref = ?').get(provider, sessionRef) as Row | undefined;
+    return row?.archived === 1;
+  }
+
+  setHistoryArchived(provider: ProviderId, sessionRef: string, archived: boolean): void {
+    this.db.prepare(`INSERT INTO history_labels (provider, session_ref, archived) VALUES (?, ?, ?)
+      ON CONFLICT(provider, session_ref) DO UPDATE SET archived = excluded.archived`).run(provider, sessionRef, archived ? 1 : 0);
   }
 
   /** `touch: false` keeps updatedAt (pin, rename and snooze are not activity). */
