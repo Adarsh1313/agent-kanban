@@ -20,8 +20,7 @@ export const ChatComposer = forwardRef<HTMLTextAreaElement, { chat: Chat; hint: 
     const noteId = useId();
     const switching = to !== chat.provider;
     const send = async (text: string) => {
-      const ok = await runAction(store, () => (switching ? api.send(chat.id, text, to) : api.send(chat.id, text)));
-      return ok;
+      return runAction(store, () => (switching ? api.send(chat.id, text, to) : api.send(chat.id, text)));
     };
     const tools = (
       <select className="provider-pick" aria-label="Provider" value={to} aria-describedby={switching ? noteId : undefined} onChange={(e) => setTo(e.target.value as ProviderId)}>

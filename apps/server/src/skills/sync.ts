@@ -19,7 +19,8 @@ const list = (p: string) => { try { return readdirSync(p); } catch { return []; 
 
 /** Skill folders (holding SKILL.md) directly in `dir`. */
 function skillDirs(dir: string): { name: string; path: string }[] {
-  return list(dir).filter((n) => !n.startsWith('.') && existsSync(join(dir, n, 'SKILL.md'))).map((name) => ({ name, path: join(dir, name) }));
+  // A managed copy (left from an earlier home provider) is not a source.
+  return list(dir).filter((n) => !n.startsWith('.') && existsSync(join(dir, n, 'SKILL.md')) && !existsSync(join(dir, n, MARKER))).map((name) => ({ name, path: join(dir, name) }));
 }
 
 /** `skills` folders in the Claude plugin cache (marketplace/plugin/version/skills), searched a few levels deep. */

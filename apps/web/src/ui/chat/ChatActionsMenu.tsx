@@ -1,6 +1,6 @@
 import type { Chat, ProviderId } from '@agent-kanban/shared';
 import { folderKey } from '@agent-kanban/shared';
-import { visibleProjects } from '../../state/selectors.ts';
+import { chatFolder, visibleProjects } from '../../state/selectors.ts';
 import { api } from '../../api/client.ts';
 import { closePanelIn, mergeChats, openHistoryIn, type AppState, type HistoryRef } from '../../state/reducer.ts';
 import { useStore, useStoreInstance, type Store } from '../../state/store.ts';
@@ -235,7 +235,7 @@ export function ChatActionsMenu({ anchor, open: wanted, target, onClose, onRenam
               </Tooltip>
               Move to project
             </MenuLabel>
-            {chat && projects.filter((p) => folderKey(p.path) !== folderKey(chat.projectLabel || chat.cwd)).map((p) => (
+            {chat && projects.filter((p) => folderKey(p.path) !== folderKey(chatFolder(chat))).map((p) => (
               <MenuItem key={p.id} onSelect={pick(() => void moveToProject(store, chat, p.path))}>{p.name || p.path}</MenuItem>
             ))}
             {chat?.projectLabel && <MenuItem onSelect={pick(() => void moveToProject(store, chat, null))}>Back to its own folder</MenuItem>}

@@ -53,8 +53,9 @@ export function buildPreface(input: {
   let room = HANDOFF_TOKENS * CHARS_PER_TOKEN;
   const kept: string[] = [];
   for (let i = items.length - 1; i >= 0; i--) {
-    const line = items[i]!.line;
-    if (line.length > room) break;
+    let line = items[i]!.line;
+    // The newest item is always sent, cut to fit; older ones stop at the budget.
+    if (line.length > room) { if (kept.length) break; line = line.slice(0, room - 1) + '…'; }
     room -= line.length + 1;
     kept.unshift(line);
   }

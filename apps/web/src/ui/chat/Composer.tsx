@@ -41,7 +41,7 @@ export const Composer = forwardRef<HTMLTextAreaElement, ComposerProps>(function 
         setActive((at + (e.key === 'ArrowDown' ? 1 : -1) + matches.length) % matches.length);
         return;
       }
-      if ((e.key === 'Enter' && !e.shiftKey) || e.key === 'Tab') { e.preventDefault(); pick(matches[at]!); return; }
+      if (((e.key === 'Enter' && !e.shiftKey) || e.key === 'Tab') && matches[at] !== query) { e.preventDefault(); pick(matches[at]!); return; }
       if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setDismissed(text); return; }
     }
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && e.nativeEvent.keyCode !== 229) {

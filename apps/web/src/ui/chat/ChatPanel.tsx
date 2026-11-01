@@ -244,7 +244,7 @@ export function ChatPanel() {
           <>
             <Thread chat={s.chat} key={`t:${s.chat.id}`} />
             <ContinueWith chat={s.chat} />
-            <ChatComposer key={`c:${s.chat.id}`} ref={composerRef} chat={s.chat} hint={HINT} skills={skills}
+            <ChatComposer key={`c:${s.chat.id}:${s.chat.provider}`} ref={composerRef} chat={s.chat} hint={HINT} skills={skills}
               placeholder={s.chat.column === 'running' ? 'Send a note. It reaches the agent after this step' : 'Reply or give a new instruction'} />
           </>
         ) : (
