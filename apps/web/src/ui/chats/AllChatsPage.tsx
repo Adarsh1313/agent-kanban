@@ -192,10 +192,12 @@ export function AllChatsPage() {
           </label>
           <FilterButton scope="chats" />
         </div>
-        <div className="chat-lifecycle" role="tablist" aria-label="Chat lifecycle">
+        <div className="chat-lifecycle">
+          <div className="lifecycle-tabs" role="tablist" aria-label="Chat lifecycle">
           <button className="btn" type="button" role="tab" aria-selected={mode === 'active'} onClick={() => setMode('active')}>Active</button>
           <button className="btn" type="button" role="tab" aria-selected={mode === 'archived'} onClick={() => setMode('archived')}>Archived</button>
           <button className="btn" type="button" role="tab" aria-selected={mode === 'trash'} onClick={() => setMode('trash')}>Trash</button>
+          </div>
           {mode !== 'trash' && visibleRows.length > 0 && <button className="btn ghost select-view" type="button" onClick={() => setSelected(new Set(visibleRows.map((c) => c.key)))}>Select all in view</button>}
           {mode === 'trash' && trash.length > 0 && <button className="btn ghost trash-empty" type="button" onClick={() => setEmptying(true)}>Empty trash</button>}
         </div>
