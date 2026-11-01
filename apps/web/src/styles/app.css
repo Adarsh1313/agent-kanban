@@ -200,7 +200,6 @@ a.prow { color: inherit; text-decoration: none; }
 body:has(> .onb[data-state="open"]) > .toasts { z-index: 91; }
 .onb .found .onb-show { margin-top: calc(var(--space-1) * 1.5); }
 .onb-k { font-size: var(--text-micro); color: var(--color-text-faint); font-weight: var(--weight-medium); margin-bottom: calc(var(--space-1) * 1.5); }
-.onb .onb-play { height: auto; padding: 0 calc(var(--space-1) / 2); display: inline; }
 .onb .agent-row .t small + small { color: var(--color-text-faint); }
 .onb h1:focus { outline: none; }
 
@@ -212,7 +211,7 @@ body:has(> .onb[data-state="open"]) > .toasts { z-index: 91; }
 /* The chat panel runs to the top edge too: its header keeps its buttons clear of the caption buttons. */
 .desktop :is(.topbar, .panel-head) { padding-right: calc(var(--titlebar-controls-width) + var(--space-2)); }
 
-/* Recent chats (prototype variant A): the project label sits muted on the right; hovering swaps it for the date. */
+/* Sidebar chat rows (Pinned, card bodies): the project label sits muted on the right; hovering swaps it for the date. */
 .chat-row .rest { flex: none; max-width: 34%; color: var(--color-text-faint); font-size: var(--text-caption); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .chat-row .rest .d { display: none; }
 /* The "…" button floats over the row's right edge, so while hidden it takes no width from the title; the label makes
@@ -257,3 +256,117 @@ body:has(> .onb[data-state="open"]) > .toasts { z-index: 91; }
 .effort-item small { color: var(--color-text-faint); font-size: var(--text-caption); }
 .effort-note { margin-top: var(--space-1); font-size: var(--text-caption); color: var(--color-text-faint); }
 .suggestions { display: flex; flex-wrap: wrap; gap: var(--space-1); margin-top: var(--space-2); }
+/* Routines (#45): Projects-style rows and the editor's form. */
+.routine-rows { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--color-border); }
+.routine-row { display: grid; grid-template-columns: minmax(220px, 2fr) minmax(120px, 1fr) minmax(140px, 1fr) auto; align-items: center; gap: var(--space-3); min-height: 56px; padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--color-border); }
+.routine-row[data-paused] .routine-main, .routine-row[data-paused] .routine-next { opacity: .55; }
+.routine-main { display: grid; gap: var(--space-1); min-width: 0; }
+.routine-main b { font-weight: var(--weight-medium); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.routine-meta { display: inline-flex; align-items: center; gap: var(--space-1); font-size: var(--text-caption); color: var(--color-text-muted); }
+.routine-next, .routine-last { display: grid; font-size: var(--text-caption); color: var(--color-text-muted); }
+.routine-next .cap, .routine-last .cap { font-size: var(--text-micro); color: var(--color-text-faint); }
+.routine-last[data-result="folder_missing"], .routine-last[data-result="skipped_running"] { color: var(--color-needs-text); }
+.routine-actions { display: inline-flex; gap: var(--space-1); }
+.routine-form { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); }
+.routine-form .field { display: grid; gap: var(--space-1); font-size: var(--text-caption); color: var(--color-text-muted); border: 0; margin: 0; padding: 0; min-width: 0; }
+.routine-form .field.wide { grid-column: 1 / -1; }
+.routine-form .field input, .routine-form .field select, .routine-form .field textarea { font: inherit; font-size: var(--text-body); color: var(--color-text); background: var(--color-control); border: 1px solid var(--color-border); border-radius: var(--radius-control); padding: var(--space-1) var(--space-2); min-height: var(--control-height-sm); }
+.routine-form .field textarea { min-height: calc(var(--control-height-sm) * 3); resize: vertical; }
+.routine-form legend { padding: 0; margin-bottom: var(--space-1); }
+.routine-repeat .seg button[aria-checked="true"] { color: var(--color-text); font-weight: var(--weight-medium); background: var(--color-surface); }
+.routine-days { display: flex; gap: var(--space-1); margin-top: var(--space-2); }
+.routine-days button { min-width: var(--control-height-sm); height: var(--control-height-sm); border-radius: var(--radius-full); background: var(--color-control); color: var(--color-text-muted); font-size: var(--text-caption); }
+.routine-days button[aria-pressed="true"] { background: var(--color-ink); color: var(--color-ink-contrast); }
+.routine-chime { display: flex !important; align-items: center; gap: var(--space-2); align-self: end; }
+.project-routines { margin-top: var(--space-6); }
+.project-routines .head { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--space-2); }
+@media (max-width: 860px) { .routine-row { grid-template-columns: 1fr auto; } .routine-next, .routine-last { display: none; } }
+/* ───────── My projects (sidebar cards, #38; prototype variant B) ───────── */
+.side-title.static { cursor: default; }
+.side-act { margin-left: auto; font-size: var(--text-micro); color: var(--color-text-faint); padding: 0 var(--space-1); border-radius: var(--radius-control); }
+@media (hover: hover) and (pointer: fine) { .side-act:hover { color: var(--color-text); background: var(--color-nav-hover); } }
+.pick-card { margin-top: var(--space-3); padding: var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-card); background: var(--color-surface);
+  display: flex; flex-direction: column; gap: var(--space-2); font-size: var(--text-caption); color: var(--color-text-muted); }
+.pick-card b { color: var(--color-text); font-size: var(--text-body); font-weight: var(--weight-semibold); }
+.pick-card .btn { align-self: flex-start; }
+.my-empty { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-2); font-size: var(--text-caption); color: var(--color-text-muted); padding-top: var(--space-2); }
+.project-card { border: 1px solid var(--color-border); border-radius: var(--radius-card); background: var(--color-surface); margin-top: var(--space-2); overflow: hidden; }
+.project-card.missing { opacity: .6; }
+.pc-head { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2); width: 100%; text-align: left; color: var(--color-text-faint); }
+.pc-head .folder-glyph { width: var(--space-6); height: var(--space-6); font-size: var(--text-caption); }
+@media (hover: hover) and (pointer: fine) { .pc-head:hover { background: var(--color-nav-hover); } }
+.pc-two { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.pc-name { color: var(--color-text); font-weight: var(--weight-semibold); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pc-sum { display: flex; gap: var(--space-1); font-size: var(--text-micro); white-space: nowrap; overflow: hidden; }
+.pc-sum > span { display: inline-flex; align-items: center; gap: var(--space-1); }
+.pc-sum > span + span::before { content: "·"; margin-right: var(--space-1); color: var(--color-text-faint); }
+.pc-sum .on { color: var(--color-text-muted); }
+.pc-body { border-top: 1px solid var(--color-border); padding: calc(var(--space-1) / 2) var(--space-1) var(--space-1); }
+.pc-body .chat-row { font-size: var(--text-caption); }
+
+/* My projects picker: project tiles (onboarding step and the sidebar's dialog) */
+.picker-wrap { display: flex; flex-direction: column; gap: var(--space-3); }
+.pick-search input { width: 100%; }
+.pick-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-2); max-height: 46vh; overflow-y: auto; padding: calc(var(--space-1) / 2); }
+.pick-tile { position: relative; display: flex; flex-direction: column; gap: var(--space-1); padding: var(--space-3); text-align: left; min-width: 0;
+  border: 1px solid var(--color-border); border-radius: var(--radius-card); background: var(--color-surface);
+  transition: border-color var(--duration-pop) var(--ease-colour), box-shadow var(--duration-pop) var(--ease-colour); }
+@media (hover: hover) and (pointer: fine) { .pick-tile:hover { border-color: var(--color-border-strong); } }
+.pick-tile[aria-checked="true"] { border-color: var(--color-ink); box-shadow: inset 0 0 0 1px var(--color-ink); }
+.pick-tile.dim { color: var(--color-text-muted); }
+.pick-tile.dim .folder-glyph { opacity: .6; }
+.pick-tile .folder-glyph { width: var(--space-6); height: var(--space-6); font-size: var(--text-caption); }
+.pick-tile .pt-name { font-weight: var(--weight-semibold); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: var(--space-5); }
+.pick-tile small { color: var(--color-text-faint); font-size: var(--text-caption); }
+.pick-tile .pt-logos { display: flex; gap: var(--space-1); }
+.pick-tile .cbox { position: absolute; top: var(--space-2); right: var(--space-2); width: var(--space-4); height: var(--space-4); border-radius: var(--radius-badge);
+  border: 1px solid var(--color-border-strong); display: grid; place-items: center; color: transparent; }
+.pick-tile[aria-checked="true"] .cbox { background: var(--color-ink); border-color: var(--color-ink); color: var(--color-ink-contrast); }
+.pick-older { display: flex; align-items: center; gap: var(--space-1); padding-left: var(--space-2); }
+.pick-count { color: var(--color-text-faint); font-size: var(--text-caption); }
+@media (max-width: 640px) { .pick-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.project-card { position: relative; }
+.pc-remove { position: absolute; top: var(--space-2); right: calc(var(--space-6) + var(--space-1)); width: var(--control-height-sm); height: var(--control-height-sm); opacity: 0; }
+.project-card:hover .pc-remove, .pc-remove:focus-visible { opacity: 1; }
+@media (hover: none) { .pc-remove { opacity: 1; } }
+.activity-hint { display: flex; align-items: center; gap: var(--space-1); margin-top: var(--space-2); padding: var(--space-1) var(--space-1) var(--space-1) var(--space-2);
+  border: 1px dashed var(--color-border); border-radius: var(--radius-control); font-size: var(--text-caption); color: var(--color-text-muted); }
+.activity-hint > span { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.activity-hint b { color: var(--color-text); font-weight: var(--weight-medium); }
+.hint-add { font-weight: var(--weight-medium); color: var(--color-text); padding: 0 var(--space-1); border-radius: var(--radius-control); }
+@media (hover: hover) and (pointer: fine) { .hint-add:hover { background: var(--color-nav-hover); } }
+.hint-x { width: var(--control-height-sm); height: var(--control-height-sm); }
+.star-btn[aria-pressed="true"] .icon path { fill: currentColor; }
+.star-btn[aria-pressed="true"] { color: var(--color-text); }
+.plist-rows .row-star { position: absolute; right: calc(var(--space-3) + var(--space-1) * 1.5); top: 0; bottom: 0; margin: auto 0; width: var(--control-height-sm); height: var(--control-height-sm); opacity: 0; }
+.plist-rows li:hover .row-star, .plist-rows .row-star:focus-visible, .plist-rows .row-star[aria-pressed="true"] { opacity: 1; }
+@media (hover: none) { .plist-rows .row-star { opacity: 1; } }
+
+/* ───────── Global search: the sidebar field and the palette (#38, prototype variant B) ───────── */
+.side-actions .gsearch { flex: 1; display: flex; align-items: center; gap: var(--space-2); height: var(--control-height-sm); padding: 0 var(--space-2); min-width: 0;
+  border: 1px solid var(--color-border); border-radius: var(--radius-control); background: var(--color-surface); color: var(--color-text-faint); font-size: var(--text-caption); text-align: left; }
+.gsearch .gs-t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (hover: hover) and (pointer: fine) { .gsearch:hover { border-color: var(--color-border-strong); color: var(--color-text-muted); } }
+.palette { position: fixed; z-index: 61; left: 50%; top: 12vh; transform: translateX(-50%); width: min(720px, calc(100vw - var(--space-8)));
+  background: var(--color-surface); border-radius: var(--radius-panel); box-shadow: var(--shadow-card-lift); overflow: hidden;
+  animation: palette-in var(--duration-dialog) var(--ease-out); }
+@keyframes palette-in { from { opacity: 0; transform: translateX(-50%) scale(.98); } }
+@media (prefers-reduced-motion: reduce) { .palette { animation: none; } }
+.palette-in { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--color-border); color: var(--color-text-faint); }
+.palette-in input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; font: inherit; font-size: var(--text-lead); color: var(--color-text); }
+.palette-cols { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); max-height: 52vh; }
+.palette-cols > div { overflow-y: auto; padding: var(--space-1); }
+.palette-cols > div:first-child { border-right: 1px solid var(--color-border); }
+.palette-cols ul { list-style: none; margin: 0; padding: 0; }
+.palette-label { font-size: var(--text-micro); color: var(--color-text-faint); padding: var(--space-2) var(--space-2) var(--space-1); }
+.palette-item { display: flex; align-items: center; gap: var(--space-2); min-height: var(--control-height-sm); padding: 0 var(--space-2); border-radius: var(--radius-control); cursor: pointer; }
+.palette-item[aria-selected="true"] { background: var(--color-control); }
+.palette-item .r-t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.palette-item .r-m { color: var(--color-text-faint); font-size: var(--text-caption); white-space: nowrap; max-width: 40%; overflow: hidden; text-overflow: ellipsis; }
+.palette-item mark, .all-chats-page mark { background: var(--color-needs-soft); color: inherit; border-radius: 2px; }
+.palette-none, .palette-empty { margin: 0; padding: var(--space-2); font-size: var(--text-caption); color: var(--color-text-faint); }
+.palette-empty { padding: var(--space-6) var(--space-4); text-align: center; }
+.palette-all { display: flex; align-items: center; gap: var(--space-2); width: 100%; margin-top: var(--space-1); padding: var(--space-2); border-top: 1px solid var(--color-border);
+  font-size: var(--text-caption); color: var(--color-text-muted); text-align: left; }
+@media (hover: hover) and (pointer: fine) { .palette-all:hover { color: var(--color-text); background: var(--color-nav-hover); } }
+@media (max-width: 640px) { .palette-cols { grid-template-columns: minmax(0, 1fr); } .palette-cols > div:first-child { border-right: 0; border-bottom: 1px solid var(--color-border); } }

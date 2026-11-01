@@ -634,3 +634,16 @@ test('effort maps to turn/start effort; instructions go to thread/start as devel
     assert.deepEqual(calls.filter((c) => c.method === 'turn/start').map((c) => c.params.effort), ['high', 'low']);
   } finally { await adapter.dispose(); }
 });
+
+test('free resets: reads the banked count and redeems one with an idempotency key (#31)', async () => {
+  const { adapter } = make('limits');
+  try {
+    assert.equal(await adapter.readResetCredits(), 2);
+    assert.equal(await adapter.useResetCredit(), 'reset');
+  } finally { await adapter.dispose(); }
+  const none = make('');
+  try {
+    assert.equal(await none.adapter.readResetCredits(), 0);
+    assert.equal(await none.adapter.useResetCredit(), 'failed');
+  } finally { await none.adapter.dispose(); }
+});

@@ -693,3 +693,40 @@ test('effort maps to the SDK level at launch and a change reaches a live query b
   assert.deepEqual(applied, [{ effortLevel: 'high' }]);
   await a.dispose();
 });
+
+test('a rejected rate limit that fails the turn is out of usage with its reset time (#39)', async () => {
+  const rejected = { type: 'rate_limit_event', rate_limit_info: { status: 'rejected', resetsAt: 1_793_000_000 }, session_id: 's' };
+  const f = fake(async function* (_o, input) { await input.next(); yield init(); yield rejected; yield result({ is_error: true, result: "You've hit your limit" }); await never(); });
+  const a = new ClaudeAdapter({ claudePath: 'c', query: f.query });
+  const ev = collect(a);
+  await a.startChat({ cwd: '.', prompt: 'go' });
+  await tick();
+  assert.deepEqual(ev.at(-1), { type: 'limit.reached', sessionRef: 'sess-1', resetsAt: new Date(1_793_000_000_000).toISOString() });
+  await a.dispose();
+});
+
+test('a rejection that overage covered still completes the turn', async () => {
+  const rejected = { type: 'rate_limit_event', rate_limit_info: { status: 'rejected', resetsAt: 1_793_000_000 }, session_id: 's' };
+  const f = fake(async function* (_o, input) { await input.next(); yield init(); yield rejected; yield result(); await never(); });
+  const a = new ClaudeAdapter({ claudePath: 'c', query: f.query });
+  const ev = collect(a);
+  await a.startChat({ cwd: '.', prompt: 'go' });
+  await tick();
+  assert.equal(ev.at(-1).type, 'turn.completed');
+  await a.dispose();
+});
+
+test("chats run in the active account's config folder; Default passes no env (#39)", async () => {
+  let env: Record<string, string> = {};
+  const f = fake(async function* (_o, input) { await input.next(); yield init(); yield result(); await never(); });
+  const a = new ClaudeAdapter({ claudePath: 'c', query: f.query, env: () => env });
+  await a.startChat({ cwd: '.', prompt: 'go' });
+  assert.equal(f.calls[0]!.options.env, undefined);
+  env = { CLAUDE_CONFIG_DIR: '/accounts/work' };
+  await a.startChat({ cwd: '.', prompt: 'again' });
+  assert.equal(f.calls[1]!.options.env.CLAUDE_CONFIG_DIR, '/accounts/work');
+  // The rest of the environment is passed on (Windows spells it Path, so find it by name in any case).
+  const pathKey = (e: Record<string, unknown>) => Object.keys(e).find((k) => k.toUpperCase() === 'PATH');
+  assert.equal(f.calls[1]!.options.env[pathKey(f.calls[1]!.options.env)!], process.env[pathKey(process.env)!]);
+  await a.dispose();
+});

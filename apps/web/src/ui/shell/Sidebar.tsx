@@ -1,34 +1,27 @@
 import type { ProviderId } from '@agent-kanban/shared';
 import { folderKey } from '@agent-kanban/shared';
-import { useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
-import { focusedProvider, hiddenFolders, isArchived, isSnoozed, memoState, pinned as pinnedChats, projectLabel, providerCounts, recentChats, type SidebarChat } from '../../state/selectors.ts';
-import { applySettings, openChatIn, type AppState } from '../../state/reducer.ts';
+import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { focusedProvider, hiddenFolders, isArchived, isSnoozed, pinned as pinnedChats, providerCounts } from '../../state/selectors.ts';
+import { applySettings, type AppState } from '../../state/reducer.ts';
 import { api } from '../../api/client.ts';
 import { uniqueProjects } from '../projects/model.ts';
 import { useStore, useStoreInstance } from '../../state/store.ts';
-import { openHistoryChat, openNewChat, openRowMenu } from '../actions.ts';
-import { Icon, Menu, MenuItem, PROVIDER_IDS, ProviderLogo, StatusIcon, Tooltip, providerName, toast } from '../primitives/index.ts';
+import { Icon, Menu, MenuItem, PROVIDER_IDS, ProviderLogo, providerName, toast } from '../primitives/index.ts';
 import { replayOnboarding } from '../onboarding/Onboarding.tsx';
+import { MyProjects } from '../myprojects/MyProjects.tsx';
+import { ChatRow } from './ChatRow.tsx';
 import { navigate, hashFor } from './route.ts';
+import { openSearch } from '../search/SearchPalette.tsx';
 import { toggleTheme } from './theme.ts';
-import { dateTime, relativeTime } from '../board/format.ts';
 
 const NAV = [
   ['board', 'board', 'Board'],
   ['chats', 'inbox', 'All chats'],
   ['projects', 'projects', 'Projects'],
+  ['routines', 'clock', 'Routines'],
   ['connections', 'plug', 'Connections'],
 ] as const;
 
-
-function onActivate(fn: () => void) {
-  return (e: KeyboardEvent<HTMLElement>) => {
-    if ((e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget) {
-      e.preventDefault();
-      fn();
-    }
-  };
-}
 
 function SideSection({ title, children }: { title: string; children: ReactNode }) {
   const [open, setOpen] = useState(true);
@@ -38,42 +31,6 @@ function SideSection({ title, children }: { title: string; children: ReactNode }
         <Icon name="chevron-down" size="sm" />{title}
       </button>
       <div className={`collapsible${open ? '' : ' closed'}`} inert={!open}><div>{children}</div></div>
-    </div>
-  );
-}
-
-interface RowChat { key: string; chatId: string | null; provider: ProviderId; sessionRef: string | null; title: string; cwd: string; updatedAt: string; column: SidebarChat['column'] }
-
-function ChatRow({ chat, current, project: given }: { chat: RowChat; current: boolean; project?: string }) {
-  const store = useStoreInstance();
-  const now = useStore((s) => s.now);
-  const project = useStore((s) => given ?? projectLabel(s, chat.cwd));
-  // Hover shows the full title plus its project, provider and when it was last active (#23); the row swaps the project label for the date.
-  const when = `${project} · ${providerName(chat.provider)} · ${dateTime(chat.updatedAt, now)}`;
-  const open = () => {
-    if (chat.chatId) store.setState((s) => openChatIn(s, chat.chatId!));
-    else if (chat.sessionRef) openHistoryChat({ provider: chat.provider, sessionRef: chat.sessionRef, cwd: chat.cwd, title: chat.title });
-  };
-  const more = (e: MouseEvent<HTMLButtonElement>) => {
-    e.stopPropagation();
-    openRowMenu(
-      { chatId: chat.chatId, history: chat.sessionRef ? { provider: chat.provider, sessionRef: chat.sessionRef, cwd: chat.cwd, title: chat.title } : null },
-      e.currentTarget,
-    );
-  };
-  return (
-    <div className="chat-row" role="button" tabIndex={0} title={`${chat.title}
-${when}`} aria-description={when} aria-current={current ? 'true' : undefined} onClick={open} onKeyDown={onActivate(open)}>
-      <ProviderLogo id={chat.provider} size="sm" />
-      <span className="t">{chat.title}</span>
-      {chat.column === 'running' && <StatusIcon state="running" />}
-      {chat.column === 'needs_you' && <span className="state-dot" title="Needs you" />}
-      <span className="rest" aria-hidden="true"><span className="p">{project}</span><span className="d">{relativeTime(chat.updatedAt, now)}</span></span>
-      <Tooltip label="More actions">
-        <button className="row-more" type="button" aria-label={`More actions for ${chat.title}`} aria-haspopup="menu" onClick={more}>
-          <Icon name="more" size="sm" />
-        </button>
-      </Tooltip>
     </div>
   );
 }
@@ -99,32 +56,6 @@ function Providers() {
   );
 }
 
-function Recent() {
-  // Memoized on the parts it reads, so streaming deltas do not re-sort every history chat.
-  const select = useMemo(
-    () => memoState((s) => [s.chats, s.history, s.projects, s.settings, s.ui.filters, s.ui.archiving, s.now], (s) => recentChats(s, s.now)),
-    [],
-  );
-  const list = useStore(select);
-  const filtering = useStore((s) => Object.values(s.ui.filters).some((v) => v !== null));
-  const openChatId = useStore((s) => s.ui.openChatId);
-  const openHistory = useStore((s) => s.ui.openHistory);
-  return (
-    <SideSection title="Recent chats">
-      <div className="recent">
-        {filtering && list.length === 0 && <p className="empty-note side-empty">No matching chats</p>}
-        {list.map((c) => (
-          <ChatRow key={c.key} chat={c} project={c.projectName}
-            current={c.chatId !== null ? c.chatId === openChatId : openHistory !== null && openHistory.provider === c.provider && openHistory.sessionRef === c.sessionRef} />
-        ))}
-        <button className="show-more-row all-projects" type="button" aria-label="See all chats" onClick={() => navigate('chats')}>
-          All chats<Icon name="chevron-right" size="sm" />
-        </button>
-      </div>
-    </SideSection>
-  );
-}
-
 function Pinned() {
   const list = useStore((s) => pinnedChats(s, s.now));
   const openChatId = useStore((s) => s.ui.openChatId);
@@ -143,18 +74,13 @@ const counts = (s: AppState) => {
   ).length;
   const connected = Object.values(s.connections).filter((c) => c?.status === 'connected' || c?.status === 'update_available').length;
   const hidden = hiddenFolders(s);
-  return { board, projects: uniqueProjects(s).filter((p) => !hidden.has(folderKey(p.id))).length, connections: connected };
+  return { board, projects: uniqueProjects(s).filter((p) => !hidden.has(folderKey(p.id))).length, routines: s.routines.length, connections: connected };
 };
 
 export function Sidebar() {
   const store = useStoreInstance();
   const view = useStore((s) => s.ui.view);
   const n = useStore(counts);
-  // The search icon opens All chats with its search box focused (the page focuses it when this counter moves).
-  const searchChats = () => {
-    store.setState((s) => ({ ...s, ui: { ...s.ui, chatsSearchFocus: s.ui.chatsSearchFocus + 1 } }));
-    if (location.hash !== hashFor('chats')) navigate('chats');
-  };
   const navRef = useRef<HTMLElement>(null);
   const capRef = useRef<HTMLSpanElement>(null);
   const placed = useRef(false);
@@ -216,8 +142,9 @@ export function Sidebar() {
         Agent Kanban <span className="chev"><Icon name="updown" /></span>
       </button>
       <div className="side-actions">
-        <button className="btn new" type="button" onClick={() => openNewChat()}><Icon name="plus" />New chat <span className="kbd">N</span></button>
-        <Tooltip label="Search chats"><button className="btn icon-only ghost" type="button" aria-label="Search chats" onClick={searchChats}><Icon name="search" /></button></Tooltip>
+        <button className="gsearch" type="button" onClick={() => openSearch(store)}>
+          <Icon name="search" size="sm" /><span className="gs-t">Search chats and projects</span><span className="kbd" aria-hidden="true">Ctrl K</span>
+        </button>
       </div>
       <nav className="navlist" aria-label="Main" ref={navRef}>
         <span className="cap" ref={capRef} />
@@ -231,7 +158,7 @@ export function Sidebar() {
       <div className="scroll">
         <Providers />
         <Pinned />
-        <Recent />
+        <MyProjects />
       </div>
 
       <div className="side-foot">

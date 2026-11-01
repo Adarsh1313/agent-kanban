@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { applyEvent, applySnapshot, initialState, markAllNotificationsRead, markChatNotificationsRead, markNotificationRead, type AppNotification, type AppState } from '../src/state/reducer.ts';
 import { createStore, StoreProvider, type Store } from '../src/state/store.ts';
 import { Bell } from '../src/ui/notify/Bell.tsx';
-import { markAllRead, notificationText, onRing, openNotification, reloadPrefs, resetAudioForTests, RING_GAP_MS, startNotifier } from '../src/ui/notify/notifier.ts';
+import { chime, markAllRead, notificationText, onRing, openNotification, reloadPrefs, resetAudioForTests, RING_GAP_MS, startNotifier } from '../src/ui/notify/notifier.ts';
 import { chat } from './helpers.ts';
 
 /* ───────── Browser API fakes ───────── */
@@ -21,6 +21,7 @@ class FakeNotification {
 }
 
 const tones: number[] = [];
+const gains: { to: unknown; gain: { value: number; peak: number } }[] = [];
 class FakeAudioContext {
   static created = 0;
   static last: FakeAudioContext | null = null;
@@ -37,7 +38,12 @@ class FakeAudioContext {
     return o;
   }
   createGain() {
-    const g = { gain: { setValueAtTime: () => {}, linearRampToValueAtTime: () => {}, exponentialRampToValueAtTime: () => {} }, connect: (d: unknown) => d };
+    const g = {
+      to: null as unknown,
+      gain: { value: 1, peak: 0, setValueAtTime: () => {}, linearRampToValueAtTime: (v: number) => { g.gain.peak = Math.max(g.gain.peak, v); }, exponentialRampToValueAtTime: () => {} },
+      connect: (d: unknown) => { g.to = d; return d; },
+    };
+    gains.push(g);
     return g;
   }
 }
@@ -67,6 +73,7 @@ beforeEach(() => {
   reloadPrefs();
   resetAudioForTests();
   tones.length = 0;
+  gains.length = 0;
   FakeAudioContext.created = 0;
   FakeNotification.permission = 'default';
   FakeNotification.instances = [];
@@ -146,6 +153,18 @@ describe('notifier', () => {
     expect(tones).toEqual([880, 1320]);
     expect(bell().getAttribute('aria-label')).toBe('Notifications, 1 unread');
     expect(bell().querySelector('.dot')!.textContent).toBe('1');
+  });
+
+  it('the chime plays at 200% through one gain node, and its loudest moment stays under clipping (#36)', () => {
+    chime();
+    const ctx = FakeAudioContext.last!;
+    const master = gains.filter((g) => g.to === ctx.destination);
+    expect(master).toHaveLength(1);
+    expect(master[0]!.gain.value).toBe(2);
+    const notes = gains.filter((g) => g.to === master[0]);
+    expect(notes).toHaveLength(2);
+    // Both notes can sound at once: their summed peak, doubled, must stay below full scale (1).
+    expect(notes.reduce((sum, g) => sum + g.gain.peak, 0) * master[0]!.gain.value).toBeLessThan(1);
   });
 
   it('a finished chat chimes softer (880 then 1100 Hz); Sound off plays nothing', () => {
@@ -350,7 +369,7 @@ describe('notifications popover', () => {
     const rows = [...pop().querySelectorAll<HTMLElement>('.notif')];
     expect(rows.map((r) => r.querySelector('small')!.textContent)).toEqual([
       'Codex finished. Ready for review',
-      'Claude Code hit its usage limit',
+      'Claude Code is out of usage',
       'Claude Code wants to run a command',
     ]);
     expect(rows.map((r) => r.querySelector('b')!.textContent)).toEqual(['Write docs', 'Fix the login bug', 'Fix the login bug']);

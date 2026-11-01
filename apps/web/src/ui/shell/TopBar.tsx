@@ -6,10 +6,11 @@ import { Bell } from '../notify/Bell.tsx';
 import { FilterButton } from '../filters/FilterMenu.tsx';
 import { UsageChips } from '../usage/UsageChips.tsx';
 
-const VIEW_META: Record<'board' | 'chats' | 'projects' | 'connections', { icon: IconName; title: string }> = {
+const VIEW_META: Record<'board' | 'chats' | 'projects' | 'routines' | 'connections', { icon: IconName; title: string }> = {
   board: { icon: 'board', title: 'Board' },
   chats: { icon: 'inbox', title: 'All chats' },
   projects: { icon: 'projects', title: 'Projects' },
+  routines: { icon: 'clock', title: 'Routines' },
   connections: { icon: 'plug', title: 'Connections' },
 };
 

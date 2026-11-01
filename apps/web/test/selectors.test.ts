@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { folderKey } from '@agent-kanban/shared';
 import { applySnapshot, initialState, type AppState, type Filters } from '../src/state/reducer.ts';
-import { boardColumns, focusedProvider, pinned, projectLabel, providerCounts, recentChats, suggestFor, unreadCount, visibleChats } from '../src/state/selectors.ts';
+import { boardColumns, focusedProvider, pinned, projectLabel, providerCounts, sidebarChats, suggestFor, unreadCount, visibleChats } from '../src/state/selectors.ts';
 import { filterOptions } from '../src/ui/filters/model.ts';
 import { chat } from './helpers.ts';
 
@@ -62,7 +62,7 @@ describe('snooze', () => {
     const s = state([chat({ id: 'z', pinned: true, snoozedUntil: '2026-10-23T13:00:00.000Z' })]);
     expect(ids(s)).toEqual([]);
     expect(pinned(s, NOW)).toEqual([]);
-    expect(recentChats(s, NOW)).toEqual([]);
+    expect(sidebarChats(s, NOW)).toEqual([]);
     const later = Date.parse('2026-10-23T13:00:01.000Z');
     expect(visibleChats(s, later)).toHaveLength(1);
     expect(pinned(s, later)).toHaveLength(1);
@@ -84,19 +84,20 @@ describe('boardColumns', () => {
   });
 });
 
-describe('recentChats', () => {
-  it('lists the 10 most recent chats across projects, newest first, pinned excluded, each with its project name', () => {
+describe('sidebarChats', () => {
+  it('lists chats across projects, newest first, pinned excluded, each with its project name', () => {
     const list = [];
     for (let p = 0; p < 3; p++) for (let i = 0; i < 5; i++) {
       list.push(chat({ id: `p${p}c${i}`, cwd: `/w/proj${p}`, updatedAt: new Date(NOW - (i * 10 + p) * 60000).toISOString(), pinned: p === 0 && i === 0 }));
     }
-    const recent = recentChats(state(list), NOW);
-    expect(recent.map((c) => c.chatId)).toEqual(['p1c0', 'p2c0', 'p0c1', 'p1c1', 'p2c1', 'p0c2', 'p1c2', 'p2c2', 'p0c3', 'p1c3']);
+    const recent = sidebarChats(state(list), NOW);
+    expect(recent.map((c) => c.chatId).slice(0, 10)).toEqual(['p1c0', 'p2c0', 'p0c1', 'p1c1', 'p2c1', 'p0c2', 'p1c2', 'p2c2', 'p0c3', 'p1c3']);
+    expect(recent).toHaveLength(14);
     expect(recent.map((c) => c.projectName).slice(0, 3)).toEqual(['proj1', 'proj2', 'proj0']);
   });
   it('names a Claude scratch chat by its one project', () => {
     const s = state([chat({ id: 's', cwd: String.raw`C:\Users\me\AppData\Roaming\Claude\scratch-workspaces\u1\scratch-aa` })]);
-    expect(recentChats(s, NOW)[0]!.projectName).toBe('Claude scratch chats');
+    expect(sidebarChats(s, NOW)[0]!.projectName).toBe('Claude scratch chats');
   });
   it('includes history-only chats without a matching board chat, and honors provider focus', () => {
     const s = state(
@@ -107,10 +108,10 @@ describe('recentChats', () => {
         { provider: 'codex', sessionRef: 'S2', title: 'native one', cwd: '/w/x', updatedAt: '2026-10-23T08:00:00.000Z' },
       ],
     );
-    const all = recentChats(s, NOW);
+    const all = sidebarChats(s, NOW);
     expect(all.map((c) => c.title)).toEqual(['A chat', 'native one']);
     expect(all[1]).toMatchObject({ chatId: null, sessionRef: 'S2', provider: 'codex', projectName: 'x' });
-    expect(recentChats(withFilters(s, { provider: ['claude'] }), NOW)).toHaveLength(1);
+    expect(sidebarChats(withFilters(s, { provider: ['claude'] }), NOW)).toHaveLength(1);
   });
 });
 
@@ -131,7 +132,7 @@ describe('pinned, unreadCount, suggestFor', () => {
   });
   it('suggestFor skips providers whose "Suggest it for new chats" is off, unless none other may start', () => {
     const on = { claude: true, codex: true, antigravity: true };
-    const settings = { onboarded: true, showChats: on, suggest: { ...on, claude: false }, hiddenProjects: [], unhiddenProjects: [], suggestNextSteps: true };
+    const settings = { onboarded: true, showChats: on, suggest: { ...on, claude: false }, hiddenProjects: [], unhiddenProjects: [], suggestNextSteps: true, myProjects: null };
     expect(suggestFor(state([], { suggested: 'claude', settings }), ['claude', 'codex'])).toEqual({ provider: 'codex', suggested: false });
     expect(suggestFor(state([], { suggested: null, settings }), ['claude', 'antigravity'])).toEqual({ provider: 'antigravity', suggested: false });
     expect(suggestFor(state([], { suggested: null, settings }), ['claude'])).toEqual({ provider: 'claude', suggested: false });
@@ -161,8 +162,8 @@ describe('one folder, however it is spelled', () => {
   const spellings = [String.raw`C:\a`, String.raw`c:\a\ `.trim(), 'C:/a'];
   const s = state(spellings.map((cwd, i) => chat({ id: `c${i}`, sessionRef: `r${i}`, cwd, updatedAt: `2026-10-23T10:0${i}:00.000Z` })));
   it('the sidebar labels every spelling with one project', () => {
-    expect(new Set(recentChats(s, NOW).map((c) => folderKey(c.projectId))).size).toBe(1);
-    expect(new Set(recentChats(s, NOW).map((c) => c.projectName))).toEqual(new Set(['a']));
+    expect(new Set(sidebarChats(s, NOW).map((c) => folderKey(c.projectId))).size).toBe(1);
+    expect(new Set(sidebarChats(s, NOW).map((c) => c.projectName))).toEqual(new Set(['a']));
   });
   it('filtering by any spelling matches every spelling', () => {
     for (const p of spellings) expect(ids(withFilters(s, { project: [p] }))).toEqual(['c0', 'c1', 'c2']);

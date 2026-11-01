@@ -19,11 +19,17 @@ import { STOP_REQUEST_FILE, watchStopRequest } from './stop-request.ts';
 import { FolderPicker } from './folder-picker.ts';
 import { FolderOpener } from './folder-opener.ts';
 import { SettingsStore } from './settings.ts';
+import { RoutineService } from './routines.ts';
 import { AdapterRegistry } from './adapters/registry.ts';
 import { findBinary } from './binaries.ts';
 import { createApi } from './api.ts';
 import { ConnectionMonitor, getLatest, makeGetVersion } from './health.ts';
 import { acquireLock, releaseLock } from './lock.ts';
+import { AccountService, AccountStore } from './accounts.ts';
+import { ClaudeHooks } from './outside/hooks.ts';
+import { OutsideSessions } from './outside/sessions.ts';
+import { readClaudeSession } from './history/claude.ts';
+import { unlinkSync, writeFileSync } from 'node:fs';
 
 // Last resort: a stray rejection is logged, never allowed to take the server (and every chat) down.
 process.on('unhandledRejection', (e) => console.error('[agent-kanban] unhandled', e));
@@ -55,6 +61,8 @@ if (!acquireLock(lockPath)) {
 }
 process.on('exit', () => releaseLock(lockPath));
 const store = new Store(join(dataDir, 'agent-kanban.db'));
+// Extra accounts (#39) live under the data folder; Default is the provider's own folder.
+const accountStore = new AccountStore({ backend: store, root: join(dataDir, 'accounts'), providerHome: { claude: join(homedir(), '.claude'), codex: join(homedir(), '.codex') } });
 const token = randomBytes(24).toString('hex');
 
 const PROVIDERS: ProviderId[] = ['claude', 'codex', 'antigravity'];
@@ -64,8 +72,8 @@ const findProvider = (id: ProviderId) =>
 // Adapters are created when a provider's binary is first found, so installing one later needs no restart.
 const adapters = new AdapterRegistry({
   findBinary: findProvider,
-  create: (id, path) => (id === 'claude' ? new ClaudeAdapter({ claudePath: path })
-    : id === 'codex' ? new CodexAdapter({ codexPath: path })
+  create: (id, path) => (id === 'claude' ? new ClaudeAdapter({ claudePath: path, env: () => accountStore.env('claude') })
+    : id === 'codex' ? new CodexAdapter({ codexPath: path, env: () => accountStore.env('codex') })
       : new AntigravityAdapter({ exePath: path })),
 });
 // Creating an adapter starts nothing: the Antigravity agent (slow to start) is launched only by a chat or sign-in.
@@ -100,6 +108,7 @@ const connections = new ConnectionMonitor({
   },
 });
 const settings = new SettingsStore(store);
+const routines = new RoutineService({ store, chats, broadcast: (e) => broadcast(e) });
 const connect = new ConnectService({
   run: spawnCommand,
   npmPath: () => findBinary('npm'),
@@ -118,9 +127,44 @@ const connect = new ConnectService({
   // The check after an operation is always sent (newer checkedAt), so the card stops saying Checking… even when nothing changed.
   onHealth: (health) => broadcast({ type: 'connection.updated', health }),
   home: akHome,
+  accountEnv: (id) => accountStore.env(id),
 });
 connectRef = connect;
-const api = createApi({ chats, usage, history: () => readAllHistory(home), token, connections, adapters, connect, settings, folderPicker: new FolderPicker(), folderOpener: new FolderOpener(),
+const accounts = new AccountService({
+  accounts: accountStore,
+  // A turn in progress (Running), not merely a chat the helper still has open: those continue on the new account.
+  runningOn: (p) => chats.listChats().some((c) => c.provider === p && c.column === 'running'),
+  switched: (p) => {
+    (adapters.get(p) as { accountChanged?: () => void } | undefined)?.accountChanged?.();
+    usage.refresh(p).catch(() => {});
+    connections.check(p).catch(() => {});
+  },
+  emit: (e) => broadcast(e),
+});
+// A used reset puts Codex back to work: its out-of-usage chats continue now.
+const codexResets = {
+  read: async () => { const a = adapters.get('codex'); return a instanceof CodexAdapter ? a.readResetCredits() : 0; },
+  use: async () => {
+    const a = adapters.get('codex');
+    if (!(a instanceof CodexAdapter)) return 'failed';
+    const outcome = await a.useResetCredit();
+    if (outcome === 'reset') {
+      usage.refresh('codex').catch(() => {});
+      for (const c of chats.listChats()) {
+        if (c.provider === 'codex' && c.column === 'needs_you' && c.needsReason === 'limit') chats.resumeNow(c.id).catch(() => {});
+      }
+    }
+    return outcome;
+  },
+};
+// Claude Code hooks run our script with Node; in the desktop app the server's own binary is Electron run as Node.
+const execPath = process.execPath.replace(/\\/g, '/');
+const nodeRunner = process.versions.electron ? `ELECTRON_RUN_AS_NODE=1 "${execPath}"` : `"${execPath}"`;
+const hookEndpoint = join(dataDir, 'hook-endpoint.json');
+const hookSecret = randomBytes(24).toString('hex');
+const claudeHooks = new ClaudeHooks({ settingsPath: join(home, '.claude', 'settings.json'), scriptPath: join(dataDir, 'agent-kanban-hook.mjs'), endpointPath: hookEndpoint, runner: nodeRunner });
+const outside = new OutsideSessions({ store, emit: (e) => broadcast(e), runningHere: (id) => chats.runningHere(id), claudeHome: join(home, '.claude') });
+const api = createApi({ codexResets, accounts, routines, hooks: claudeHooks, outside, hookSecret, chats, usage, history: () => readAllHistory(home), token, connections, adapters, connect, settings, folderPicker: new FolderPicker(), folderOpener: new FolderOpener(),
   transcript: (provider, sessionRef) => readTranscript(home, provider, sessionRef) });
 broadcast = api.broadcast;
 
@@ -149,6 +193,13 @@ try {
 }
 api.server.on('error', (err) => console.error('Server error:', err));
 const addr = api.server.address() as AddressInfo;
+// The hook script finds this server through this file; it is ours only while we run.
+writeFileSync(hookEndpoint, JSON.stringify({ port: addr.port, secret: hookSecret }), { mode: 0o600 });
+process.on('exit', () => { try { unlinkSync(hookEndpoint); } catch { /* already gone */ } });
+let installedHooks = false;
+try { installedHooks = claudeHooks.installed(); } catch { /* unreadable settings: treated as not installed */ }
+if (installedHooks) void outside.catchUp(readClaudeSession).catch((e) => console.error('[agent-kanban] outside catch-up', e));
+setInterval(() => { try { outside.settleIdle(); } catch (e) { console.error('[agent-kanban] outside settle', e); } }, 60_000).unref();
 if (desktop) await tellDesktop({ type: 'ready', port: addr.port, token });
 else console.log(`Agent Kanban server: http://127.0.0.1:${addr.port}/?token=${token}`);
 // Browser mode can ask for the page to open (AGENT_KANBAN_OPEN_BROWSER=1): the token goes straight to the browser.
@@ -157,6 +208,8 @@ if (process.env.AGENT_KANBAN_OPEN_BROWSER === '1') {
 }
 usage.start();
 connections.start();
+// Catches up runs missed in the past 12 hours, then keeps the timer for the next one.
+void routines.start().catch((e) => console.error('Routines failed to start:', e));
 
 let stopping = false;
 async function shutdown(): Promise<void> {
@@ -164,6 +217,7 @@ async function shutdown(): Promise<void> {
   stopping = true;
   usage.stop();
   connections.stop();
+  routines.stop();
   // Installs and sign-ins in progress are cancelled; their process trees are killed before we exit.
   const connectDone = connect.dispose().catch(() => {});
   api.server.close();

@@ -112,7 +112,7 @@ p { text-wrap: pretty; }
 [data-level="out"] { --fill-colour: var(--color-meter-out); }
 
 /* Popover: scales from its trigger, never from centre */
-.popover { position: absolute; z-index: 30; background: var(--color-surface); border-radius: var(--radius-card); box-shadow: var(--shadow-pop);
+.popover { position: absolute; z-index: 45; background: var(--color-surface); border-radius: var(--radius-card); box-shadow: var(--shadow-pop);
   transform-origin: var(--origin, top right); transition: opacity var(--duration-pop) var(--ease-out), transform var(--duration-pop) var(--ease-out); }
 .popover[data-state="closed"] { opacity: 0; transform: scale(.97) translateY(-4px); pointer-events: none; transition-duration: var(--duration-exit); }
 .usage-pop { width: 340px; padding: var(--space-2); max-height: calc(100vh - var(--topbar-height) - var(--space-6)); overflow-y: auto; overscroll-behavior: contain; }
@@ -229,6 +229,15 @@ p { text-wrap: pretty; }
 .request .row { display: flex; gap: var(--space-2); }
 @keyframes rise { from { opacity: 0; transform: translateY(6px); } }
 .composer { border-top: 1px solid var(--color-border); padding: var(--space-3) var(--space-4) var(--space-4); }
+/* Out of usage (#39): the auto-resume switch and queued messages above the composer. */
+.out-of-usage { border-top: 1px solid var(--color-border); padding: var(--space-3) var(--space-4) 0; display: grid; gap: var(--space-2); }
+.out-of-usage:empty { display: none; }
+.queue { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-1); }
+.queue-chip { display: flex; align-items: center; gap: var(--space-1); border: 1px solid var(--color-border); border-radius: var(--radius-control); background: var(--color-surface); padding: 2px 2px 2px var(--space-2); }
+.queue-text, .queue-edit { flex: 1; min-width: 0; text-align: left; background: none; border: 0; padding: 0; font: inherit; color: var(--color-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: text; }
+/* A chat running in Claude Code outside the app (#37): watch-only, no composer. */
+.panel-outside { border-top: 1px solid var(--color-border); padding: var(--space-3) var(--space-4) var(--space-4); margin: 0; font-size: var(--text-caption); color: var(--color-text-muted); }
+.card-meta .card-outside { color: var(--color-text-muted); }
 .composer-box { border: 1px solid var(--color-border); border-radius: var(--radius-card); background: var(--color-surface); padding: var(--space-2);
   transition: border-color var(--duration-hover) var(--ease-colour), box-shadow var(--duration-hover) var(--ease-colour); }
 .composer-box:focus-within { border-color: var(--color-border-strong); box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-focus) 15%, transparent); }

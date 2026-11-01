@@ -20,6 +20,7 @@ test('defaults: not onboarded, every provider shown and suggested', () => {
     hiddenProjects: [],
     unhiddenProjects: [],
     suggestNextSteps: true,
+    myProjects: null,
   });
   assert.deepEqual(s.get(), defaultSettings());
 });
@@ -38,6 +39,7 @@ test('patch round-trips through the store (partial per-provider updates) and sur
     hiddenProjects: ['/work/old'],
     unhiddenProjects: [],
     suggestNextSteps: true,
+    myProjects: null,
   };
   assert.deepEqual(out, want);
   assert.deepEqual(new SettingsStore(new Store(join(dir, 'ak.db'))).get(), want);

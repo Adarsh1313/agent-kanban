@@ -1,6 +1,8 @@
+import { randomUUID } from 'node:crypto';
 import { readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import type {
+  QueuedMessage,
   AdapterEvent, Chat, Effort, HistoryChat, Message, OpenRequest, ProviderId, ServerEvent, ToolCall, UserAction,
 } from '@agent-kanban/shared';
 import { nextState } from './columns.ts';
@@ -50,6 +52,8 @@ export function parseNextSteps(text: string): { text: string; suggestions: strin
     .map((s) => (s.length > NEXT_LEN ? s.slice(0, NEXT_LEN - 1).trimEnd() + '…' : s));
   return { text: lines.slice(0, start).join('\n').trimEnd(), suggestions };
 }
+/** Sent at a reset when nothing was queued (the same words as the Resume button). */
+export const RESUME_TEXT = 'Continue where you left off.';
 
 export class ActiveElsewhereError extends Error {
   constructor() {
@@ -105,6 +109,7 @@ export class ChatService {
   private historyGates = new Map<string, Promise<void>>();
   /** The effort each chat's current turn runs at, so its replies can note it. */
   private turnEffort = new Map<string, Effort>();
+  private resumeTimer: NodeJS.Timeout | null = null;
 
   constructor(opts: {
     store: Store;
@@ -134,9 +139,10 @@ export class ChatService {
 
   // ---- public API ----
 
-  async start(input: { provider: ProviderId; cwd: string; prompt: string; model?: string; effort?: Effort }): Promise<Chat> {
+  /** `title` and `routineId` are set by a routine's run (#45); a plain new chat is titled from its prompt. */
+  async start(input: { provider: ProviderId; cwd: string; prompt: string; model?: string; effort?: Effort; title?: string; routineId?: string }): Promise<Chat> {
     const chat = this.store.createChat({
-      provider: input.provider, cwd: input.cwd, title: input.prompt, model: input.model ?? null, effort: input.effort ?? 'normal',
+      provider: input.provider, cwd: input.cwd, title: input.title ?? input.prompt, model: input.model ?? null, effort: input.effort ?? 'normal', routineId: input.routineId ?? null,
     });
     this.addMessage(chat.id, 'user', input.prompt);
     this.broadcast({ type: 'chat.updated', chat });
@@ -152,14 +158,104 @@ export class ChatService {
     while (this.pending.has(chatId)) await this.pending.get(chatId);
   }
 
+  /** Out of usage: a message waits in the follow-up queue and goes out when the chat can continue (#39). */
   async send(chatId: string, text: string): Promise<void> {
+    const current = this.mustGet(chatId);
+    if (current.column === 'needs_you' && current.needsReason === 'limit') {
+      this.setQueue(chatId, [...(current.queue ?? []), { id: randomUUID(), text }]);
+      return;
+    }
+    await this.sendNow(chatId, text);
+  }
+
+  /** Changes a queued message's text. */
+  editQueued(chatId: string, queuedId: string, text: string): Chat {
+    const queue = this.mustGetQueued(chatId, queuedId);
+    return this.setQueue(chatId, queue.map((q) => (q.id === queuedId ? { ...q, text } : q)));
+  }
+
+  removeQueued(chatId: string, queuedId: string): Chat {
+    const queue = this.mustGetQueued(chatId, queuedId);
+    return this.setQueue(chatId, queue.filter((q) => q.id !== queuedId));
+  }
+
+  /** Sends one queued message now instead of waiting for the reset. */
+  async sendQueuedNow(chatId: string, queuedId: string): Promise<void> {
+    const queue = this.mustGetQueued(chatId, queuedId);
+    const item = queue.find((q) => q.id === queuedId)!;
+    this.setQueue(chatId, queue.filter((q) => q.id !== queuedId));
+    await this.sendNow(chatId, item.text);
+  }
+
+  /** Continues every out-of-usage chat whose reset time has come, then waits for the next one. */
+  resumeDue(): void {
+    const now = this.now().getTime();
+    for (const chat of this.store.listChats()) {
+      if (!this.waitingOnReset(chat) || Date.parse(chat.resumeAt!) > now) continue;
+      void this.continueOutOfUsage(chat).catch((e) => console.error('[agent-kanban] auto-resume', e));
+    }
+    this.armResume();
+  }
+
+  /** Continues an out-of-usage chat now (after switching to an account with room): its queue first. */
+  async resumeNow(chatId: string): Promise<void> {
+    const chat = this.mustGet(chatId);
+    if (chat.column !== 'needs_you' || chat.needsReason !== 'limit') throw new CantContinueError("This chat isn't waiting on usage.");
+    await this.continueOutOfUsage(chat);
+    this.armResume();
+  }
+
+  private async continueOutOfUsage(chat: Chat): Promise<void> {
+    const [first, ...rest] = chat.queue ?? [];
+    this.store.updateChat(chat.id, { queue: rest }, { touch: false });
+    await this.sendNow(chat.id, first?.text ?? RESUME_TEXT);
+  }
+
+  private waitingOnReset(chat: Chat): boolean {
+    return chat.column === 'needs_you' && chat.needsReason === 'limit' && !!chat.resumeAt && chat.autoResume !== false;
+  }
+
+  /** One timer for the earliest reset across chats; re-armed whenever one changes. */
+  private armResume(): void {
+    if (this.resumeTimer) clearTimeout(this.resumeTimer);
+    this.resumeTimer = null;
+    let next = Infinity;
+    for (const chat of this.store.listChats()) if (this.waitingOnReset(chat)) next = Math.min(next, Date.parse(chat.resumeAt!));
+    if (!Number.isFinite(next)) return;
+    // setTimeout can't wait longer than about 24 days; checking again every 6 hours keeps it simple.
+    const delay = Math.min(Math.max(0, next - this.now().getTime()), 6 * 60 * 60_000);
+    this.resumeTimer = setTimeout(() => this.resumeDue(), delay);
+    this.resumeTimer.unref?.();
+  }
+
+  private mustGetQueued(chatId: string, queuedId: string): QueuedMessage[] {
+    const queue = this.mustGet(chatId).queue ?? [];
+    if (!queue.some((q) => q.id === queuedId)) throw new Error('That message is no longer queued.');
+    return queue;
+  }
+
+  private setQueue(chatId: string, queue: QueuedMessage[]): Chat {
+    const chat = this.store.updateChat(chatId, { queue }, { touch: false });
+    this.broadcast({ type: 'chat.updated', chat });
+    return chat;
+  }
+
+  /** Stops waiting for timers (tests and shutdown). */
+  dispose(): void {
+    if (this.resumeTimer) clearTimeout(this.resumeTimer);
+    this.resumeTimer = null;
+  }
+
+  private async sendNow(chatId: string, text: string): Promise<void> {
     this.mustGet(chatId);
     while (this.pending.has(chatId)) await this.pending.get(chatId);
     const chat = this.mustGet(chatId);
+    if (chat.outsideLive) throw new ActiveElsewhereError();
     if (chat.sessionRef && !this.live.has(chat.id) && chat.provider === 'claude' && this.isActiveElsewhere(chat.sessionRef, chat.id)) {
       throw new ActiveElsewhereError();
     }
     this.touch(chatId);
+    if (chat.resumeAt) this.store.updateChat(chatId, { resumeAt: null }, { touch: false });
     this.userStopped.delete(chatId); // the user moved on: the new turn's events count
     this.addMessage(chatId, 'user', text);
     this.transition(chatId, { type: 'user.message' });
@@ -230,13 +326,14 @@ export class ChatService {
     return chat;
   }
 
-  /** Rename, pin, snooze or set the effort of a chat (effort applies from the next message). */
-  patch(chatId: string, patch: { title?: string; pinned?: boolean; snoozedUntil?: string | null; effort?: Effort }): Chat {
+  /** Rename, pin, snooze, set the effort of a chat (effort applies from the next message) or turn auto-resume on or off. */
+  patch(chatId: string, patch: { title?: string; pinned?: boolean; snoozedUntil?: string | null; effort?: Effort; autoResume?: boolean }): Chat {
     const current = this.mustGet(chatId);
     if (Object.values(patch).every((v) => v === undefined)) return current;
     // Not activity: the card keeps its place and its "5m ago".
     const chat = this.store.updateChat(chatId, patch, { touch: false });
     this.broadcast({ type: 'chat.updated', chat });
+    if (patch.autoResume !== undefined) this.armResume();
     return chat;
   }
 
@@ -290,6 +387,11 @@ export class ChatService {
 
   getChat(chatId: string): Chat { return this.mustGet(chatId); }
 
+  /** True while this app runs the chat (or is starting or resuming it): outside hooks leave its card alone (#37). */
+  runningHere(chatId: string): boolean {
+    return this.live.has(chatId) || this.pending.has(chatId) || this.resuming.has(chatId);
+  }
+
   listMessages(chatId: string): Message[] {
     this.mustGet(chatId);
     return this.store.listMessages(chatId);
@@ -313,6 +415,8 @@ export class ChatService {
     for (const chat of this.store.listChats()) this.announceClosed(chat.id);
     this.store.closeOpenRequests();
     for (const chat of this.store.listChats()) this.transition(chat.id, { type: 'app.restarted' });
+    // A reset that passed while the app was closed is resumed now.
+    this.armResume();
   }
 
   // ---- internals ----
@@ -583,12 +687,21 @@ export class ChatService {
         this.settle(chatId);
         this.transition(chatId, e);
         this.broadcast({ type: 'notification', chatId, kind: 'finished' });
+        {
+          // After a resume, the rest of the follow-up queue goes out one turn at a time.
+          const [next, ...rest] = this.store.getChat(chatId)?.queue ?? [];
+          if (next) {
+            this.store.updateChat(chatId, { queue: rest }, { touch: false });
+            void this.sendNow(chatId, next.text).catch((err) => console.error('[agent-kanban] queued message', err));
+          }
+        }
         try { this.usage.refresh(provider).catch(() => {}); } catch { /* usage must never break a chat */ }
         return;
       }
       case 'limit.reached':
         this.closeRequests(chatId);
-        this.transition(chatId, e);
+        this.transition(chatId, e, { resumeAt: e.resetsAt ?? null });
+        this.armResume();
         this.broadcast({ type: 'notification', chatId, kind: 'limit' });
         return;
       case 'error': {

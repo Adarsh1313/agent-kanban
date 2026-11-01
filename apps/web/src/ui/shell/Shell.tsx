@@ -8,8 +8,11 @@ import { ConnectionsPage } from '../connections/ConnectionsPage.tsx';
 import { ChatPanel } from '../chat/ChatPanel.tsx';
 import { FilterBar } from '../filters/FilterBar.tsx';
 import { NewChatDialog } from '../newchat/NewChatDialog.tsx';
+import { PickProjectsDialog } from '../myprojects/PickProjects.tsx';
+import { SearchPalette } from '../search/SearchPalette.tsx';
 import { ProjectsPage } from '../projects/ProjectsPage.tsx';
 import { AllChatsPage } from '../chats/AllChatsPage.tsx';
+import { RoutineEditor, RoutinesPage } from '../routines/RoutinesPage.tsx';
 import { hasOpenLayer } from '../primitives/layers.ts';
 import { Toasts } from '../primitives/index.ts';
 import { Sidebar } from './Sidebar.tsx';
@@ -107,12 +110,16 @@ export function Shell() {
             {view === 'board' && <><FilterBar /><Board /></>}
             {view === 'chats' && <AllChatsPage />}
             {view === 'projects' && <ProjectsPage />}
+            {view === 'routines' && <RoutinesPage />}
             {view === 'connections' && <ConnectionsPage />}
           </main>
         </div>
       </div>
       <ChatPanel />
       <NewChatDialog />
+      <RoutineEditor />
+      <PickProjectsDialog />
+      <SearchPalette />
       <Toasts />
     </>
   );

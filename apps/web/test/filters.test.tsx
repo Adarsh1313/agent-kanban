@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, within } from '@testing-librar
 import type { Chat, HistoryChat } from '@agent-kanban/shared';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { applySnapshot, initialState, type AppState, type Filters } from '../src/state/reducer.ts';
-import { recentChats } from '../src/state/selectors.ts';
+import { sidebarChats } from '../src/state/selectors.ts';
 import { createStore, StoreProvider, type Store } from '../src/state/store.ts';
 import { Board } from '../src/ui/board/Board.tsx';
 import { FilterBar } from '../src/ui/filters/FilterBar.tsx';
@@ -194,7 +194,7 @@ describe('Shell: F key and the sidebar', () => {
 
   it('the sidebar\'s recent chats follow the filters (history-only chats are "the provider\'s own app")', () => {
     const s = seeded().getState();
-    const titles = (st: AppState) => recentChats(st, NOW).map((c) => c.title).sort();
+    const titles = (st: AppState) => sidebarChats(st, NOW).map((c) => c.title).sort();
     const w = (f: Partial<Filters>): AppState => ({ ...s, ui: { ...s.ui, filters: { ...s.ui.filters, ...f } } });
     expect(titles(s)).toEqual(['Add tests', 'Fix login', 'Old idea', 'Write docs']);
     expect(titles(w({ source: ['native'] }))).toEqual(['Old idea']);
@@ -208,15 +208,6 @@ describe('Shell: F key and the sidebar', () => {
     expect(titles(w({ provider: ['claude'], source: ['native'] }))).toEqual(['Old idea']);
     mount(createStore(w({ provider: [] })), <Sidebar />);
     expect(screen.queryByText('Fix login')).toBeNull();
-  });
-
-  it('the sidebar says so when filters leave no recent chats, and says nothing without filters', () => {
-    const s = seeded().getState();
-    mount(createStore({ ...s, ui: { ...s.ui, filters: { ...s.ui.filters, provider: [] } } }), <Sidebar />);
-    expect(screen.getByText('No matching chats')).toBeTruthy();
-    cleanup();
-    mount(seeded({}, [], []), <Sidebar />);
-    expect(screen.queryByText('No matching chats')).toBeNull();
   });
 });
 
@@ -245,6 +236,6 @@ describe('Filter menu: Project', () => {
 
   it('choosing Claude scratch chats keeps every scratch chat', () => {
     const base = seeded({ project: [ROOT] }, chats, history);
-    expect(recentChats(base.getState(), NOW).map((c) => c.title).sort()).toEqual(['Regex', 'Zstd']);
+    expect(sidebarChats(base.getState(), NOW).map((c) => c.title).sort()).toEqual(['Regex', 'Zstd']);
   });
 });

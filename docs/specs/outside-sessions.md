@@ -67,8 +67,14 @@ A one-click **Install** in Settings adds an Agent Kanban hook entry to `~/.claud
 
 ## Progress
 
-- [ ] Slice 1: hook installer + `GET/POST install/remove` endpoints, with tests on a temp settings file
-- [ ] Slice 2: event sink endpoint + hook script; events drive Running/Needs you/Review on one chat keyed by session id
-- [ ] Slice 3: catch-up on start (24 h, idle settle) and history de-duplication
-- [ ] Slice 4: web: Settings section, outside mark on cards, read-only composer note, Continue here
-- [ ] Slice 5: DESIGN.md note, glossary check, close #37
+- [x] Slice 1: hook installer + `GET/POST install/remove` endpoints, with tests on a temp settings file
+- [x] Slice 2: event sink endpoint + hook script; events drive Running/Needs you/Review on one chat keyed by session id
+- [x] Slice 3: catch-up on start (24 h, idle settle) and history de-duplication
+- [x] Slice 4: web: Settings section, outside mark on cards, read-only composer note, Continue here
+- [x] Slice 5: DESIGN.md note, glossary check, close #37
+
+## Implementation notes
+
+- The hook script finds the app through `~/.agent-kanban/hook-endpoint.json` (port plus a per-run secret), written on start and removed on exit, not the lock file. The secret stops web pages from posting fake events to the local server.
+- The switch lives on Claude's Connections card, not a separate Settings page.
+- The event endpoint is `POST /api/hooks/claude/event`.

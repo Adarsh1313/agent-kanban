@@ -10,10 +10,11 @@ import type {
   Project,
   ProviderId,
   RequestAction,
+  Routine,
   ServerEvent,
   Settings,
   ToolCall,
-  UsageReading,
+  UsageReading, Account, AccountProvider,
 } from '@agent-kanban/shared';
 import { suggest } from '@agent-kanban/shared';
 
@@ -49,7 +50,7 @@ export interface Filters {
 export interface HistoryRef { provider: ProviderId; sessionRef: string; cwd: string; title: string }
 
 export interface UiState {
-  view: 'board' | 'chats' | 'projects' | 'connections';
+  view: 'board' | 'chats' | 'projects' | 'routines' | 'connections';
   projectId: string | null;
   /** The chat shown in the side panel; mutually exclusive with `openHistory`. */
   openChatId: string | null;
@@ -62,6 +63,12 @@ export interface UiState {
   chatsFilters: Filters;
   /** Bumped by the sidebar's search icon: All chats focuses its search box. */
   chatsSearchFocus: number;
+  /** The My projects picker dialog is open (from the sidebar's pick card, Edit or empty state). */
+  pickProjects: boolean;
+  /** The global search palette is open (sidebar field, Ctrl+K). */
+  searchOpen: boolean;
+  /** Text "See all results" hands to All chats' search box (with chatsSearchFocus bumped). */
+  chatsSearchText: string;
 }
 
 export interface SyncState {
@@ -88,8 +95,13 @@ export interface AppState {
   connect: Partial<Record<ProviderId, ConnectState>>;
   /** null until loaded. */
   settings: Settings | null;
+  /** Each provider's accounts once asked (#39). */
+  accounts: Partial<Record<AccountProvider, Account[]>>;
+  /** Claude Code's outside-chat hooks are installed; null until asked (#37). */
+  claudeHooks: boolean | null;
   history: HistoryChat[];
   projects: Project[];
+  routines: Routine[];
   notifications: AppNotification[];
   /** Chats whose thread was fetched with loadChat (see isChatLoaded). */
   loadedChats: Record<string, true>;
@@ -119,6 +131,7 @@ export interface Snapshot {
   projects: Project[];
   connect?: ConnectState[];
   settings?: Settings | null;
+  routines?: Routine[];
 }
 
 const MAX_NOTIFICATIONS = 100;
@@ -135,8 +148,11 @@ export function initialState(): AppState {
     connections: {},
     connect: {},
     settings: null,
+    accounts: {},
+    claudeHooks: null,
     history: [],
     projects: [],
+    routines: [],
     notifications: [],
     loadedChats: {},
     pendingDeltas: {},
@@ -154,6 +170,9 @@ export function initialState(): AppState {
       filters: { provider: null, project: null, status: null, model: null, reason: null, activity: null, source: null },
       chatsFilters: { provider: null, project: null, status: null, model: null, reason: null, activity: null, source: null },
       chatsSearchFocus: 0,
+      pickProjects: false,
+      searchOpen: false,
+      chatsSearchText: '',
     },
   };
 }
@@ -334,9 +353,15 @@ export function applyEvent(s: AppState, e: ServerEvent, now: Date = new Date()):
       return mk([], { connections: { ...s.connections, [e.health.provider]: e.health } });
     case 'connect.updated':
       return mk([], { connect: mergeConnect(s.connect, [e.state]) });
+    case 'accounts.updated':
+      return mk([], { accounts: { ...s.accounts, [e.provider]: e.accounts } });
+    case 'hooks.updated':
+      return mk([], { claudeHooks: e.installed });
     case 'settings.updated':
       // Saved in another tab (or onboarding): every open page follows.
       return { ...applySettings(s, e.settings), sync: bump(s, []) };
+    case 'routines.updated':
+      return mk([], { routines: e.routines });
     case 'notification': {
       const item: AppNotification = { id: `n${s.sync.seq + 1}`, chatId: e.chatId, kind: e.kind, ...(e.action ? { action: e.action } : {}), at: now.toISOString(), unread: true };
       return mk([chatKey(e.chatId)], { notifications: [item, ...s.notifications].slice(0, MAX_NOTIFICATIONS) });
@@ -407,6 +432,7 @@ export function applySnapshot(s: AppState, snap: Snapshot, since: number = s.syn
     suggested: snap.suggested,
     history: snap.history,
     projects: snap.projects,
+    routines: snap.routines ?? s.routines,
   };
 }
 

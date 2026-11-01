@@ -57,6 +57,8 @@ type Chat = {
   query: Query | null;
   turnRunning: boolean;
   turnAnnounced: boolean;
+  /** Set by a rejected rate_limit_event during this turn: its reset time, or '' when not given. */
+  limitResetsAt?: string;
   stopping: boolean;
   pending: Map<string, Pending>;
   onStarted?: { resolve: () => void; reject: (e: Error) => void };
@@ -70,6 +72,9 @@ export const CLAUDE_EFFORT: Record<Effort, 'low' | 'medium' | 'high'> = { quick:
 const SHUT_DOWN = 'Claude Code adapter is shut down.';
 const DIED = 'Claude Code stopped unexpectedly.';
 const IDLE_CLOSE_MS = 10 * 60_000;
+
+/** Claude Code's result text when a plan limit stopped the turn (no rate_limit_event came first). */
+const LIMIT_TEXT = /hit your (usage )?limit|usage limit reached|out of usage/i;
 
 export class ClaudeAdapter implements ProviderAdapter {
   id = 'claude' as const;
@@ -89,13 +94,27 @@ export class ClaudeAdapter implements ProviderAdapter {
   private lastSignedIn: boolean | null = null;
   private idleCloseMs: number;
 
-  constructor(opts: { claudePath: string; query?: typeof sdkQuery; usageTimeoutMs?: number; idleCloseMs?: number }) {
+  /** The active account's settings for Claude Code (CLAUDE_CONFIG_DIR), read whenever a query starts (#39). */
+  private accountEnv: () => Record<string, string>;
+
+  constructor(opts: { claudePath: string; query?: typeof sdkQuery; usageTimeoutMs?: number; idleCloseMs?: number; env?: () => Record<string, string> }) {
+    this.accountEnv = opts.env ?? (() => ({}));
     this.usageTimeoutMs = opts.usageTimeoutMs ?? 15_000;
     this.idleCloseMs = opts.idleCloseMs ?? IDLE_CLOSE_MS;
     // The SDK needs the real executable (an .exe, or a .js script it runs with node), never a .cmd shim.
     const target = resolveSpawnTarget(opts.claudePath);
     this.claudePath = target.args.length === 0 ? target.command : target.args[0]!;
     this.query = opts.query ?? sdkQuery;
+  }
+
+  private envOption(): { env?: Record<string, string | undefined> } {
+    const env = this.accountEnv();
+    return Object.keys(env).length > 0 ? { env: { ...process.env, ...env } } : {};
+  }
+
+  /** The usage query belongs to one account: switching closes it so the next reading uses the new one. */
+  accountChanged(): void {
+    this.closeUsageQuery(true);
   }
 
   onEvent(listener: Listener): () => void {
@@ -160,6 +179,8 @@ export class ClaudeAdapter implements ProviderAdapter {
     if (chat.effort) options.effort = CLAUDE_EFFORT[chat.effort];
     if (chat.instructions) options.systemPrompt = { type: 'preset', preset: 'claude_code', append: chat.instructions };
     if (resume) options.resume = resume;
+    const env = this.accountEnv();
+    if (Object.keys(env).length > 0) options.env = { ...process.env, ...env };
     const q = this.query({ prompt: chat.queue, options: options as never });
     chat.query = q;
     this.live.add(chat);
@@ -219,12 +240,22 @@ export class ClaudeAdapter implements ProviderAdapter {
           this.emit({ type: 'tool.call', sessionRef, toolCallId: String(block.id), name: String(block.name), summary: toolSummary(block.name, block.input ?? {}), status: 'running' });
         }
       });
+    } else if (m.type === 'rate_limit_event') {
+      // Claude.ai plan limits: a rejected request means the turn ends out of usage until resetsAt (#39).
+      const info = m.rate_limit_info;
+      if (info?.status === 'rejected') chat.limitResetsAt = typeof info.resetsAt === 'number' ? new Date(info.resetsAt * 1000).toISOString() : '';
     } else if (m.type === 'result') {
       const swallow = chat.stopping;
+      const limit = chat.limitResetsAt;
+      chat.limitResetsAt = undefined;
       chat.turnRunning = false; chat.turnAnnounced = false; chat.stopping = false;
       this.scheduleIdleClose(chat);
       if (swallow) return;
-      if (m.is_error) this.emit({ type: 'error', sessionRef, message: typeof m.result === 'string' && m.result ? m.result : 'Claude Code ran into a problem.' });
+      const text = typeof m.result === 'string' ? m.result : '';
+      // A rejection that overage covered still ends the turn normally: only a failed turn is out of usage.
+      if (m.is_error && (limit !== undefined || LIMIT_TEXT.test(text))) {
+        this.emit(limit ? { type: 'limit.reached', sessionRef, resetsAt: limit } : { type: 'limit.reached', sessionRef });
+      } else if (m.is_error) this.emit({ type: 'error', sessionRef, message: typeof m.result === 'string' && m.result ? m.result : 'Claude Code ran into a problem.' });
       else this.emit({ type: 'turn.completed', sessionRef });
     }
   }
@@ -320,7 +351,7 @@ export class ClaudeAdapter implements ProviderAdapter {
       // One long-lived query with an empty prompt stream; strictMcpConfig + no mcpServers keeps user MCP servers from loading.
       const q = this.query({
         prompt: new InputQueue(),
-        options: { pathToClaudeCodeExecutable: this.claudePath, permissionMode: 'default', mcpServers: {}, strictMcpConfig: true } as never,
+        options: { pathToClaudeCodeExecutable: this.claudePath, permissionMode: 'default', mcpServers: {}, strictMcpConfig: true, ...this.envOption() } as never,
       });
       this.usageQuery = q;
       this.drain(q);
