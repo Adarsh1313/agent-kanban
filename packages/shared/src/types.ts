@@ -50,9 +50,14 @@ export interface Chat {
   archived: boolean;
   pinned: boolean;
   snoozedUntil: string | null;
+  /** Each provider's own session for this chat, kept across handoffs (#40). */
+  providerRefs?: Partial<Record<ProviderId, string>>;
+  /** "Move to project": the project the chat shows under; it still runs in `cwd`. */
+  projectLabel?: string | null;
 }
 
-export interface Message { id: string; chatId: string; role: 'user' | 'assistant'; text: string; createdAt: string }
+/** `provider`: who wrote it (each reply shows its provider after a handoff). */
+export interface Message { id: string; chatId: string; role: 'user' | 'assistant'; text: string; createdAt: string; provider?: ProviderId }
 
 /** A permission or question the agent is waiting on (read back after a page reload). */
 export interface OpenRequest { requestId: string; kind: 'permission' | 'question'; summary: string; createdAt: string; action?: RequestAction }

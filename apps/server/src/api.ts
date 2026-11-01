@@ -228,7 +228,7 @@ export function createApi(opts: {
     }
     if ((m = match('POST', '/api/chats/:id/messages'))) {
       const b = await readJson(req);
-      await chats.send(m[0]!, str(b, 'text'));
+      await chats.send(m[0]!, str(b, 'text'), b.provider === undefined ? undefined : provider(b));
       return { status: 204 };
     }
     if ((m = match('POST', '/api/chats/:id/requests/:requestId'))) {

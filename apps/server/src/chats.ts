@@ -10,6 +10,7 @@ import { AdapterRegistry } from './adapters/registry.ts';
 import type { AdapterSource } from './adapters/registry.ts';
 import type { UsageService } from './usage/service.ts';
 import { ANTIGRAVITY_SIGNED_OUT } from './adapters/antigravity.ts';
+import { buildPreface } from './handoff.ts';
 
 const NAMES: Record<ProviderId, string> = { claude: 'Claude Code', codex: 'Codex', antigravity: 'Antigravity' };
 const ACTIVE_WINDOW_MS = 15_000;
@@ -80,6 +81,7 @@ export class ChatService {
   private reported = new WeakMap<object, Set<string>>();
   private historyGates = new Map<string, Promise<void>>();
   private outgoing: (provider: ProviderId, text: string) => string;
+  private notes: (cwd: string) => string | null;
 
   constructor(opts: {
     store: Store;
@@ -90,7 +92,10 @@ export class ChatService {
     now?: () => Date;
     /** The text an adapter receives for what the user typed (a `/skill` in the provider's own form). */
     outgoing?: (provider: ProviderId, text: string) => string;
+    /** The project notes to hand over, when notes are on for the folder. */
+    notes?: (cwd: string) => string | null;
   }) {
+    this.notes = opts.notes ?? (() => null);
     this.outgoing = opts.outgoing ?? ((_, t) => t);
     this.store = opts.store;
     this.adapters = typeof (opts.adapters as AdapterSource).onAdapter === 'function' ? (opts.adapters as AdapterSource) : AdapterRegistry.of(opts.adapters as Partial<Record<ProviderId, ProviderAdapter>>);
@@ -127,10 +132,13 @@ export class ChatService {
     while (this.pending.has(chatId)) await this.pending.get(chatId);
   }
 
-  async send(chatId: string, text: string): Promise<void> {
+  /** `provider` other than the chat's hands the chat over to it on this message (#40). */
+  async send(chatId: string, text: string, provider?: ProviderId): Promise<void> {
     this.mustGet(chatId);
     while (this.pending.has(chatId)) await this.pending.get(chatId);
-    const chat = this.mustGet(chatId);
+    let chat = this.mustGet(chatId);
+    let preface: string | null = null;
+    if (provider && provider !== chat.provider) ({ chat, preface } = this.handOver(chat, provider));
     if (chat.sessionRef && !this.live.has(chat.id) && chat.provider === 'claude' && this.isActiveElsewhere(chat.sessionRef, chat.id)) {
       throw new ActiveElsewhereError();
     }
@@ -138,9 +146,32 @@ export class ChatService {
     this.userStopped.delete(chatId); // the user moved on: the new turn's events count
     this.addMessage(chatId, 'user', text);
     this.transition(chatId, { type: 'user.message' });
-    const out = this.outgoing(chat.provider, text);
+    const typed = this.outgoing(chat.provider, text);
+    const out = preface ? `${preface}
+
+${typed}` : typed;
     if (!chat.sessionRef) await this.begin(chat, out);
     else await this.deliver(chat, out);
+  }
+
+  /**
+   * Switches the chat to `to`: the old provider's session and how far it got are kept, `to` resumes its own
+   * session if it took part before, and the preface carries what it missed.
+   */
+  private handOver(chat: Chat, to: ProviderId): { chat: Chat; preface: string } {
+    const messages = this.store.listMessages(chat.id);
+    const refs = { ...(chat.providerRefs ?? {}) };
+    if (chat.sessionRef) refs[chat.provider] = chat.sessionRef;
+    const seen = this.store.getHandoffSeen(chat.id);
+    seen[chat.provider] = messages.length;
+    const since = refs[to] ? seen[to] ?? 0 : 0;
+    this.store.setHandoffSeen(chat.id, seen);
+    this.closeRequests(chat.id);
+    this.live.delete(chat.id);
+    const preface = buildPreface({ to, messages, toolCalls: this.store.listToolCalls(chat.id), since, cwd: chat.cwd, notes: this.notes(chat.cwd) });
+    const next = this.store.updateChat(chat.id, { provider: to, sessionRef: refs[to] ?? null, model: null, providerRefs: refs });
+    this.broadcast({ type: 'chat.updated', chat: next });
+    return { chat: next, preface };
   }
 
   async answer(chatId: string, requestId: string, decision: Decision): Promise<void> {

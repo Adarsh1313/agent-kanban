@@ -8,18 +8,25 @@ const COLS: Record<keyof Chat, string> = {
   id: 'id', provider: 'provider', sessionRef: 'session_ref', cwd: 'cwd', title: 'title', model: 'model',
   column: 'column_name', needsReason: 'needs_reason', createdAt: 'created_at', updatedAt: 'updated_at',
   doneAt: 'done_at', archived: 'archived', pinned: 'pinned', snoozedUntil: 'snoozed_until',
+  providerRefs: 'provider_refs', projectLabel: 'project_label',
 };
+
+function json<T>(raw: unknown, fallback: T): T {
+  if (typeof raw !== 'string') return fallback;
+  try { return JSON.parse(raw) as T; } catch { return fallback; }
+}
 
 function toChat(r: Row): Chat {
   return {
     id: r.id, provider: r.provider, sessionRef: r.session_ref, cwd: r.cwd, title: r.title, model: r.model,
     column: r.column_name, needsReason: r.needs_reason, createdAt: r.created_at, updatedAt: r.updated_at,
     doneAt: r.done_at, archived: r.archived === 1, pinned: r.pinned === 1, snoozedUntil: r.snoozed_until,
+    providerRefs: json(r.provider_refs, {}), projectLabel: r.project_label ?? null,
   };
 }
 
 function toMessage(r: Row): Message {
-  return { id: r.id, chatId: r.chat_id, role: r.role, text: r.text, createdAt: r.created_at };
+  return { id: r.id, chatId: r.chat_id, role: r.role, text: r.text, createdAt: r.created_at, ...(r.provider ? { provider: r.provider } : {}) };
 }
 
 function requestKey(chatId: string, requestId: string): string {
@@ -71,6 +78,13 @@ export class Store {
     // Added in Plan 3: what a permission request is for. Older databases get the column (NULL = a command).
     const requestCols = (this.db.prepare('PRAGMA table_info(requests)').all() as { name: string }[]).map((c) => c.name);
     if (!requestCols.includes('action')) this.db.exec('ALTER TABLE requests ADD COLUMN action TEXT');
+    // Added for handoff (#40): each message's provider, each provider's session and where it left off, the project label.
+    const chatCols = (this.db.prepare('PRAGMA table_info(chats)').all() as { name: string }[]).map((c) => c.name);
+    if (!chatCols.includes('provider_refs')) this.db.exec('ALTER TABLE chats ADD COLUMN provider_refs TEXT');
+    if (!chatCols.includes('handoff_seen')) this.db.exec('ALTER TABLE chats ADD COLUMN handoff_seen TEXT');
+    if (!chatCols.includes('project_label')) this.db.exec('ALTER TABLE chats ADD COLUMN project_label TEXT');
+    const msgCols = (this.db.prepare('PRAGMA table_info(messages)').all() as { name: string }[]).map((c) => c.name);
+    if (!msgCols.includes('provider')) this.db.exec('ALTER TABLE messages ADD COLUMN provider TEXT');
   }
 
   /** Closes the database (tests remove its folder afterwards). */
@@ -109,7 +123,7 @@ export class Store {
     for (const [k, v] of Object.entries(patch) as [keyof Chat, unknown][]) {
       if (k === 'id' || k === 'updatedAt' || !(k in COLS) || v === undefined) continue;
       sets.push(`${COLS[k]} = ?`);
-      vals.push(typeof v === 'boolean' ? (v ? 1 : 0) : v);
+      vals.push(typeof v === 'boolean' ? (v ? 1 : 0) : v !== null && typeof v === 'object' ? JSON.stringify(v) : v);
     }
     if (opts.touch !== false) {
       sets.push('updated_at = ?');
@@ -131,9 +145,11 @@ export class Store {
   }
 
   addMessage(chatId: string, role: 'user' | 'assistant', text: string): Message {
-    const m: Message = { id: randomUUID(), chatId, role, text, createdAt: this.now() };
-    this.db.prepare('INSERT INTO messages (id, chat_id, role, text, created_at) VALUES (?, ?, ?, ?, ?)')
-      .run(m.id, chatId, role, text, m.createdAt);
+    // Each message keeps the provider the chat had when it was written.
+    const provider = (this.db.prepare('SELECT provider FROM chats WHERE id = ?').get(chatId) as Row | undefined)?.provider as ProviderId | undefined;
+    const m: Message = { id: randomUUID(), chatId, role, text, createdAt: this.now(), ...(provider ? { provider } : {}) };
+    this.db.prepare('INSERT INTO messages (id, chat_id, role, text, created_at, provider) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(m.id, chatId, role, text, m.createdAt, provider ?? null);
     return m;
   }
 
@@ -204,6 +220,16 @@ export class Store {
     const out: UsageReading = { provider: r.provider, status: r.status, windows: JSON.parse(r.windows) as UsageWindow[], readAt: r.read_at };
     if (r.message !== null) out.message = r.message;
     return out;
+  }
+
+  /** How many messages each provider had seen when the chat last moved away from it (handoff deltas). */
+  getHandoffSeen(chatId: string): Partial<Record<ProviderId, number>> {
+    const r = this.db.prepare('SELECT handoff_seen FROM chats WHERE id = ?').get(chatId) as Row | undefined;
+    return json(r?.handoff_seen, {});
+  }
+
+  setHandoffSeen(chatId: string, seen: Partial<Record<ProviderId, number>>): void {
+    this.db.prepare('UPDATE chats SET handoff_seen = ? WHERE id = ?').run(JSON.stringify(seen), chatId);
   }
 
   /** A stored setting (JSON text), or undefined when it was never set. */
