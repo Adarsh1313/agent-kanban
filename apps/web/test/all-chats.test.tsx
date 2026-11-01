@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { Chat, HistoryChat, Project } from '@agent-kanban/shared';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { applySnapshot, initialState } from '../src/state/reducer.ts';
 import { createStore, StoreProvider, type Store } from '../src/state/store.ts';
 import { Shell } from '../src/ui/shell/Shell.tsx';
@@ -55,6 +55,23 @@ describe('All chats', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'Archived' }));
     expect(titles()).toEqual(['Fix login redirect', 'Old login idea']);
     expect(within(page()).getAllByRole('button', { name: 'More actions' })).toHaveLength(2);
+  });
+
+  it('Trash shows days left, restores a chat, and confirms Empty trash', async () => {
+    const store = seeded();
+    store.setState((s) => ({ ...s, trash: [{ id: 'claude-s1', chatId: 'a', provider: 'claude', sessionRef: 's1', title: 'Deleted work', deletedAt: ago(60), daysLeft: 29 }] }));
+    const fetch = vi.fn().mockResolvedValue(Response.json(store.getState().trash[0]));
+    vi.stubGlobal('fetch', fetch);
+    mount(store);
+    fireEvent.click(screen.getByRole('tab', { name: 'Trash' }));
+    expect(screen.getByRole('list', { name: 'Trash' }).textContent).toContain('29 days left');
+    fireEvent.click(screen.getByRole('button', { name: 'Restore' }));
+    await waitFor(() => expect(store.getState().trash).toHaveLength(0));
+    expect(fetch.mock.calls.some((call) => call[0] === '/api/trash/claude-s1/restore')).toBe(true);
+
+    store.setState((s) => ({ ...s, trash: [{ id: 'codex-s2', chatId: null, provider: 'codex', sessionRef: 's2', title: 'Another', deletedAt: ago(60), daysLeft: 29 }] }));
+    fireEvent.click(document.querySelector<HTMLButtonElement>('.trash-empty')!);
+    expect(screen.getByRole('dialog', { name: 'Empty trash?' }).textContent).toContain('gone for good');
   });
 
   it('search matches the title or the project and highlights the match; nothing matching shows an empty state', () => {

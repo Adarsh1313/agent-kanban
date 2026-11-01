@@ -1,4 +1,5 @@
-import type { Chat, ProviderId } from '@agent-kanban/shared';
+import type { Chat, ProviderId, TrashEntry } from '@agent-kanban/shared';
+import { useState } from 'react';
 import { folderKey } from '@agent-kanban/shared';
 import { chatFolder, visibleProjects } from '../../state/selectors.ts';
 import { api } from '../../api/client.ts';
@@ -7,6 +8,7 @@ import { useStore, useStoreInstance, type Store } from '../../state/store.ts';
 import { errorText } from '../board/Card.tsx';
 import { clockTime } from '../board/format.ts';
 import { dismissToast, Icon, Menu, MenuItem, MenuLabel, MenuSep, Tooltip, toast, type MenuNav } from '../primitives/index.ts';
+import { Dialog } from '../primitives/Dialog.tsx';
 
 const HOUR = 3_600_000;
 const EVENING_HOUR = 18;
@@ -204,10 +206,37 @@ export function ChatActionsMenu({ anchor, open: wanted, target, onClose, onRenam
   const history = chat ? null : target?.history ?? null;
   const historyArchived = useStore((s) => history !== null && Boolean(s.history.find((h) => h.provider === history.provider && h.sessionRef === history.sessionRef)?.archived));
   const historyOpen = useStore((s) => history !== null && s.ui.openHistory?.provider === history.provider && s.ui.openHistory.sessionRef === history.sessionRef);
+  const [deleting, setDeleting] = useState<ChatActionsTarget | null>(null);
+  const [deletingBusy, setDeletingBusy] = useState(false);
 
   const pick = (fn: () => void) => () => {
     onClose();
     fn();
+  };
+
+  const askDelete = (item: ChatActionsTarget) => {
+    onClose();
+    setDeleting(item);
+  };
+
+  const confirmDelete = async () => {
+    if (!deleting) return;
+    setDeletingBusy(true);
+    try {
+      let entry: TrashEntry;
+      if (deleting.chatId) entry = await api.deleteChat(deleting.chatId);
+      else if (deleting.history) entry = await api.deleteHistory(deleting.history.provider, deleting.history.sessionRef);
+      else return;
+      store.setState((s) => ({
+        ...s,
+        chats: entry.chatId && s.chats[entry.chatId] ? { ...s.chats, [entry.chatId]: { ...s.chats[entry.chatId]!, deletedAt: entry.deletedAt } } : s.chats,
+        history: deleting.history ? s.history.filter((h) => h.provider !== deleting.history!.provider || h.sessionRef !== deleting.history!.sessionRef) : s.history,
+        trash: [entry, ...s.trash.filter((e) => e.id !== entry.id)],
+      }));
+      setDeleting(null);
+      toast('Chat moved to Trash');
+    } catch (err) { toast(errorText(err)); }
+    finally { setDeletingBusy(false); }
   };
 
   const root = (nav: MenuNav) => {
@@ -234,6 +263,10 @@ export function ChatActionsMenu({ anchor, open: wanted, target, onClose, onRenam
                 : <MenuItem icon="archive" danger onSelect={pick(() => archiveChat(store, chat.id))}>Archive chat</MenuItem>}
             </>
           )}
+          <MenuSep />
+          <MenuItem icon="trash" danger disabled={chat.column === 'running' || chat.provider === 'antigravity'}
+            right={chat.column === 'running' ? 'Stop it first' : chat.provider === 'antigravity' ? "Antigravity chats can't be deleted from here yet" : undefined}
+            onSelect={() => askDelete({ chatId: chat.id, history: null })}>Delete chat</MenuItem>
         </>
       );
     }
@@ -249,11 +282,14 @@ export function ChatActionsMenu({ anchor, open: wanted, target, onClose, onRenam
         {historyArchived
           ? <MenuItem icon="archive" onSelect={pick(() => void unarchiveHistoryChat(store, history))}>Unarchive chat</MenuItem>
           : <MenuItem icon="archive" danger onSelect={pick(() => void archiveHistoryChat(store, history))}>Archive chat</MenuItem>}
+        <MenuItem icon="trash" danger disabled={history.provider === 'antigravity'} right={history.provider === 'antigravity' ? "Antigravity chats can't be deleted from here yet" : undefined}
+          onSelect={() => askDelete({ chatId: null, history })}>Delete chat</MenuItem>
       </>
     );
   };
 
   return (
+    <>
     <Menu
       anchor={anchor}
       open={open}
@@ -291,6 +327,12 @@ export function ChatActionsMenu({ anchor, open: wanted, target, onClose, onRenam
         ),
       }}
     />
+    <Dialog open={deleting !== null} onClose={() => { if (!deletingBusy) setDeleting(null); }} title="Delete this chat?"
+      footer={<><span className="grow" /><button className="btn ghost" type="button" disabled={deletingBusy} onClick={() => setDeleting(null)}>Cancel</button>
+        <button className="btn danger" type="button" disabled={deletingBusy} onClick={() => void confirmDelete()}>Delete chat</button></>}>
+      <p>It goes to Trash for 30 days, then it’s gone for good.</p>
+    </Dialog>
+    </>
   );
 }
 

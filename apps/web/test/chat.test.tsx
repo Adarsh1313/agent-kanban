@@ -13,12 +13,12 @@ import { Toasts } from '../src/ui/primitives/toast.tsx';
 import { Dialog } from '../src/ui/primitives/Dialog.tsx';
 import { chat, message } from './helpers.ts';
 
-const FNS = ['listMessages', 'listRequests', 'listToolCalls', 'send', 'answer', 'stop', 'done', 'archive', 'unarchive', 'archiveHistory', 'unarchiveHistory', 'patchChat', 'continueHistory', 'historyMessages', 'openFolder', 'skills'] as const;
+const FNS = ['listMessages', 'listRequests', 'listToolCalls', 'send', 'answer', 'stop', 'done', 'archive', 'unarchive', 'archiveHistory', 'unarchiveHistory', 'deleteChat', 'deleteHistory', 'patchChat', 'continueHistory', 'historyMessages', 'openFolder', 'skills'] as const;
 type Fn = (typeof FNS)[number];
 
 vi.mock('../src/api/client.ts', async (orig) => {
   const m = await orig<typeof import('../src/api/client.ts')>();
-  const fns = Object.fromEntries(['listMessages', 'listRequests', 'listToolCalls', 'send', 'answer', 'stop', 'done', 'archive', 'unarchive', 'archiveHistory', 'unarchiveHistory', 'patchChat', 'continueHistory', 'historyMessages', 'openFolder', 'skills'].map((k) => [k, vi.fn()]));
+  const fns = Object.fromEntries(['listMessages', 'listRequests', 'listToolCalls', 'send', 'answer', 'stop', 'done', 'archive', 'unarchive', 'archiveHistory', 'unarchiveHistory', 'deleteChat', 'deleteHistory', 'patchChat', 'continueHistory', 'historyMessages', 'openFolder', 'skills'].map((k) => [k, vi.fn()]));
   return { ...m, api: { ...m.api, ...fns } };
 });
 
@@ -472,6 +472,27 @@ describe('Chat panel: actions menu', () => {
     expect(screen.getByText('That chat is gone.')).toBeTruthy();
   });
 
+  it('Delete confirms, moves the chat to Trash, and explains why a running chat is disabled', async () => {
+    mocked.deleteChat.mockResolvedValue({ id: 'claude-s1', chatId: 'c1', provider: 'claude', sessionRef: 's1', title: 'Remove', deletedAt: '2026-10-23T12:00:00Z', daysLeft: 30 });
+    const store = seeded([chat({ title: 'Remove', column: 'review', sessionRef: 's1' })]);
+    mount(store);
+    act(() => openRowMenu({ chatId: 'c1', history: null }, within(card('Remove')).getByRole('button', { name: 'More actions' })));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Delete chat' }));
+    expect(screen.getByRole('dialog', { name: 'Delete this chat?' }).textContent).toContain('Trash for 30 days');
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Delete this chat?' })).getByRole('button', { name: 'Delete chat' }));
+    await waitFor(() => expect(mocked.deleteChat).toHaveBeenCalledWith('c1'));
+    expect(store.getState().chats.c1?.deletedAt).toBe('2026-10-23T12:00:00Z');
+    expect(store.getState().trash).toHaveLength(1);
+
+    cleanup();
+    const running = seeded([chat({ title: 'Busy', column: 'running' })]);
+    mount(running);
+    act(() => openRowMenu({ chatId: 'c1', history: null }, within(card('Busy')).getByRole('button', { name: 'More actions' })));
+    const disabled = screen.getByRole('menuitem', { name: /Delete chat/ });
+    expect(disabled.getAttribute('aria-disabled')).toBe('true');
+    expect(disabled.textContent).toContain('Stop it first');
+  });
+
   it('copies the project path and the resume command', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
@@ -633,7 +654,7 @@ describe('Chat panel: history-only chats', () => {
     const anchor = document.body.appendChild(document.createElement('button'));
     act(() => openRowMenu({ chatId: null, history: ref }, anchor));
     const items = screen.getAllByRole('menuitem').map((m) => m.textContent);
-    expect(items).toEqual(['Continue here', 'Open folder', 'Copy project path', 'Copy resume command', 'Archive chat']);
+    expect(items).toEqual(['Continue here', 'Open folder', 'Copy project path', 'Copy resume command', 'Archive chat', 'Delete chat']);
     fireEvent.click(screen.getByRole('menuitem', { name: 'Continue here' }));
     expect(store.getState().ui.openHistory).toEqual(ref);
   });
@@ -643,7 +664,7 @@ describe('Chat panel: history-only chats', () => {
     mount(seeded([]));
     act(() => openHistoryChat(ref));
     fireEvent.click(within(panel()).getByRole('button', { name: 'More actions' }));
-    expect(screen.getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Open folder', 'Copy project path', 'Copy resume command', 'Archive chat']);
+    expect(screen.getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Open folder', 'Copy project path', 'Copy resume command', 'Archive chat', 'Delete chat']);
     await waitFor(() => expect(within(panel()).getByText('Hi')).toBeTruthy());
   });
 });
