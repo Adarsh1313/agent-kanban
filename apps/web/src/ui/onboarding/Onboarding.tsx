@@ -451,7 +451,7 @@ export function Onboarding() {
       pane = (
         <>
           {h1('Which agent do you use most?')}
-          <p className="lead">That’s your home provider. We copy its skills and global instructions to the other agents, so they work the way you do. Skills you made in the others are left alone.</p>
+          <p className="lead">Thatâ€™s your home provider. We copy its skills and global instructions to the other agents, so they work the way you do. Skills you made in the others are left alone.</p>
           <HomeProviderPicker ids={ids.length ? ids : PROVIDER_IDS} />
           <div className="onb-foot">{backBtn}<span className="grow">You can change this later in Connections.</span>{next()}</div>
         </>

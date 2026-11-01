@@ -14,6 +14,7 @@ import { PickerBusyError } from './folder-picker.ts';
 import type { Transcript } from './history/transcript.ts';
 import type { ConnectService } from './connect/service.ts';
 import { SettingsError } from './settings.ts';
+import { disableNotes, enableNotes, readNotes, writeNotes } from './notes.ts';
 import type { SettingsStore } from './settings.ts';
 import type { ChatService } from './chats.ts';
 import type { UsageService } from './usage/service.ts';
@@ -213,6 +214,28 @@ export function createApi(opts: {
       if (!known) throw new HttpError(404, 'Not found.');
       return { status: 200, body: await projectInfo(known.path) };
     }
+    if (match('GET', '/api/projects/notes') || match('PUT', '/api/projects/notes') || match('POST', '/api/projects/notes')) {
+      if (!settings) throw new HttpError(404, 'Not found.');
+      const b = method === 'GET' ? {} : await readJson(req);
+      const path = method === 'GET' ? url.searchParams.get('path') ?? '' : typeof b.path === 'string' ? b.path : '';
+      const known = path ? buildProjects(chats.listChats(), await visibleHistory(), projectRules()).find((p) => folderKey(p.path) === folderKey(path)) : undefined;
+      if (!known) throw new HttpError(404, 'Not found.');
+      const key = folderKey(known.path);
+      if (method === 'POST') {
+        // Turning notes on or off for the project.
+        if (typeof b.on !== 'boolean') throw new HttpError(400, 'On must be true or false.');
+        if (b.on) enableNotes(known.path); else disableNotes(known.path);
+        const others = (settings.get().notesProjects ?? []).filter((k) => folderKey(k) !== key);
+        const next = settings.patch({ notesProjects: b.on ? [...others, known.path] : others });
+        broadcast({ type: 'settings.updated', settings: next });
+        return { status: 200, body: next };
+      }
+      if (method === 'PUT') {
+        if (typeof b.text !== 'string') throw new HttpError(400, 'Missing "text".');
+        writeNotes(known.path, b.text);
+      }
+      return { status: 200, body: { text: readNotes(known.path) ?? '' } };
+    }
     if (match('GET', '/api/models')) return { status: 200, body: await models() };
     if (match('POST', '/api/chats')) {
       const b = await readJson(req);
@@ -337,7 +360,7 @@ export function createApi(opts: {
       res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Vary', 'Origin');
       res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
-      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, OPTIONS');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, PUT, OPTIONS');
     }
     const send = (status: number, body?: unknown) => {
       if (body === undefined) { res.writeHead(status); res.end(); return; }

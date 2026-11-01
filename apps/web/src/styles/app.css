@@ -273,3 +273,6 @@ body:has(> .onb[data-state="open"]) > .toasts { z-index: 91; }
 .handoff-note:empty { display: none; }
 .handoff-note { padding: var(--space-1) var(--space-4); font-size: var(--text-caption); color: var(--color-text-muted); }
 .limit-nudge { display: flex; align-items: center; gap: var(--space-2); }
+.project-notes { display: flex; flex-direction: column; gap: var(--space-2); align-items: flex-start; margin-top: var(--space-6); }
+.project-notes .toggle-row { width: 100%; }
+.notes-edit { width: 100%; min-height: calc(var(--space-8) * 8); font-family: var(--font-mono); font-size: var(--text-body); color: var(--color-text); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-card); padding: var(--space-2); resize: vertical; }

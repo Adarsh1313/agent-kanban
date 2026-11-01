@@ -142,6 +142,10 @@ export const api = {
   historyMessages: (provider: ProviderId, sessionRef: string) =>
     get<Transcript>(`/api/history/${provider}/${encodeURIComponent(sessionRef)}/messages`),
   usage: () => get<UsageResponse>('/api/usage'),
+  /** Project notes (#40): turn on or off (answers the new settings), read and save. */
+  setNotes: (path: string, on: boolean) => post<Settings>('/api/projects/notes', { path, on }),
+  notes: (path: string) => get<{ text: string }>(`/api/projects/notes?path=${enc(path)}`),
+  saveNotes: (path: string, text: string) => request<{ text: string }>('PUT', '/api/projects/notes', { path, text }),
   /** Skill sync's last report plus every home provider skill (#40). */
   skills: () => get<SkillsReport>('/api/skills'),
   syncSkills: () => post<SkillsReport>('/api/skills/sync'),

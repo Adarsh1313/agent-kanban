@@ -21,6 +21,8 @@ import { FolderOpener } from './folder-opener.ts';
 import { SettingsStore } from './settings.ts';
 import { SkillService } from './skills/service.ts';
 import { skillForm } from './skills/form.ts';
+import { readNotes } from './notes.ts';
+import { folderKey } from '@agent-kanban/shared';
 import { AdapterRegistry } from './adapters/registry.ts';
 import { findBinary } from './binaries.ts';
 import { createApi } from './api.ts';
@@ -88,7 +90,9 @@ const usage = new UsageService({
 // Set once skills exists: a `/skill` the user picked is sent in each provider's own form.
 let skillNames: () => string[] = () => [];
 const chats = new ChatService({ store, adapters, usage, broadcast: (e) => broadcast(e), claudeHome: join(home, '.claude'),
-  outgoing: (provider, text) => skillForm(provider, text, skillNames()) });
+  outgoing: (provider, text) => skillForm(provider, text, skillNames()),
+  // Notes go with a handoff only when the user turned them on for the project.
+  notes: (cwd) => (settings.get().notesProjects ?? []).some((k) => folderKey(k) === folderKey(cwd)) ? readNotes(cwd) : null });
 /** Set once ConnectService exists; the monitor's first check runs after that. */
 let connectRef: ConnectService | null = null;
 const connections = new ConnectionMonitor({

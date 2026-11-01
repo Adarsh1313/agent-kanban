@@ -122,5 +122,5 @@ Claude's limit was hit mid-way through a project, so the user moved the work to 
 - [x] Slice 4: composer `/` skill list with per-provider form on send
 - [x] Slice 5: handoff engine (per-provider refs, budgeted preface, delta, spec pointer) with tests
 - [x] Slice 6: web: provider picker mid-chat, handoff note, provider per reply, "Continue with Codex" nudge
-- [ ] Slice 7: project notes toggle and managed lines; notes in handoff; Open notes on project page
+- [x] Slice 7: project notes toggle and managed lines; notes in handoff; Open notes on project page
 - [ ] Slice 8: Move to project label; DESIGN.md, glossary check, close #40 and #28

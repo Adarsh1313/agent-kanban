@@ -9,6 +9,7 @@ import { copyText } from '../chat/ChatActionsMenu.tsx';
 import { Icon, PROVIDER_IDS, ProviderLogo, providerName, StatusIcon } from '../primitives/index.ts';
 import { cssMs, reducedMotion } from '../primitives/motion.ts';
 import { navigate } from '../shell/route.ts';
+import { ProjectNotes } from './ProjectNotes.tsx';
 import {
   agoLabel, cachedProjectInfo, chatsByFolder, findByFolder, folderKey, INSTRUCTION_FILE, isProjectHidden, loadProjectInfo, plural, setProjectHidden, statsOf, workedWith,
   type ProjectChat, type ProjectStats,
@@ -314,6 +315,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
               <button className="chats-more" type="button" onClick={() => { focusRevealed.current = true; setShowAll(true); }}>Show {list.length - visible.length} more</button>
             )}
           </div>
+          <ProjectNotes project={project} />
         </div>
         <About project={project} now={now} />
       </div>
