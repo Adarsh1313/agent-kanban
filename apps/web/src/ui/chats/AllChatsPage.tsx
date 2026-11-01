@@ -39,18 +39,18 @@ function Row({ c, q, now, selected, onSelect }: { c: ListedChat; q: string; now:
   };
   return (
     <li role="listitem">
-      <div className="crow" role="button" tabIndex={0} title={`${c.title}\n${c.projectName} · ${providerName(c.provider)} · ${dateTime(c.updatedAt, now)}`}
-        data-selected={selected || undefined} onClick={open} onKeyDown={(e) => {
-          if (e.key === ' ') { e.preventDefault(); onSelect(e.shiftKey); }
-          else if (e.key === 'Enter' && e.target === e.currentTarget) { e.preventDefault(); open(); }
-        }}>
+      <div className="crow" data-selected={selected || undefined}>
         <input className="chat-check" type="checkbox" checked={selected} aria-label={`Select ${c.title}`} onChange={() => {}}
-          onClick={(e) => { e.stopPropagation(); onSelect(e.shiftKey); }} />
-        <ProviderLogo id={c.provider} size="sm" alt={providerName(c.provider)} />
-        <span className="t">{highlight(c.title, q)}</span>
-        <span className="proj"><span className="folder-glyph proj-glyph" aria-hidden="true">{(c.projectName || '?')[0]!.toUpperCase()}</span><span>{highlight(c.projectName, q)}</span></span>
-        <span className="chat-status">{c.column ? 'On board' : 'In history'}</span>
-        <span className="when">{relativeTime(c.updatedAt, now)}</span>
+          onClick={(e) => onSelect(e.shiftKey)} />
+        <button className="crow-main" type="button" title={`${c.title}
+${c.projectName} · ${providerName(c.provider)} · ${dateTime(c.updatedAt, now)}`}
+          onClick={open} onKeyDown={(e) => { if (e.key === ' ') { e.preventDefault(); onSelect(e.shiftKey); } }}>
+          <ProviderLogo id={c.provider} size="sm" alt={providerName(c.provider)} />
+          <span className="t">{highlight(c.title, q)}</span>
+          <span className="proj"><span className="folder-glyph proj-glyph" aria-hidden="true">{(c.projectName || '?')[0]!.toUpperCase()}</span><span>{highlight(c.projectName, q)}</span></span>
+          <span className="chat-status">{c.column ? 'On board' : 'In history'}</span>
+          <span className="when">{relativeTime(c.updatedAt, now)}</span>
+        </button>
         <button className="btn icon-only ghost row-more" type="button" aria-label="More actions" onClick={more}><Icon name="more" size="sm" /></button>
       </div>
     </li>

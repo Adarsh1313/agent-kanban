@@ -233,6 +233,8 @@ body:has(> .onb[data-state="open"]) > .toasts { z-index: 91; }
 .all-chats-page .chat-lifecycle .trash-empty { margin-left: auto; color: var(--color-danger); }
 .all-chats-page .chat-lifecycle .select-view { margin-left: auto; }
 .all-chats-page .chat-lifecycle .btn[aria-selected="true"] { background: var(--color-ink); color: var(--color-ink-contrast); border-color: var(--color-ink); }
+.all-chats-page .crow-main { flex: 1; min-width: 0; align-self: stretch; display: flex; align-items: center; gap: var(--space-3); padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.all-chats-page .crow-main:focus-visible { outline-offset: var(--space-1); }
 .all-chats-page .crow .row-more { flex: none; opacity: 0; transition: opacity var(--duration-hover) var(--ease-colour); }
 .all-chats-page .crow .chat-check { width: var(--space-4); height: var(--space-4); margin: calc(var(--space-2) * -1); padding: var(--space-2); box-sizing: content-box; opacity: 0; accent-color: var(--color-ink); transition: opacity var(--duration-hover) var(--ease-colour); }
 @media (hover: none) { .all-chats-page .crow .chat-check, .all-chats-page .crow .row-more { opacity: 1; } }

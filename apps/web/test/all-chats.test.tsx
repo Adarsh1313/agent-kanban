@@ -29,7 +29,7 @@ function seeded(): Store {
 }
 const mount = (store: Store) => render(<StoreProvider store={store}><Shell /></StoreProvider>);
 const page = () => screen.getByRole('list', { name: 'All chats' });
-const titles = () => [...page().querySelectorAll('.crow > .t')].map((r) => r.textContent);
+const titles = () => [...page().querySelectorAll('.crow .t')].map((r) => r.textContent);
 
 beforeEach(() => { location.hash = '#/chats'; });
 afterEach(() => { cleanup(); location.hash = ''; });
