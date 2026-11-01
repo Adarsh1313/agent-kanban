@@ -709,6 +709,8 @@ test("chats run in the active account's config folder; Default passes no env (#3
   env = { CLAUDE_CONFIG_DIR: '/accounts/work' };
   await a.startChat({ cwd: '.', prompt: 'again' });
   assert.equal(f.calls[1]!.options.env.CLAUDE_CONFIG_DIR, '/accounts/work');
-  assert.equal(f.calls[1]!.options.env.PATH, process.env.PATH);
+  // The rest of the environment is passed on (Windows spells it Path, so find it by name in any case).
+  const pathKey = (e: Record<string, unknown>) => Object.keys(e).find((k) => k.toUpperCase() === 'PATH');
+  assert.equal(f.calls[1]!.options.env[pathKey(f.calls[1]!.options.env)!], process.env[pathKey(process.env)!]);
   await a.dispose();
 });
