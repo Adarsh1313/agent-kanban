@@ -23,6 +23,7 @@ import { parseHookPayload, type HookPayload } from './outside/sessions.ts';
 import type { SettingsStore } from './settings.ts';
 import type { ChatService } from './chats.ts';
 import type { UsageService } from './usage/service.ts';
+import { TrashError, type TrashService } from './trash.ts';
 // suggest() lives in shared so the web app can recompute "Most room" from usage.updated events.
 import { EFFORTS, folderKey, suggest } from '@agent-kanban/shared';
 
@@ -127,6 +128,7 @@ export function createApi(opts: {
   /** Receives Claude Code hook events; `hookSecret` is the value the hook script sends with them. */
   outside?: { handle(p: HookPayload): void };
   hookSecret?: string;
+  trash?: TrashService;
   /** Folder holding the built web app (default apps/web/dist). */
   webDist?: string;
   token: string;
@@ -341,6 +343,20 @@ export function createApi(opts: {
     if ((m = match('POST', '/api/chats/:id/undone'))) return { status: 200, body: chats.dragOutOfDone(m[0]!) };
     if ((m = match('POST', '/api/chats/:id/archive'))) return { status: 200, body: chats.archive(m[0]!) };
     if ((m = match('POST', '/api/chats/:id/unarchive'))) return { status: 200, body: chats.unarchive(m[0]!) };
+    if ((m = match('POST', '/api/chats/:id/delete'))) {
+      if (!opts.trash) throw new HttpError(404, 'Not found.');
+      const entry = await opts.trash.deleteChat(chats.getChat(m[0]!));
+      chats.markDeleted(m[0]!, entry.deletedAt);
+      return { status: 200, body: entry };
+    }
+    if ((m = match('POST', '/api/history/:provider/:ref/delete'))) {
+      if (!opts.trash) throw new HttpError(404, 'Not found.');
+      const id = m[0] as ProviderId;
+      if (!PROVIDERS.includes(id)) throw new HttpError(400, 'Unknown provider. Use claude, codex or antigravity.');
+      const item = (await history()).find((h) => h.provider === id && h.sessionRef === m![1]);
+      if (!item) throw new HttpError(404, 'Chat not found.');
+      return { status: 200, body: await opts.trash.deleteHistory(item) };
+    }
     if ((m = match('POST', '/api/history/:provider/:ref/archive')) || (m = match('POST', '/api/history/:provider/:ref/unarchive'))) {
       const id = m[0] as ProviderId;
       if (!PROVIDERS.includes(id)) throw new HttpError(400, 'Unknown provider. Use claude, codex or antigravity.');
@@ -357,6 +373,21 @@ export function createApi(opts: {
       return { status: 200, body: await opts.transcript(id, m[1]!) };
     }
     if (match('GET', '/api/history')) return { status: 200, body: await visibleHistory(url.searchParams.get('archived') === 'all') };
+    if (match('GET', '/api/trash')) {
+      if (!opts.trash) throw new HttpError(404, 'Not found.');
+      return { status: 200, body: await opts.trash.list() };
+    }
+    if ((m = match('POST', '/api/trash/:id/restore'))) {
+      if (!opts.trash) throw new HttpError(404, 'Not found.');
+      const entry = await opts.trash.restore(m[0]!);
+      if (entry.chatId) chats.restoreDeleted(entry.chatId);
+      return { status: 200, body: entry };
+    }
+    if (match('DELETE', '/api/trash')) {
+      if (!opts.trash) throw new HttpError(404, 'Not found.');
+      await opts.trash.empty();
+      return { status: 204 };
+    }
     if (match('POST', '/api/history/continue')) {
       const b = await readJson(req);
       const p = provider(b); const ref = str(b, 'sessionRef'); const text = str(b, 'text');
@@ -529,7 +560,7 @@ export function createApi(opts: {
         if (err instanceof URIError) return send(404, { error: 'Not found.' });
         if (err instanceof AccountError) return send(400, { error: err.message });
         if (err instanceof AccountBusyError) return send(409, { error: err.message });
-        if (err instanceof HttpError) {
+        if (err instanceof HttpError || err instanceof TrashError) {
           if (err.status === 413) return reject413(err.message);
           return send(err.status, { error: err.message });
         }

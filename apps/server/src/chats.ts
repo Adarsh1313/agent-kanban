@@ -370,6 +370,21 @@ ${typed}` : typed;
     return chat;
   }
 
+  markDeleted(chatId: string, deletedAt: string): Chat {
+    this.mustGet(chatId);
+    const chat = this.store.updateChat(chatId, { deletedAt }, { touch: false });
+    this.partials.delete(chatId);
+    this.broadcast({ type: 'chat.updated', chat });
+    return chat;
+  }
+
+  restoreDeleted(chatId: string): Chat {
+    this.mustGet(chatId);
+    const chat = this.store.updateChat(chatId, { deletedAt: null }, { touch: false });
+    this.broadcast({ type: 'chat.updated', chat });
+    return chat;
+  }
+
   setHistoryArchived(provider: ProviderId, sessionRef: string, archived: boolean): void {
     this.store.setHistoryArchived(provider, sessionRef, archived);
   }

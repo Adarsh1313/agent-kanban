@@ -86,7 +86,7 @@ const byRecent = (a: { updatedAt: string }, b: { updatedAt: string }) => (a.upda
 /** Board chats that pass the filters; archived and snoozed ones are hidden. */
 export function visibleChats(s: AppState, now: number = Date.now()): Chat[] {
   return Object.values(s.chats)
-    .filter((c) => c.column !== null && !isArchived(s, c) && !isSnoozed(c, now) && !inHiddenProject(s, chatFolder(c)) && passes(c, s.ui.filters, now))
+    .filter((c) => !c.deletedAt && c.column !== null && !isArchived(s, c) && !isSnoozed(c, now) && !inHiddenProject(s, chatFolder(c)) && passes(c, s.ui.filters, now))
     .sort(byRecent);
 }
 
@@ -101,7 +101,7 @@ const toSidebar = (c: Chat): SidebarChat => ({
 });
 
 export function pinned(s: AppState, now: number = Date.now()): Chat[] {
-  return Object.values(s.chats).filter((c) => c.pinned && !isArchived(s, c) && !isSnoozed(c, now) && !inHiddenProject(s, chatFolder(c))).sort(byRecent);
+  return Object.values(s.chats).filter((c) => !c.deletedAt && c.pinned && !isArchived(s, c) && !isSnoozed(c, now) && !inHiddenProject(s, chatFolder(c))).sort(byRecent);
 }
 
 /**
@@ -112,7 +112,7 @@ function listedChats(s: AppState, now: number, f: Filters = s.ui.filters, everyt
   const known = new Set<string>();
   for (const c of Object.values(s.chats)) if (c.sessionRef) known.add(`${c.provider}\u0000${c.sessionRef}`);
   const fromBoard = Object.values(s.chats)
-    .filter((c) => isArchived(s, c) === archived && (everything || (!c.pinned && !isSnoozed(c, now))) && !inHiddenProject(s, chatFolder(c)) && passes(c, f, now))
+    .filter((c) => !c.deletedAt && isArchived(s, c) === archived && (everything || (!c.pinned && !isSnoozed(c, now))) && !inHiddenProject(s, chatFolder(c)) && passes(c, f, now))
     .map(toSidebar);
   const fromHistory: SidebarChat[] = s.history
     .filter((h) => Boolean(h.archived) === archived && !known.has(`${h.provider}\u0000${h.sessionRef}`) && !inHiddenProject(s, h.cwd) && passes({ ...h, column: null, model: null, needsReason: null }, f, now))
@@ -221,7 +221,7 @@ function countProviders(s: AppState): Record<ProviderId, number> {
   const known = new Set<string>();
   for (const c of Object.values(s.chats)) {
     if (c.sessionRef) known.add(`${c.provider}\u0000${c.sessionRef}`);
-    if (!isArchived(s, c) && !inHiddenProject(s, chatFolder(c))) counts[c.provider] += 1;
+    if (!c.deletedAt && !isArchived(s, c) && !inHiddenProject(s, chatFolder(c))) counts[c.provider] += 1;
   }
   for (const h of s.history) if (!known.has(`${h.provider}\u0000${h.sessionRef}`) && !inHiddenProject(s, h.cwd)) counts[h.provider] += 1;
   return counts;

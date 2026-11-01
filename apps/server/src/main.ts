@@ -34,6 +34,7 @@ import { ClaudeHooks } from './outside/hooks.ts';
 import { OutsideSessions } from './outside/sessions.ts';
 import { readClaudeSession } from './history/claude.ts';
 import { unlinkSync, writeFileSync } from 'node:fs';
+import { TrashService } from './trash.ts';
 
 // Last resort: a stray rejection is logged, never allowed to take the server (and every chat) down.
 process.on('unhandledRejection', (e) => console.error('[agent-kanban] unhandled', e));
@@ -176,7 +177,9 @@ const hookEndpoint = join(dataDir, 'hook-endpoint.json');
 const hookSecret = randomBytes(24).toString('hex');
 const claudeHooks = new ClaudeHooks({ settingsPath: join(home, '.claude', 'settings.json'), scriptPath: join(dataDir, 'agent-kanban-hook.mjs'), endpointPath: hookEndpoint, runner: nodeRunner });
 const outside = new OutsideSessions({ store, emit: (e) => broadcast(e), runningHere: (id) => chats.runningHere(id), claudeHome: join(home, '.claude') });
-const api = createApi({ codexResets, accounts, routines, hooks: claudeHooks, outside, hookSecret, chats, usage, history: () => readAllHistory(home), token, connections, adapters, connect, settings, skills, folderPicker: new FolderPicker(), folderOpener: new FolderOpener(),
+const trash = new TrashService({ dataDir, home });
+trash.start();
+const api = createApi({ codexResets, accounts, routines, hooks: claudeHooks, outside, hookSecret, trash, chats, usage, history: () => readAllHistory(home), token, connections, adapters, connect, settings, skills, folderPicker: new FolderPicker(), folderOpener: new FolderOpener(),
   transcript: (provider, sessionRef) => readTranscript(home, provider, sessionRef) });
 broadcast = api.broadcast;
 
@@ -232,6 +235,7 @@ async function shutdown(): Promise<void> {
   connections.stop();
   skills.stop();
   routines.stop();
+  trash.dispose();
   // Installs and sign-ins in progress are cancelled; their process trees are killed before we exit.
   const connectDone = connect.dispose().catch(() => {});
   api.server.close();

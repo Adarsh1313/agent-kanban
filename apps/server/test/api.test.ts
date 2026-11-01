@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Chat, HistoryChat, UsageReading, ServerEvent } from '@agent-kanban/shared';
 import { createApi } from '../src/api.ts';
+import { TrashError } from '../src/trash.ts';
 import { ActiveElsewhereError, CantContinueError } from '../src/chats.ts';
 import { suggest } from '@agent-kanban/shared';
 
@@ -446,5 +447,35 @@ test('archive and unarchive include board and provider-history chats in the expl
     assert.deepEqual(await (await s.f('/api/history')).json(), []);
     assert.equal(((await (await s.f('/api/history?archived=all')).json()) as any[])[0]?.archived, true);
     assert.equal((await s.f('/api/history/claude/h1/unarchive', { method: 'POST' })).status, 200);
+  } finally { s.close(); }
+});
+
+test('trash routes delete, list, restore and empty; provider refusal statuses pass through', async () => {
+  const entries: any[] = [];
+  let marked: string | null = null;
+  let restored: string | null = null;
+  const trash = {
+    deleteChat: async (c: Chat) => {
+      if (c.column === 'running') throw new TrashError(409, 'Stop it first.');
+      const e = { id: 'claude-s1', chatId: c.id, provider: c.provider, sessionRef: c.sessionRef!, title: c.title, deletedAt: '2026-02-01T00:00:00Z', daysLeft: 30 };
+      entries.push(e); return e;
+    },
+    deleteHistory: async () => { throw new TrashError(422, "Antigravity chats can't be deleted from here yet."); },
+    list: async () => entries,
+    restore: async (id: string) => entries.find((e) => e.id === id),
+    empty: async () => { entries.length = 0; },
+  };
+  const s = await setup({
+    getChat: () => chat(), markDeleted: (_id: string, at: string) => { marked = at; return chat(); },
+    restoreDeleted: (id: string) => { restored = id; return chat(); },
+  }, undefined, { trash: trash as any, history: async () => [{ provider: 'antigravity', sessionRef: 'a1', title: 'A', cwd: dir, updatedAt: '2026-01-01T00:00:00Z' }] });
+  try {
+    assert.equal((await s.f('/api/chats/c1/delete', { method: 'POST' })).status, 200);
+    assert.equal(marked, '2026-02-01T00:00:00Z');
+    assert.equal(((await (await s.f('/api/trash')).json()) as any[]).length, 1);
+    assert.equal((await s.f('/api/trash/claude-s1/restore', { method: 'POST' })).status, 200);
+    assert.equal(restored, 'c1');
+    assert.equal((await s.f('/api/history/antigravity/a1/delete', { method: 'POST' })).status, 422);
+    assert.equal((await s.f('/api/trash', { method: 'DELETE' })).status, 204);
   } finally { s.close(); }
 });

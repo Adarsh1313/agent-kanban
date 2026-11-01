@@ -57,6 +57,8 @@ export interface Chat {
   updatedAt: string;
   doneAt: string | null;
   archived: boolean;
+  /** Set while the provider session is in Agent Kanban's 30-day Trash. */
+  deletedAt?: string | null;
   pinned: boolean;
   snoozedUntil: string | null;
   /** Out of usage: when it continues on its own (left out when not waiting on a reset, #39). */
@@ -135,6 +137,16 @@ export interface HistoryChat {
   updatedAt: string;
   /** App-side label; provider history files are left untouched when a history-only chat is archived. */
   archived?: boolean;
+}
+
+export interface TrashEntry {
+  id: string;
+  chatId: string | null;
+  provider: ProviderId;
+  sessionRef: string;
+  title: string;
+  deletedAt: string;
+  daysLeft: number;
 }
 
 export interface ConnectionHealth {

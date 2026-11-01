@@ -8,6 +8,7 @@ const COLS: Record<keyof Chat, string> = {
   id: 'id', provider: 'provider', sessionRef: 'session_ref', cwd: 'cwd', title: 'title', model: 'model',
   column: 'column_name', needsReason: 'needs_reason', createdAt: 'created_at', updatedAt: 'updated_at',
   doneAt: 'done_at', archived: 'archived', pinned: 'pinned', snoozedUntil: 'snoozed_until', routineId: 'routine_id', effort: 'effort',
+  deletedAt: 'deleted_at',
   resumeAt: 'resume_at', autoResume: 'auto_resume', queue: 'queue',
   origin: 'origin', outsideLive: 'outside_live',
   providerRefs: 'provider_refs', projectLabel: 'project_label',
@@ -23,6 +24,7 @@ function toChat(r: Row): Chat {
     id: r.id, provider: r.provider, sessionRef: r.session_ref, cwd: r.cwd, title: r.title, model: r.model,
     column: r.column_name, needsReason: r.needs_reason, createdAt: r.created_at, updatedAt: r.updated_at,
     doneAt: r.done_at, archived: r.archived === 1, pinned: r.pinned === 1, snoozedUntil: r.snoozed_until,
+    deletedAt: r.deleted_at ?? null,
     effort: r.effort ?? 'normal',
     routineId: r.routine_id ?? null,
     // Out-of-usage fields appear only when they differ from the default (#39).
@@ -138,6 +140,7 @@ export class Store {
     if (!chatCols.includes('provider_refs')) this.db.exec('ALTER TABLE chats ADD COLUMN provider_refs TEXT');
     if (!chatCols.includes('handoff_seen')) this.db.exec('ALTER TABLE chats ADD COLUMN handoff_seen TEXT');
     if (!chatCols.includes('project_label')) this.db.exec('ALTER TABLE chats ADD COLUMN project_label TEXT');
+    if (!chatCols.includes('deleted_at')) this.db.exec('ALTER TABLE chats ADD COLUMN deleted_at TEXT');
     if (!messageCols.includes('provider')) this.db.exec('ALTER TABLE messages ADD COLUMN provider TEXT');
   }
 
@@ -167,7 +170,7 @@ export class Store {
   }
 
   listChats(includeArchived = false): Chat[] {
-    const sql = `SELECT * FROM chats${includeArchived ? '' : ' WHERE archived = 0'} ORDER BY updated_at DESC, rowid DESC`;
+    const sql = `SELECT * FROM chats${includeArchived ? '' : ' WHERE archived = 0 AND deleted_at IS NULL'} ORDER BY updated_at DESC, rowid DESC`;
     return (this.db.prepare(sql).all() as Row[]).map(toChat);
   }
 

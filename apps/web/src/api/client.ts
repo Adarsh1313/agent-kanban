@@ -14,6 +14,7 @@ import type {
   Settings,
   SkillsReport,
   ToolCall,
+  TrashEntry,
   UsageReading, Account, AccountProvider,
 } from '@agent-kanban/shared';
 
@@ -143,6 +144,7 @@ export const api = {
   undone: (id: string) => post<Chat>(`/api/chats/${enc(id)}/undone`),
   archive: (id: string, opts: RequestOptions = {}) => request<Chat>('POST', `/api/chats/${enc(id)}/archive`, undefined, opts),
   unarchive: (id: string) => post<Chat>(`/api/chats/${enc(id)}/unarchive`),
+  deleteChat: (id: string) => post<TrashEntry>(`/api/chats/${enc(id)}/delete`),
   /** The follow-up queue of an out-of-usage chat (#39). */
   editQueued: (id: string, queued: string, text: string) => request<Chat>('PATCH', `/api/chats/${enc(id)}/queue/${enc(queued)}`, { text }),
   removeQueued: (id: string, queued: string) => request<Chat>('DELETE', `/api/chats/${enc(id)}/queue/${enc(queued)}`),
@@ -151,6 +153,10 @@ export const api = {
   history: () => get<HistoryChat[]>('/api/history?archived=all'),
   archiveHistory: (provider: ProviderId, sessionRef: string) => post<HistoryChat>(`/api/history/${provider}/${enc(sessionRef)}/archive`),
   unarchiveHistory: (provider: ProviderId, sessionRef: string) => post<HistoryChat>(`/api/history/${provider}/${enc(sessionRef)}/unarchive`),
+  deleteHistory: (provider: ProviderId, sessionRef: string) => post<TrashEntry>(`/api/history/${provider}/${enc(sessionRef)}/delete`),
+  trash: () => get<TrashEntry[]>('/api/trash'),
+  restoreTrash: (id: string) => post<TrashEntry>(`/api/trash/${enc(id)}/restore`),
+  emptyTrash: () => request<void>('DELETE', '/api/trash'),
   continueHistory: (body: { provider: ProviderId; sessionRef: string; text: string }) => post<Chat>('/api/history/continue', body),
   /** Past messages of a history-only chat, read-only (#16). */
   historyMessages: (provider: ProviderId, sessionRef: string) =>
