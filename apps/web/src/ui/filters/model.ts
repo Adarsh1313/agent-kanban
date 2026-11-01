@@ -50,7 +50,7 @@ const REASONS: [string, string][] = [
   ['question', 'An answer to a question'],
   ['waiting', 'Waiting for you'],
   ['stopped', 'You stopped it'],
-  ['limit', 'Usage limit reached'],
+  ['limit', 'Out of usage'],
   ['error', 'Something went wrong'],
   ['interrupted', 'Interrupted'],
 ];

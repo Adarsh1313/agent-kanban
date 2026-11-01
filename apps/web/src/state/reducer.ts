@@ -13,7 +13,7 @@ import type {
   ServerEvent,
   Settings,
   ToolCall,
-  UsageReading,
+  UsageReading, Account, AccountProvider,
 } from '@agent-kanban/shared';
 import { suggest } from '@agent-kanban/shared';
 
@@ -94,6 +94,8 @@ export interface AppState {
   connect: Partial<Record<ProviderId, ConnectState>>;
   /** null until loaded. */
   settings: Settings | null;
+  /** Each provider's accounts once asked (#39). */
+  accounts: Partial<Record<AccountProvider, Account[]>>;
   /** Claude Code's outside-chat hooks are installed; null until asked (#37). */
   claudeHooks: boolean | null;
   history: HistoryChat[];
@@ -143,6 +145,7 @@ export function initialState(): AppState {
     connections: {},
     connect: {},
     settings: null,
+    accounts: {},
     claudeHooks: null,
     history: [],
     projects: [],
@@ -346,6 +349,8 @@ export function applyEvent(s: AppState, e: ServerEvent, now: Date = new Date()):
       return mk([], { connections: { ...s.connections, [e.health.provider]: e.health } });
     case 'connect.updated':
       return mk([], { connect: mergeConnect(s.connect, [e.state]) });
+    case 'accounts.updated':
+      return mk([], { accounts: { ...s.accounts, [e.provider]: e.accounts } });
     case 'hooks.updated':
       return mk([], { claudeHooks: e.installed });
     case 'settings.updated':

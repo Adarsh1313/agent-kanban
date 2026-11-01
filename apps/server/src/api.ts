@@ -14,6 +14,8 @@ import { PickerBusyError } from './folder-picker.ts';
 import type { Transcript } from './history/transcript.ts';
 import type { ConnectService } from './connect/service.ts';
 import { SettingsError } from './settings.ts';
+import { ACCOUNT_PROVIDERS, AccountBusyError, AccountError, type AccountService } from './accounts.ts';
+import type { AccountProvider } from '@agent-kanban/shared';
 import { parseHookPayload, type HookPayload } from './outside/sessions.ts';
 import type { SettingsStore } from './settings.ts';
 import type { ChatService } from './chats.ts';
@@ -105,6 +107,10 @@ export function createApi(opts: {
   folderPicker?: { pick(): Promise<string | null> };
   /** A chat's "Open folder": shows a project folder in the file manager (#15). */
   folderOpener?: { open(path: string): Promise<void> };
+  /** Codex's banked free resets (#31). */
+  codexResets?: { read(): Promise<number>; use(): Promise<string> };
+  /** Several accounts per provider (#39). */
+  accounts?: AccountService;
   /** Claude Code hooks that put outside chats on the board (#37). */
   hooks?: { installed(): boolean; install(): void; remove(): void };
   /** Receives Claude Code hook events; `hookSecret` is the value the hook script sends with them. */
@@ -185,6 +191,26 @@ export function createApi(opts: {
     };
     let m: string[] | null;
     if (match('GET', '/api/chats')) return { status: 200, body: chats.listChats() };
+    if (opts.codexResets && match('GET', '/api/usage/codex/resets')) return { status: 200, body: { available: await opts.codexResets.read() } };
+    if (opts.codexResets && match('POST', '/api/usage/codex/resets/use')) return { status: 200, body: { outcome: await opts.codexResets.use() } };
+    if (url.pathname.startsWith('/api/accounts') && opts.accounts) {
+      const accounts = opts.accounts;
+      const who = (v: unknown): AccountProvider => {
+        if (typeof v !== 'string' || !ACCOUNT_PROVIDERS.includes(v as AccountProvider)) throw new HttpError(400, 'Accounts are for claude or codex.');
+        return v as AccountProvider;
+      };
+      if (match('GET', '/api/accounts')) return { status: 200, body: accounts.all() };
+      if (match('POST', '/api/accounts')) {
+        const b = await readJson(req);
+        return { status: 201, body: accounts.add(who(b.provider), str(b, 'name')) };
+      }
+      if ((m = match('PATCH', '/api/accounts/:provider/:id'))) {
+        const b = await readJson(req);
+        return { status: 200, body: accounts.rename(who(m[0]), m[1]!, str(b, 'name')) };
+      }
+      if ((m = match('POST', '/api/accounts/:provider/:id/activate'))) return { status: 200, body: accounts.activate(who(m[0]), m[1]!) };
+      if ((m = match('DELETE', '/api/accounts/:provider/:id'))) return { status: 200, body: accounts.remove(who(m[0]), m[1]!) };
+    }
     if (url.pathname.startsWith('/api/hooks/claude') && opts.hooks) {
       const hooks = opts.hooks;
       if (match('GET', '/api/hooks/claude')) return { status: 200, body: { installed: hooks.installed() } };
@@ -203,7 +229,7 @@ export function createApi(opts: {
     if ((m = match('GET', '/api/chats/:id/tool-calls'))) return { status: 200, body: chats.listToolCalls(m[0]!) };
     if ((m = match('PATCH', '/api/chats/:id'))) {
       const b = await readJson(req);
-      const patch: { title?: string; pinned?: boolean; snoozedUntil?: string | null } = {};
+      const patch: { title?: string; pinned?: boolean; snoozedUntil?: string | null; autoResume?: boolean } = {};
       for (const [k, v] of Object.entries(b)) {
         if (k === 'title') {
           const t = typeof v === 'string' ? v.trim() : '';
@@ -212,6 +238,9 @@ export function createApi(opts: {
         } else if (k === 'pinned') {
           if (typeof v !== 'boolean') throw new HttpError(400, 'Pinned must be true or false.');
           patch.pinned = v;
+        } else if (k === 'autoResume') {
+          if (typeof v !== 'boolean') throw new HttpError(400, 'Auto-resume must be true or false.');
+          patch.autoResume = v;
         } else if (k === 'snoozedUntil') {
           if (v === null) patch.snoozedUntil = null;
           else {
@@ -258,6 +287,13 @@ export function createApi(opts: {
       await chats.answer(m[0]!, m[1]!, decision);
       return { status: 204 };
     }
+    if ((m = match('PATCH', '/api/chats/:id/queue/:queued'))) {
+      const b = await readJson(req);
+      return { status: 200, body: chats.editQueued(m[0]!, m[1]!, str(b, 'text')) };
+    }
+    if ((m = match('DELETE', '/api/chats/:id/queue/:queued'))) return { status: 200, body: chats.removeQueued(m[0]!, m[1]!) };
+    if ((m = match('POST', '/api/chats/:id/resume-now'))) { await chats.resumeNow(m[0]!); return { status: 204 }; }
+    if ((m = match('POST', '/api/chats/:id/queue/:queued/send-now'))) { await chats.sendQueuedNow(m[0]!, m[1]!); return { status: 204 }; }
     if ((m = match('POST', '/api/chats/:id/stop'))) { await chats.stop(m[0]!); return { status: 200, body: chats.getChat(m[0]!) }; }
     if ((m = match('POST', '/api/chats/:id/done'))) return { status: 200, body: chats.markDone(m[0]!) };
     if ((m = match('POST', '/api/chats/:id/undone'))) return { status: 200, body: chats.dragOutOfDone(m[0]!) };
@@ -344,7 +380,7 @@ export function createApi(opts: {
       res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Vary', 'Origin');
       res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
-      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, OPTIONS');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
     }
     const send = (status: number, body?: unknown) => {
       if (body === undefined) { res.writeHead(status); res.end(); return; }
@@ -419,13 +455,15 @@ export function createApi(opts: {
       (r) => send(r.status, r.body),
       (err: unknown) => {
         if (err instanceof URIError) return send(404, { error: 'Not found.' });
+        if (err instanceof AccountError) return send(400, { error: err.message });
+        if (err instanceof AccountBusyError) return send(409, { error: err.message });
         if (err instanceof HttpError) {
           if (err.status === 413) return reject413(err.message);
           return send(err.status, { error: err.message });
         }
         const msg = err instanceof Error ? err.message : '';
         if (err instanceof ActiveElsewhereError || err instanceof CantContinueError || err instanceof ConnectBusyError || err instanceof ConnectStateError || err instanceof PickerBusyError) return send(409, { error: msg });
-        if (msg === 'That request is no longer open.') return send(409, { error: msg });
+        if (msg === 'That request is no longer open.' || msg === 'That message is no longer queued.') return send(409, { error: msg });
         if (msg === 'Chat not found.') return send(404, { error: msg });
         console.error(err);
         send(500, { error: 'Something went wrong.' });

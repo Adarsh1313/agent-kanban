@@ -11,7 +11,7 @@ import type {
   ProviderId,
   Settings,
   ToolCall,
-  UsageReading,
+  UsageReading, Account, AccountProvider,
 } from '@agent-kanban/shared';
 
 const TOKEN_KEY = 'agent-kanban.token';
@@ -95,7 +95,7 @@ const get = <T>(path: string) => request<T>('GET', path);
 const post = <T>(path: string, body?: unknown) => request<T>('POST', path, body);
 
 export type AnswerDecision = 'allow' | 'deny' | { reply: string };
-export interface ChatPatch { title?: string; pinned?: boolean; snoozedUntil?: string | null }
+export interface ChatPatch { title?: string; pinned?: boolean; snoozedUntil?: string | null; autoResume?: boolean }
 export interface UsageResponse { readings: UsageReading[]; suggested: ProviderId | null }
 /** What the Connections page can ask the server to do for a provider (`open` re-opens the sign-in page the server holds). */
 export type ConnectAction = 'install' | 'signin' | 'signout' | 'update' | 'cancel' | 'open';
@@ -131,6 +131,10 @@ export const api = {
   done: (id: string) => post<Chat>(`/api/chats/${enc(id)}/done`),
   undone: (id: string) => post<Chat>(`/api/chats/${enc(id)}/undone`),
   archive: (id: string, opts: RequestOptions = {}) => request<Chat>('POST', `/api/chats/${enc(id)}/archive`, undefined, opts),
+  /** The follow-up queue of an out-of-usage chat (#39). */
+  editQueued: (id: string, queued: string, text: string) => request<Chat>('PATCH', `/api/chats/${enc(id)}/queue/${enc(queued)}`, { text }),
+  removeQueued: (id: string, queued: string) => request<Chat>('DELETE', `/api/chats/${enc(id)}/queue/${enc(queued)}`),
+  sendQueuedNow: (id: string, queued: string) => post<void>(`/api/chats/${enc(id)}/queue/${enc(queued)}/send-now`),
   patchChat: (id: string, patch: ChatPatch) => request<Chat>('PATCH', `/api/chats/${enc(id)}`, patch),
   history: () => get<HistoryChat[]>('/api/history'),
   continueHistory: (body: { provider: ProviderId; sessionRef: string; text: string }) => post<Chat>('/api/history/continue', body),
@@ -144,6 +148,16 @@ export const api = {
   connectStates: () => get<ConnectState[]>('/api/connect'),
   /** Starts (or cancels) an operation; the answer is the provider's state right after, and progress follows as connect.updated events. */
   connect: (provider: ProviderId, action: ConnectAction) => post<ConnectState>(`/api/connect/${enc(provider)}/${action}`),
+  /** Several accounts per provider (#39); each change answers with that provider's accounts. */
+  accounts: () => get<Record<AccountProvider, Account[]>>('/api/accounts'),
+  addAccount: (provider: AccountProvider, name: string) => post<Account[]>('/api/accounts', { provider, name }),
+  renameAccount: (provider: AccountProvider, id: string, name: string) => request<Account[]>('PATCH', `/api/accounts/${provider}/${enc(id)}`, { name }),
+  activateAccount: (provider: AccountProvider, id: string) => post<Account[]>(`/api/accounts/${provider}/${enc(id)}/activate`),
+  removeAccount: (provider: AccountProvider, id: string) => request<Account[]>('DELETE', `/api/accounts/${provider}/${enc(id)}`),
+  /** Codex's banked free resets (#31). */
+  codexResets: () => get<{ available: number }>('/api/usage/codex/resets'),
+  useCodexReset: () => post<{ outcome: string }>('/api/usage/codex/resets/use'),
+  resumeNow: (id: string) => post<void>(`/api/chats/${enc(id)}/resume-now`),
   /** Whether Claude Code tells the app about chats run outside it (#37). */
   claudeHooks: () => get<{ installed: boolean }>('/api/hooks/claude'),
   setClaudeHooks: (on: boolean) => post<{ installed: boolean }>(`/api/hooks/claude/${on ? 'install' : 'remove'}`),

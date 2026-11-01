@@ -50,11 +50,24 @@ export interface Chat {
   archived: boolean;
   pinned: boolean;
   snoozedUntil: string | null;
+  /** Out of usage: when it continues on its own (left out when not waiting on a reset, #39). */
+  resumeAt?: string | null;
+  /** False when the user chose "Don't resume" (left out = resume, the default). */
+  autoResume?: boolean;
+  /** Messages written while out of usage, sent in order when it can continue (left out when empty). */
+  queue?: QueuedMessage[];
   /** Set on a Claude Code chat the user ran outside the app (#37); left out for the app's own chats. */
   origin?: 'outside';
   /** True while that outside chat is still running in Claude Code: it can only be watched, not replied to. */
   outsideLive?: boolean;
 }
+
+export interface QueuedMessage { id: string; text: string }
+
+/** Providers that can have several accounts (#39); Antigravity has one in v1. */
+export type AccountProvider = 'claude' | 'codex';
+/** One sign-in to a provider; "default" is the one the provider's own folder holds. */
+export interface Account { id: string; provider: AccountProvider; name: string; active: boolean }
 
 export interface Message { id: string; chatId: string; role: 'user' | 'assistant'; text: string; createdAt: string }
 
@@ -94,6 +107,7 @@ export type ServerEvent =
   | { type: 'connection.updated'; health: ConnectionHealth }
   | { type: 'connect.updated'; state: ConnectState }
   | { type: 'settings.updated'; settings: Settings }
+  | { type: 'accounts.updated'; provider: AccountProvider; accounts: Account[] }
   | { type: 'hooks.updated'; installed: boolean }
   | { type: 'notification'; chatId: string; kind: 'permission' | 'question' | 'finished' | 'limit' | 'error'; action?: RequestAction };
 

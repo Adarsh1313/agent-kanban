@@ -32,6 +32,13 @@ one running-blue card halfway between two ink columns.
 - **One primary (ink) button per view.** On the board that is New chat.
 - **Cards** carry title, provider logo + model, folder, time. Needs-you adds one reason badge; running
   adds the activity line. Detail lives in the side panel, never a new page.
+- **Out of usage** is a needs-you reason (amber), never an error: "Out of usage · resumes 2:40 pm" while it will
+  continue on its own, "Out of usage · resets 2:40 pm" or "· resets later" when it won't, plus "2 queued" on the card. The
+  panel puts a short block above the composer: the "Continue on its own when usage resets" switch, "N free resets ·
+  Use reset" for Codex, one "Switch to Work and continue" button per other account, then the queued messages as
+  bordered rows (click to edit, Send now, remove). The composer says "Queue a message. It goes out when it can continue".
+- **Accounts** sit on a provider's Connections card under its switches: plain rows (name, an "Active" badge or "Use this
+  account", remove), then "Add another account", which opens a one-line name field. Never switched automatically.
 - **Outside the app:** a Claude Code chat the user runs in a terminal shows as an ordinary card with a muted
   "Outside the app" label in its meta line (no new colour) while it runs there. It has no Stop, and the panel shows
   one muted line instead of the composer until it stops; then the composer offers "Continue this chat here".

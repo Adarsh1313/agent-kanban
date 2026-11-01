@@ -87,8 +87,8 @@ describe('Board: columns and cards', () => {
     expect(within(card('stopped')).getByText('Stopped')).toBeTruthy();
     expect(within(card('error')).getByText('Something went wrong')).toBeTruthy();
     expect(within(card('interrupted')).getByText('Interrupted')).toBeTruthy();
-    const badge = within(card('limit')).getByText(/^Limit reached · resets/);
-    expect(badge.textContent).toBe(`Limit reached · resets ${clockTime(resetsAt, NOW)}`);
+    const badge = within(card('limit')).getByText(/^Out of usage · resets/);
+    expect(badge.textContent).toBe(`Out of usage · resets ${clockTime(resetsAt, NOW)}`);
     expect(badge.textContent).toMatch(/resets \d{1,2}:\d{2} (am|pm)$/);
   });
 
