@@ -112,6 +112,7 @@ export function ChatPanel() {
 
   const panelRef = useRef<HTMLElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
+  const [fill, setFill] = useState<{ text: string; n: number } | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [menu, setMenu] = useState<{ target: ChatActionsTarget; anchor: HTMLElement; open: boolean } | null>(null);
   const loading = useRef(new Set<string>());
@@ -240,8 +241,8 @@ export function ChatPanel() {
         </div>
         {s.kind === 'chat' ? (
           <>
-            <Thread chat={s.chat} key={`t:${s.chat.id}`} />
-            <Composer key={`c:${s.chat.id}`} ref={composerRef} onSend={sendTo(s.chat)} hint={HINT} tools={<EffortPicker chat={s.chat} />}
+            <Thread chat={s.chat} key={`t:${s.chat.id}`} onSuggest={(text) => setFill((f) => ({ text, n: (f?.n ?? 0) + 1 }))} />
+            <Composer key={`c:${s.chat.id}`} ref={composerRef} onSend={sendTo(s.chat)} hint={HINT} tools={<EffortPicker chat={s.chat} />} fill={fill}
               placeholder={s.chat.column === 'running' ? 'Send a note. It reaches the agent after this step' : 'Reply or give a new instruction'} />
           </>
         ) : (

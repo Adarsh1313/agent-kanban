@@ -591,3 +591,30 @@ describe('Composer: effort', () => {
     await waitFor(() => expect(within(panel()).getByText('Quick effort')).toBeTruthy());
   });
 });
+
+describe('Suggested next steps', () => {
+  const withSteps = () => thread([message({ id: 'u', role: 'user', text: 'go' }), message({ id: 'a', text: 'done', suggestions: ['Run the tests', 'Open a PR'] })]);
+
+  it('shows chips under the last reply; a click fills the composer without sending', async () => {
+    withSteps();
+    mount(seeded([chat({ title: 'Talk', column: 'review' })]));
+    fireEvent.click(card('Talk'));
+    const group = await within(panel()).findByRole('group', { name: 'Suggested next steps' });
+    fireEvent.click(within(group).getByRole('button', { name: 'Open a PR' }));
+    const box = within(panel()).getByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement;
+    await waitFor(() => expect(box.value).toBe('Open a PR'));
+    expect(document.activeElement).toBe(box);
+    expect(mocked.send).not.toHaveBeenCalled();
+  });
+
+  it('are gone once the user sends', async () => {
+    withSteps();
+    mocked.send.mockResolvedValue(undefined);
+    const store = seeded([chat({ title: 'Talk', column: 'review' })]);
+    mount(store);
+    fireEvent.click(card('Talk'));
+    await within(panel()).findByRole('group', { name: 'Suggested next steps' });
+    act(() => { store.setState((s) => applyEvent(s, { type: 'message.completed', chatId: 'c1', message: message({ id: 'u2', role: 'user', text: 'next', createdAt: '2026-10-23T11:00:00.000Z' }) })); });
+    expect(within(panel()).queryByRole('group', { name: 'Suggested next steps' })).toBeNull();
+  });
+});

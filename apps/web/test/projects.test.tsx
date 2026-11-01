@@ -326,7 +326,7 @@ describe('Project detail', () => {
 
 describe('Projects: hidden and folder missing', () => {
   const ON = { claude: true, codex: true, antigravity: true };
-  const settings = (over: Partial<Settings> = {}): Settings => ({ onboarded: true, showChats: ON, suggest: ON, hiddenProjects: [], unhiddenProjects: [], ...over });
+  const settings = (over: Partial<Settings> = {}): Settings => ({ onboarded: true, showChats: ON, suggest: ON, hiddenProjects: [], unhiddenProjects: [], suggestNextSteps: true, ...over });
   const TEMP = { ...project('/tmp/ak-claude-1', ['claude'], ago(10)), hidden: 'auto' as const, tempFolder: true };
   const OLD = { ...project('/work/old', ['codex'], ago(20)), hidden: 'manual' as const };
   const withSettings = (store: Store, st: Settings) => { store.setState((s) => ({ ...s, settings: st })); return store; };

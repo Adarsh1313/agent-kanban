@@ -72,4 +72,4 @@ The user can't tell an agent to answer quickly or to take extra time without kno
 - [x] Slice 1: effort on chats (type, PATCH, adapters map it, capability flag) with tests
 - [x] Slice 2: web: effort picker, per-reply effort note
 - [x] Slice 3: suggested next steps: preface, parse and strip, setting, with tests
-- [ ] Slice 4: web: suggestion chips, fill composer, Settings switch; DESIGN.md; close #42 and #29
+- [x] Slice 4: web: suggestion chips, fill composer, Settings switch; DESIGN.md; close #42 and #29

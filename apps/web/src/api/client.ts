@@ -106,6 +106,7 @@ export interface SettingsPatch {
   suggest?: Partial<Record<ProviderId, boolean>>;
   hiddenProjects?: string[];
   unhiddenProjects?: string[];
+  suggestNextSteps?: boolean;
 }
 
 export interface Transcript {

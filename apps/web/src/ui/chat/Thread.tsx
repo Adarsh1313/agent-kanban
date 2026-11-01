@@ -107,7 +107,7 @@ function effortNote(replies: { effort?: Message['effort'] }[]): string | null {
 }
 
 /** One board chat's thread: the latest messages, a "Worked · N steps" group per turn, streaming text and open requests. */
-export function Thread({ chat }: { chat: Chat }) {
+export function Thread({ chat, onSuggest }: { chat: Chat; onSuggest?: (text: string) => void }) {
   const { messages, calls, requests, streaming, loaded, now } = useStore(selectThread(chat.id));
   const [limit, setLimit] = useState(THREAD_PAGE);
   const ref = useRef<HTMLDivElement>(null);
@@ -191,6 +191,11 @@ export function Thread({ chat }: { chat: Chat }) {
           </div>
         );
       })}
+      {onSuggest && chat.column !== 'running' && lastReply && messages.at(-1) === lastReply && (lastReply.suggestions?.length ?? 0) > 0 && (
+        <div className="suggestions" role="group" aria-label="Suggested next steps">
+          {lastReply.suggestions!.map((s) => <button className="chip-btn" type="button" key={s} onClick={() => onSuggest(s)}>{s}</button>)}
+        </div>
+      )}
       {chat.column === 'needs_you' && requests.map((r) => <RequestCard key={r.requestId} chatId={chat.id} provider={chat.provider} cwd={chat.cwd} request={r} />)}
       {chat.column === 'needs_you' && chat.needsReason === 'stopped' && (
         <div className="thread-note"><Icon name="stop" size="sm" />You stopped the agent. Resume to let it carry on, or send a new instruction.</div>

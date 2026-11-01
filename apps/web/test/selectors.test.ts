@@ -131,7 +131,7 @@ describe('pinned, unreadCount, suggestFor', () => {
   });
   it('suggestFor skips providers whose "Suggest it for new chats" is off, unless none other may start', () => {
     const on = { claude: true, codex: true, antigravity: true };
-    const settings = { onboarded: true, showChats: on, suggest: { ...on, claude: false }, hiddenProjects: [], unhiddenProjects: [] };
+    const settings = { onboarded: true, showChats: on, suggest: { ...on, claude: false }, hiddenProjects: [], unhiddenProjects: [], suggestNextSteps: true };
     expect(suggestFor(state([], { suggested: 'claude', settings }), ['claude', 'codex'])).toEqual({ provider: 'codex', suggested: false });
     expect(suggestFor(state([], { suggested: null, settings }), ['claude', 'antigravity'])).toEqual({ provider: 'antigravity', suggested: false });
     expect(suggestFor(state([], { suggested: null, settings }), ['claude'])).toEqual({ provider: 'claude', suggested: false });

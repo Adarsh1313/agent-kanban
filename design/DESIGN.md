@@ -61,6 +61,12 @@ one running-blue card halfway between two ink columns.
   Ready), 4-segment progress bar.
 - **Empty board:** dimmed columns with dashed placeholders, a card explaining what happens, Start a
   chat / Browse projects, and the 3 most recent chats to pick up.
+- **Effort picker:** a ghost menu button in the composer row showing the current level (Quick, Normal,
+  Thorough), each with a one-line hint. Hidden when the provider has no effort setting. A reply that
+  ran at Quick or Thorough gets a faint caption "Quick effort". Never say "reasoning".
+- **Suggested next steps:** up to 3 secondary chips (`.chip-btn`) under the latest reply, in a group
+  named "Suggested next steps". A click fills the composer and focuses it; it never sends. Gone once
+  anything is sent. Settings > Suggest next steps turns them off.
 
 ## Desktop app
 

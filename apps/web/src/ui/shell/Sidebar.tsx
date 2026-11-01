@@ -2,11 +2,12 @@ import type { ProviderId } from '@agent-kanban/shared';
 import { folderKey } from '@agent-kanban/shared';
 import { useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
 import { focusedProvider, hiddenFolders, isArchived, isSnoozed, memoState, pinned as pinnedChats, projectLabel, providerCounts, recentChats, type SidebarChat } from '../../state/selectors.ts';
-import { openChatIn, type AppState } from '../../state/reducer.ts';
+import { applySettings, openChatIn, type AppState } from '../../state/reducer.ts';
+import { api } from '../../api/client.ts';
 import { uniqueProjects } from '../projects/model.ts';
 import { useStore, useStoreInstance } from '../../state/store.ts';
 import { openHistoryChat, openNewChat, openRowMenu } from '../actions.ts';
-import { Icon, Menu, MenuItem, PROVIDER_IDS, ProviderLogo, StatusIcon, Tooltip, providerName } from '../primitives/index.ts';
+import { Icon, Menu, MenuItem, PROVIDER_IDS, ProviderLogo, StatusIcon, Tooltip, providerName, toast } from '../primitives/index.ts';
 import { replayOnboarding } from '../onboarding/Onboarding.tsx';
 import { navigate, hashFor } from './route.ts';
 import { toggleTheme } from './theme.ts';
@@ -159,6 +160,13 @@ export function Sidebar() {
   const placed = useRef(false);
   const [settings, setSettings] = useState<HTMLElement | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const nextSteps = useStore((s) => s.settings?.suggestNextSteps ?? true);
+  const toggleNextSteps = async () => {
+    try {
+      const next = await api.patchSettings({ suggestNextSteps: !nextSteps });
+      store.setState((s) => applySettings(s, next));
+    } catch { toast("Couldn't save that setting. Try again."); }
+  };
 
   // The capsule slides to the active item (--duration-move); the first placement does not animate.
   const place = (instant: boolean) => {
@@ -232,7 +240,12 @@ export function Sidebar() {
           <Icon name="settings" />Settings
         </button>
         <Menu anchor={settings} open={menuOpen} onClose={() => setMenuOpen(false)} label="Settings" panes={{
-          root: () => <MenuItem icon="play" onSelect={() => { setMenuOpen(false); replayOnboarding(store); }}>Replay onboarding</MenuItem>,
+          root: () => (
+            <>
+              <MenuItem checked={nextSteps} onSelect={() => void toggleNextSteps()}>Suggest next steps</MenuItem>
+              <MenuItem icon="play" onSelect={() => { setMenuOpen(false); replayOnboarding(store); }}>Replay onboarding</MenuItem>
+            </>
+          ),
         }} />
       </div>
     </aside>
