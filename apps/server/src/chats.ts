@@ -33,7 +33,7 @@ export const NEXT_STEPS_PREFACE = 'At the very end of each reply, add up to 3 li
   + 'each a follow-up the user could ask you to do next, written as an instruction to you. Nothing after them.';
 const NEXT_MAX = 3;
 const NEXT_LEN = 120;
-const NEXT_LINE = /^\s*(?:[-*]\s+)?(?:\*\*|__)?Next:(?:\*\*|__)?\s*(.*?)\s*$/i;
+const NEXT_LINE = /^\s*(?:[-*]\s+)?(?:\*\*|__)?Next:(?:\*\*|__)?\s*(.*?)\s*$/;
 
 /** Splits a reply's trailing `Next:` lines off: the text without them, and up to 3 suggestions of at most 120 characters. */
 export function parseNextSteps(text: string): { text: string; suggestions: string[] } {

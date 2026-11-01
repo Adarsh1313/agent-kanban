@@ -261,7 +261,12 @@ export class ClaudeAdapter implements ProviderAdapter {
     this.assertOpen();
     const chat = this.chatFor(sessionRef);
     this.clearIdle(chat);
-    if (opts.instructions !== undefined) chat.instructions = opts.instructions || undefined;
+    const instructions = opts.instructions === undefined ? chat.instructions : opts.instructions || undefined;
+    if (instructions !== chat.instructions) {
+      chat.instructions = instructions;
+      // The system prompt is fixed per query: an idle one is closed so this turn relaunches with the new instructions.
+      this.closeIfIdle(chat);
+    }
     if (opts.effort && opts.effort !== chat.effort) {
       chat.effort = opts.effort;
       // A live query takes the new level from this turn on; a closed one gets it when it relaunches.

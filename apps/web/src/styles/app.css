@@ -252,7 +252,7 @@ body:has(> .onb[data-state="open"]) > .toasts { z-index: 91; }
 .dlg-pop .menu-item.dim { color: var(--color-text-muted); }
 
 /* Composer: effort picker and per-reply effort note (#42) */
-.effort-btn { height: 28px; padding: 0 var(--space-2); gap: var(--space-1); font-size: var(--text-caption); }
+.effort-btn { padding: 0 var(--space-2); gap: var(--space-1); font-size: var(--text-caption); }
 .effort-item { display: flex; flex-direction: column; align-items: flex-start; }
 .effort-item small { color: var(--color-text-faint); font-size: var(--text-caption); }
 .effort-note { margin-top: var(--space-1); font-size: var(--text-caption); color: var(--color-text-faint); }

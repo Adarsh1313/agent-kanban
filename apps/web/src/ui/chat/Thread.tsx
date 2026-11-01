@@ -193,7 +193,7 @@ export function Thread({ chat, onSuggest }: { chat: Chat; onSuggest?: (text: str
       })}
       {onSuggest && chat.column !== 'running' && lastReply && messages.at(-1) === lastReply && (lastReply.suggestions?.length ?? 0) > 0 && (
         <div className="suggestions" role="group" aria-label="Suggested next steps">
-          {lastReply.suggestions!.map((s) => <button className="chip-btn" type="button" key={s} onClick={() => onSuggest(s)}>{s}</button>)}
+          {lastReply.suggestions!.map((s, i) => <button className="chip-btn" type="button" key={i} onClick={() => onSuggest(s)}>{s}</button>)}
         </div>
       )}
       {chat.column === 'needs_you' && requests.map((r) => <RequestCard key={r.requestId} chatId={chat.id} provider={chat.provider} cwd={chat.cwd} request={r} />)}
