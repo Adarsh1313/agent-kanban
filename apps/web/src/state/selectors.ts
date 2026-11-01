@@ -11,9 +11,6 @@ const ACTIVITY_LIMIT_MIN = { hour: 60, today: 1440, week: 10080 } as const;
 /** A project with no activity for this long is "Older": folded away in New chat and the Project filter. */
 export const OLDER_MS = 30 * 86_400_000;
 
-/** How many chats the sidebar's Recent chats lists; All chats has the rest. */
-export const RECENT_CHATS = 10;
-
 /** A sidebar row: a board chat, or a history-only chat from the provider's own app (chatId null). */
 export interface SidebarChat {
   key: string;
@@ -108,7 +105,7 @@ export function pinned(s: AppState, now: number = Date.now()): Chat[] {
 }
 
 /**
- * Board chats (not archived) and history-only chats outside hidden projects that pass the filters. Recent chats
+ * Board chats (not archived) and history-only chats outside hidden projects that pass the filters. The sidebar
  * leaves out pinned and snoozed ones (`everything` false); All chats lists them too.
  */
 function listedChats(s: AppState, now: number, f: Filters = s.ui.filters, everything = false): SidebarChat[] {
@@ -123,16 +120,64 @@ function listedChats(s: AppState, now: number, f: Filters = s.ui.filters, everyt
   return [...fromBoard, ...fromHistory];
 }
 
-/** A Recent chats or All chats row: a chat with the project it belongs to. */
+/** A sidebar or All chats row: a chat with the project it belongs to. */
 export interface ListedChat extends SidebarChat {
   projectId: string;
   projectName: string;
 }
 
-/** Sidebar "Recent chats": the most recently active chats across projects, newest first, each named by its project; the Filter applies here too. */
-export function recentChats(s: AppState, now: number = Date.now(), limit: number = RECENT_CHATS): ListedChat[] {
-  return listedChats(s, now).sort(byRecent).slice(0, limit).map((c) => withProject(s, c));
+/** The chats the sidebar's project cards draw from: not pinned, archived or snoozed, after the Filter, newest first. */
+export function sidebarChats(s: AppState, now: number = Date.now()): ListedChat[] {
+  return listedChats(s, now).sort(byRecent).map((c) => withProject(s, c));
 }
+
+/** How many of a project's newest chats its sidebar card lists (running and needs-you chats beyond these are listed too). */
+export const CARD_CHATS = 3;
+
+/** My projects that are not hidden, most recently active first; empty until the user has picked (settings.myProjects null). */
+export const myProjects = memoState((s) => [s.projects, s.settings], (s) => {
+  const mine = new Set((s.settings?.myProjects ?? []).map((p) => folderKey(projectFolder(p))));
+  return visibleProjects(s).filter((p) => mine.has(folderKey(p.id))).sort((a, b) => byRecent({ updatedAt: a.lastActivityAt }, { updatedAt: b.lastActivityAt }));
+});
+
+/** A sidebar project card: the chats it lists, how many more there are, and its one-line summary. */
+export interface ProjectCard {
+  chats: SidebarChat[];
+  more: number;
+  running: number;
+  /** Needs you plus Review: chats waiting on the user. */
+  needsYou: number;
+}
+
+/** Chats grouped by project folder (folderKey), newest first, with the sidebar's filters; computed once for every card. */
+const chatsByProject = memoState((s) => [s.chats, s.history, s.projects, s.settings, s.ui.filters, s.ui.archiving, s.now], (s) => {
+  const out = new Map<string, ListedChat[]>();
+  for (const c of sidebarChats(s, s.now)) {
+    const k = folderKey(projectFolder(c.cwd));
+    let list = out.get(k);
+    if (!list) out.set(k, (list = []));
+    list.push(c);
+  }
+  return out;
+});
+
+export function projectCard(s: AppState, projectId: string): ProjectCard {
+  const all = chatsByProject(s).get(folderKey(projectId)) ?? [];
+  const waiting = (c: SidebarChat) => c.column === 'running' || c.column === 'needs_you';
+  const chats = [...all.slice(0, CARD_CHATS), ...all.slice(CARD_CHATS).filter(waiting)];
+  return {
+    chats,
+    more: all.length - chats.length,
+    running: all.filter((c) => c.column === 'running').length,
+    needsYou: all.filter((c) => c.column === 'needs_you' || c.column === 'review').length,
+  };
+}
+
+const NO_FILTERS: Filters = { provider: null, project: null, status: null, model: null, reason: null, activity: null, source: null };
+
+/** Every visible chat, newest first, without any filter: what global search looks through. */
+export const searchableChats = memoState((s) => [s.chats, s.history, s.projects, s.settings, s.ui.archiving, s.now], (s) =>
+  listedChats(s, s.now, NO_FILTERS, true).sort(byRecent).map((c) => withProject(s, c)));
 
 /** All chats: every chat on the board (pinned and snoozed too) or only in a provider's history, newest first, with All chats' own filters. */
 export function allChats(s: AppState, now: number = Date.now()): ListedChat[] {

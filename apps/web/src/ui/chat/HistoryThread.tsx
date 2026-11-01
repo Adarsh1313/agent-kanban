@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { api, type Transcript } from '../../api/client.ts';
 import type { HistoryRef } from '../../state/reducer.ts';
 import { useStore } from '../../state/store.ts';
@@ -24,6 +24,12 @@ export function HistoryThread({ historyRef, app }: { historyRef: HistoryRef; app
     return () => { live = false; };
   }, [historyRef.provider, historyRef.sessionRef]);
 
+  // It opens on the newest message, as the board thread does.
+  const ref = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (state.status === 'ready' && ref.current) ref.current.scrollTop = ref.current.scrollHeight;
+  }, [state]);
+
   const elsewhere = <div className="thread-note center">Earlier messages are in {app}. Send a message to carry on here.</div>;
   if (state.status === 'loading') {
     return <div className="thread" aria-busy="true"><div className="thread-note center"><StatusIcon state="running" />Loading earlier messages…</div></div>;
@@ -31,7 +37,7 @@ export function HistoryThread({ historyRef, app }: { historyRef: HistoryRef; app
   if (state.status === 'failed' || state.t.unavailable || state.t.messages.length === 0) return <div className="thread">{elsewhere}</div>;
   const { messages, truncated } = state.t;
   return (
-    <div className="thread history-thread">
+    <div className="thread history-thread" ref={ref}>
       {truncated && <div className="thread-note center">Showing the last {messages.length} messages. The rest are in {app}.</div>}
       {messages.map((m, i) => (m.role === 'user' ? (
         <div className="msg user" key={i}>

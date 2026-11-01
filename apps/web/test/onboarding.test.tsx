@@ -22,7 +22,7 @@ const mocked = api as unknown as { checkConnections: Fn; connect: Fn; patchSetti
 const NOW = Date.parse('2026-10-23T12:00:00.000Z');
 const ago = (min: number) => new Date(NOW - min * 60_000).toISOString();
 const ON = { claude: true, codex: true, antigravity: true };
-const settings = (over: Partial<Settings> = {}): Settings => ({ onboarded: false, showChats: { ...ON }, suggest: { ...ON }, hiddenProjects: [], unhiddenProjects: [], ...over });
+const settings = (over: Partial<Settings> = {}): Settings => ({ onboarded: false, showChats: { ...ON }, suggest: { ...ON }, hiddenProjects: [], unhiddenProjects: [], suggestNextSteps: true, myProjects: null, ...over });
 
 const conn = (provider: ProviderId, over: Partial<ConnectionHealth> = {}): ConnectionHealth => ({
   provider, installed: true, path: `/bin/${provider}`, version: '1.0.0', latestVersion: '1.0.0', updateAvailable: false,
@@ -174,14 +174,14 @@ describe('connect step', () => {
     fireEvent.click(primary('Get started'));
     expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Connect the agents you use' }));
     expect(screen.getByRole('group', { name: 'Connect the agents you use' }).getAttribute('aria-describedby')).toBeTruthy();
-    expect(screen.getByText('Step 1 of 5')).toBeTruthy();
+    expect(screen.getByText('Step 1 of 6')).toBeTruthy();
   });
 
   it('Enter on the step advances with the primary button; Back returns', () => {
     mount(seeded([conn('claude')]));
     fireEvent.keyDown(dialog()!, { key: 'Enter' });
     expect(screen.getByRole('heading', { name: 'Connect the agents you use' })).toBeTruthy();
-    expect(screen.getByText('Step 1 of 5')).toBeTruthy();
+    expect(screen.getByText('Step 1 of 6')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Back' }));
     expect(screen.getByRole('heading', { name: /All your coding agents/ })).toBeTruthy();
   });
@@ -246,35 +246,52 @@ describe('chats and notifications steps', () => {
     fireEvent.click(primary('Continue'));
     fireEvent.click(primary('Continue'));
     fireEvent.click(primary('Continue'));
+    fireEvent.click(primary('Continue'));
     expect(screen.getByRole('heading', { name: 'Know when an agent needs you' })).toBeTruthy();
     const sound = screen.getByRole('switch', { name: 'Sound' });
     expect(sound.getAttribute('aria-checked')).toBe('true');
     fireEvent.click(sound);
     expect(JSON.parse(localStorage.getItem('agent-kanban.notify') ?? '{}').sound).toBe(false);
-    expect(screen.getByRole('button', { name: 'Play it' })).toBeTruthy();
+    // The speaker plays the chime whether or not Sound is on (#36).
+    expect(screen.getByRole('button', { name: 'Play the chime' }).querySelector('.icon')).toBeTruthy();
     fireEvent.click(sound); // restore
   });
 });
 
-describe('home provider step (#40)', () => {
-  it('picking a tile writes homeProvider; tiles are a radio group', async () => {
-    mocked.patchSettings.mockResolvedValue(settings({ homeProvider: 'codex', skillSync: true }));
-    mount(seeded([conn('claude'), conn('codex')]));
+describe('projects step (#38)', () => {
+  const toProjects = () => {
     fireEvent.click(primary('Get started'));
     fireEvent.click(primary('Continue'));
     fireEvent.click(primary('Continue'));
+  };
+  const ps = () => [project('/w/alpha', ['claude']), project('/w/beta', ['codex'])];
+
+  it('asks which projects you work on, pre-ticked; Continue saves the ticks and moves on', async () => {
+    mocked.patchSettings.mockImplementation(async (p: Partial<Settings>) => settings(p));
+    mount(seeded([conn('claude')], { projects: ps() }));
+    toProjects();
+    expect(screen.getByRole('heading', { name: 'Which projects do you work on?' })).toBeTruthy();
+    const beta = screen.getByRole('checkbox', { name: /^beta,/ });
+    expect(beta.getAttribute('aria-checked')).toBe('true');
+    fireEvent.click(beta);
+    fireEvent.click(primary('Continue'));
     expect(screen.getByRole('heading', { name: 'Which agent do you use most?' })).toBeTruthy();
-    const group = screen.getByRole('radiogroup', { name: 'Home provider' });
-    expect(within(group).getAllByRole('radio')).toHaveLength(2);
-    fireEvent.click(within(group).getByRole('radio', { name: /Codex/ }));
-    await waitFor(() => expect(mocked.patchSettings).toHaveBeenCalledWith({ homeProvider: 'codex' }));
-    await waitFor(() => expect(within(group).getByRole('radio', { name: /Codex/ }).getAttribute('aria-checked')).toBe('true'));
+    await waitFor(() => expect(mocked.patchSettings).toHaveBeenCalledWith({ myProjects: ['/w/alpha'] }));
+  });
+
+  it('Skip keeps the pre-ticked projects', async () => {
+    mocked.patchSettings.mockImplementation(async (p: Partial<Settings>) => settings(p));
+    mount(seeded([conn('claude')], { projects: ps() }));
+    toProjects();
+    fireEvent.click(screen.getByRole('button', { name: 'Skip' }));
+    await waitFor(() => expect(mocked.patchSettings).toHaveBeenCalledWith({ myProjects: ['/w/alpha', '/w/beta'] }));
   });
 });
 
 describe('notifications step hint (#6)', () => {
   const toNotifications = () => {
     fireEvent.click(primary('Get started'));
+    fireEvent.click(primary('Continue'));
     fireEvent.click(primary('Continue'));
     fireEvent.click(primary('Continue'));
     fireEvent.click(primary('Continue'));
@@ -300,6 +317,7 @@ describe('finish', () => {
     fireEvent.click(primary('Continue'));
     fireEvent.click(primary('Continue'));
     fireEvent.click(primary('Continue'));
+    fireEvent.click(primary('Continue'));
   };
 
   it('leaves hidden projects and their chats out of the summary', () => {
@@ -307,7 +325,7 @@ describe('finish', () => {
     const store = seeded([conn('claude')], { history: [...hist('claude', 4), ...hist('claude', 3, '/tmp/ak-claude-1').map((h) => ({ ...h, sessionRef: `t${h.sessionRef}` }))], projects: [project('/w/alpha', ['claude']), temp] });
     mount(store);
     toReady();
-    expect(screen.getByText('4 chats from 1 projects in the sidebar')).toBeTruthy();
+    expect(screen.getByText('4 chats from 1 projects; 1 in your sidebar')).toBeTruthy();
   });
 
   it('summarises, writes onboarded: true, closes, and opens New chat', async () => {
@@ -320,7 +338,7 @@ describe('finish', () => {
     toReady();
     expect(screen.getByRole('heading', { name: 'You’re set up' })).toBeTruthy();
     expect(screen.getByText('1 agent connected: Claude Code')).toBeTruthy();
-    expect(screen.getByText('4 chats from 1 projects in the sidebar')).toBeTruthy();
+    expect(screen.getByText('4 chats from 1 projects; 1 in your sidebar')).toBeTruthy();
     fireEvent.click(primary(/Start your first chat/));
     await waitFor(() => expect(mocked.patchSettings).toHaveBeenCalledWith({ onboarded: true }));
     await waitFor(() => expect(newChat).toHaveBeenCalled());
@@ -369,7 +387,8 @@ describe('finish', () => {
   });
 
   it('a failed write toasts the server text and stays on the last step', async () => {
-    mocked.patchSettings.mockRejectedValue(new ApiError('Couldn’t save settings.', 500));
+    // Only the final write fails (the projects step's save of My projects goes through).
+    mocked.patchSettings.mockImplementation(async (p: Partial<Settings>) => { if ('onboarded' in p) throw new ApiError('Couldn’t save settings.', 500); return settings(p); });
     const newChat = vi.fn();
     setNewChatHandler(newChat);
     const store = seeded([conn('claude')]);
@@ -381,5 +400,22 @@ describe('finish', () => {
     expect(screen.getByRole('heading', { name: 'You’re set up' })).toBeTruthy();
     expect(store.getState().settings?.onboarded).toBe(false);
     expect(newChat).not.toHaveBeenCalled();
+  });
+});
+
+describe('home provider step (#40)', () => {
+  it('picking a tile writes homeProvider; tiles are a radio group', async () => {
+    mocked.patchSettings.mockImplementation(async (p: Partial<Settings>) => settings(p));
+    mount(seeded([conn('claude'), conn('codex')]));
+    fireEvent.click(primary('Get started'));
+    fireEvent.click(primary('Continue'));
+    fireEvent.click(primary('Continue'));
+    fireEvent.click(primary('Continue'));
+    expect(await screen.findByRole('heading', { name: 'Which agent do you use most?' })).toBeTruthy();
+    const group = screen.getByRole('radiogroup', { name: 'Home provider' });
+    expect(within(group).getAllByRole('radio')).toHaveLength(2);
+    fireEvent.click(within(group).getByRole('radio', { name: /Codex/ }));
+    await waitFor(() => expect(mocked.patchSettings).toHaveBeenCalledWith({ homeProvider: 'codex' }));
+    await waitFor(() => expect(within(group).getByRole('radio', { name: /Codex/ }).getAttribute('aria-checked')).toBe('true'));
   });
 });

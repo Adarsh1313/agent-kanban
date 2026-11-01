@@ -162,6 +162,7 @@ export function ChatActionsMenu({ anchor, open: wanted, target, onClose, onRenam
   const projects = useStore((s) => visibleProjects(s));
   const open = wanted && target !== null && (chat !== undefined || target.history !== null);
   const history = chat ? null : target?.history ?? null;
+  const historyOpen = useStore((s) => history !== null && s.ui.openHistory?.provider === history.provider && s.ui.openHistory.sessionRef === history.sessionRef);
 
   const pick = (fn: () => void) => () => {
     onClose();
@@ -197,7 +198,7 @@ export function ChatActionsMenu({ anchor, open: wanted, target, onClose, onRenam
     const cmd = resumeCommand(history.provider, history.sessionRef);
     return (
       <>
-        <MenuItem icon="resume" onSelect={pick(() => store.setState((s) => openHistoryIn(s, history)))}>Continue here</MenuItem>
+        {!historyOpen && <MenuItem icon="resume" onSelect={pick(() => store.setState((s) => openHistoryIn(s, history)))}>Continue here</MenuItem>}
         <MenuItem icon="folder" onSelect={pick(() => void openFolder(history.cwd))}>Open folder</MenuItem>
         <MenuItem icon="copy" onSelect={pick(() => void copyText(history.cwd))}>Copy project path</MenuItem>
         {cmd && <MenuItem icon="terminal" onSelect={pick(() => void copyText(cmd))}>Copy resume command</MenuItem>}

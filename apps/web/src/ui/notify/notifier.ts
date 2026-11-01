@@ -11,7 +11,7 @@ const NOTE_TEXT: Record<AppNotification['kind'], string> = {
   permission: 'wants to run a command',
   question: 'asked you a question',
   finished: 'finished. Ready for review',
-  limit: 'hit its usage limit',
+  limit: 'is out of usage',
   error: 'stopped with an error',
 };
 
@@ -170,12 +170,21 @@ export const primeAudio = (): void => {
   audioContext();
 };
 
+/**
+ * The chime's volume: 200%, through one gain node. Each note peaks at 0.06, so even both notes at once peak at
+ * 0.24 after it, far under full scale (1): louder, without clipping.
+ */
+const CHIME_VOLUME = 2;
+
 /** Two sine notes, 880 Hz then 1320 Hz (1100 Hz, softer, for a finished chat). Failures are silent. */
 export function chime(soft = false): void {
   const ctx = audioContext();
   if (!ctx) return;
   try {
     const t0 = ctx.currentTime;
+    const volume = ctx.createGain();
+    volume.gain.value = CHIME_VOLUME;
+    volume.connect(ctx.destination);
     for (const [f, t] of [[880, 0], [soft ? 1100 : 1320, 0.09]] as const) {
       const o = ctx.createOscillator();
       const g = ctx.createGain();
@@ -184,7 +193,7 @@ export function chime(soft = false): void {
       g.gain.setValueAtTime(0, t0 + t);
       g.gain.linearRampToValueAtTime(0.06, t0 + t + 0.01);
       g.gain.exponentialRampToValueAtTime(0.0001, t0 + t + 0.35);
-      o.connect(g).connect(ctx.destination);
+      o.connect(g).connect(volume);
       o.start(t0 + t);
       o.stop(t0 + t + 0.4);
     }
@@ -288,7 +297,9 @@ export function startNotifier(store: Store): () => void {
     if (now - lastRing < RING_GAP_MS) return;
     lastRing = now;
     const newest = fresh[0]!;
-    if (getPrefs().sound) chime(newest.kind === 'finished');
+    // A routine with "Chime when it finishes" chimes even when Sound is off (#45).
+    const routineChime = newest.kind === 'finished' && s.routines.some((r) => r.chime && r.id === s.chats[newest.chatId]?.routineId);
+    if (getPrefs().sound || routineChime) chime(newest.kind === 'finished');
     if (!reducedMotion()) for (const l of [...ringListeners]) l(newest.id);
   });
 

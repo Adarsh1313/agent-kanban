@@ -14,7 +14,7 @@ export class SettingsError extends Error {}
 const allOn = (): Record<ProviderId, boolean> => ({ claude: true, codex: true, antigravity: true });
 
 export function defaultSettings(): Settings {
-  return { onboarded: false, showChats: allOn(), suggest: allOn(), hiddenProjects: [], unhiddenProjects: [], homeProvider: null, skillSync: false, notesProjects: [] };
+  return { onboarded: false, showChats: allOn(), suggest: allOn(), hiddenProjects: [], unhiddenProjects: [], suggestNextSteps: true, myProjects: null, homeProvider: null, skillSync: false, notesProjects: [] };
 }
 
 function readJson(backend: SettingsBackend, key: string): unknown {
@@ -40,6 +40,13 @@ function readPaths(v: unknown): string[] {
   return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && x.trim() !== '') : [];
 }
 
+const isPaths = (v: unknown): v is string[] => Array.isArray(v) && v.every((x) => typeof x === 'string' && x.trim() !== '');
+
+/** My projects: null (never picked) unless a folder list is stored. */
+function readMine(v: unknown): string[] | null {
+  return Array.isArray(v) ? readPaths(v) : null;
+}
+
 /** Agent Kanban's own preferences (onboarding done, which providers' chats to show and suggest, hidden projects), kept in the store. */
 export class SettingsStore {
   private backend: SettingsBackend;
@@ -51,12 +58,15 @@ export class SettingsStore {
     const rawHome = readJson(this.backend, 'homeProvider');
     const homeProvider = PROVIDERS.includes(rawHome as ProviderId) ? rawHome as ProviderId : null;
     const skillSync = readJson(this.backend, 'skillSync');
+    const nextSteps = readJson(this.backend, 'suggestNextSteps');
     return {
       onboarded: typeof onboarded === 'boolean' ? onboarded : false,
       showChats: readFlags(readJson(this.backend, 'showChats')),
       suggest: readFlags(readJson(this.backend, 'suggest')),
       hiddenProjects: readPaths(readJson(this.backend, 'hiddenProjects')),
       unhiddenProjects: readPaths(readJson(this.backend, 'unhiddenProjects')),
+      suggestNextSteps: typeof nextSteps === 'boolean' ? nextSteps : true,
+      myProjects: readMine(readJson(this.backend, 'myProjects')),
       homeProvider,
       // On by default once a home provider is picked.
       skillSync: typeof skillSync === 'boolean' ? skillSync : homeProvider !== null,
@@ -72,9 +82,9 @@ export class SettingsStore {
     const next = this.get();
     let explicitSync = this.backend.getSetting('skillSync') !== undefined;
     for (const [key, value] of Object.entries(body)) {
-      if (key === 'onboarded') {
-        if (typeof value !== 'boolean') throw new SettingsError('Onboarded must be true or false.');
-        next.onboarded = value;
+      if (key === 'onboarded' || key === 'suggestNextSteps') {
+        if (typeof value !== 'boolean') throw new SettingsError(`"${key}" must be true or false.`);
+        next[key] = value;
       } else if (key === 'showChats' || key === 'suggest') {
         if (!value || typeof value !== 'object' || Array.isArray(value)) throw new SettingsError(`"${key}" must be an object like { "codex": false }.`);
         for (const [id, flag] of Object.entries(value as Record<string, unknown>)) {
@@ -92,6 +102,9 @@ export class SettingsStore {
       } else if (key === 'hiddenProjects' || key === 'unhiddenProjects' || key === 'notesProjects') {
         if (!Array.isArray(value) || !value.every((x) => typeof x === 'string' && x.trim() !== '')) throw new SettingsError(`"${key}" must be a list of folders.`);
         next[key] = value as string[];
+      } else if (key === 'myProjects') {
+        if (value !== null && !isPaths(value)) throw new SettingsError('"myProjects" must be a list of folders, or null.');
+        next.myProjects = value as string[] | null;
       } else {
         throw new SettingsError(`You can't change "${key}".`);
       }
@@ -101,6 +114,8 @@ export class SettingsStore {
     this.backend.setSetting('suggest', JSON.stringify(next.suggest));
     this.backend.setSetting('hiddenProjects', JSON.stringify(next.hiddenProjects));
     this.backend.setSetting('unhiddenProjects', JSON.stringify(next.unhiddenProjects));
+    this.backend.setSetting('suggestNextSteps', JSON.stringify(next.suggestNextSteps));
+    this.backend.setSetting('myProjects', JSON.stringify(next.myProjects));
     this.backend.setSetting('homeProvider', JSON.stringify(next.homeProvider));
     this.backend.setSetting('notesProjects', JSON.stringify(next.notesProjects));
     // Left unset until chosen, so picking a home provider later turns sync on by default.

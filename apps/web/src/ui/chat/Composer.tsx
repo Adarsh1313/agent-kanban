@@ -1,4 +1,4 @@
-import { forwardRef, useId, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { forwardRef, useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { Icon } from '../primitives/index.ts';
 
 export interface ComposerProps {
@@ -8,17 +8,30 @@ export interface ComposerProps {
   onSend: (text: string) => Promise<boolean>;
   /** Skill names `/` offers (the same for every provider; the server sends each in its provider's form). */
   skills?: string[];
-  /** Shown left of the hint, e.g. the provider picker. */
+  /** Controls shown in the row beside the hint (e.g. the provider and effort pickers). */
   tools?: ReactNode;
+  /** Replaces the text and focuses the box when it changes (a suggested next step was picked). */
+  fill?: { text: string; n: number } | null;
 }
 
 /** Enter sends, Shift+Enter starts a new line. A leading `/` lists skills: arrows move, Enter or Tab picks, Escape closes. */
-export const Composer = forwardRef<HTMLTextAreaElement, ComposerProps>(function Composer({ placeholder, hint, onSend, skills = [], tools }, ref) {
+export const Composer = forwardRef<HTMLTextAreaElement, ComposerProps>(function Composer({ placeholder, hint, onSend, skills = [], tools, fill }, ref) {
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const [active, setActive] = useState(0);
   const [dismissed, setDismissed] = useState<string | null>(null);
   const listId = useId();
+  const box = useRef<HTMLTextAreaElement | null>(null);
+  useEffect(() => {
+    if (!fill) return;
+    setText(fill.text);
+    box.current?.focus();
+  }, [fill]);
+  const setRef = (el: HTMLTextAreaElement | null) => {
+    box.current = el;
+    if (typeof ref === 'function') ref(el);
+    else if (ref) ref.current = el;
+  };
 
   const query = /^\/([\w.:-]*)$/.exec(text)?.[1];
   const matches = query === undefined || dismissed === text ? [] : skills.filter((n) => n.toLowerCase().startsWith(query.toLowerCase()));
@@ -60,7 +73,7 @@ export const Composer = forwardRef<HTMLTextAreaElement, ComposerProps>(function 
             ))}
           </ul>
         )}
-        <textarea ref={ref} placeholder={placeholder} aria-label="Message" value={text}
+        <textarea ref={setRef} placeholder={placeholder} aria-label="Message" value={text}
           aria-autocomplete={skills.length ? 'list' : undefined} aria-controls={open ? listId : undefined}
           aria-activedescendant={open ? `${listId}-${at}` : undefined}
           onChange={(e) => { setText(e.target.value); setActive(0); }} onKeyDown={onKey} />

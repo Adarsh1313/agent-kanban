@@ -12,7 +12,9 @@ import { ANTIGRAVITY_SIGNED_OUT } from '../src/adapters/antigravity.ts';
 
 class FakeAdapter implements ProviderAdapter {
   id: ProviderId;
+  capabilities = { effort: true };
   calls: string[] = [];
+  opts: unknown[] = [];
   listeners = new Set<(e: AdapterEvent) => void>();
   startError: Error | null = null;
   beforeResolve: (() => void) | null = null;
@@ -20,13 +22,14 @@ class FakeAdapter implements ProviderAdapter {
   respondError: Error | null = null;
   resumeError: Error | null = null;
   constructor(id: ProviderId) { this.id = id; }
-  async startChat() {
+  async startChat(input?: { effort?: string; instructions?: string }) {
     this.calls.push('startChat');
+    this.opts.push({ effort: input?.effort, instructions: input?.instructions });
     if (this.startError) throw this.startError;
     this.beforeResolve?.();
     return { sessionRef: this.ref };
   }
-  async sendMessage(ref: string, text: string) { this.calls.push(`send:${ref}:${text}`); }
+  async sendMessage(ref: string, text: string, opts?: unknown) { this.calls.push(`send:${ref}:${text}`); this.opts.push(opts); }
   async respondToRequest(ref: string, rid: string, d: unknown) { if (this.respondError) throw this.respondError; this.calls.push(`respond:${ref}:${rid}:${JSON.stringify(d)}`); }
   async stop(ref: string) { this.calls.push(`stop:${ref}`); }
   async resume(ref: string, cwd: string) { this.calls.push(`resume:${ref}:${cwd}`); await Promise.resolve(); if (this.resumeError) throw this.resumeError; }
@@ -846,4 +849,53 @@ test('stop parks the card at once, before the agent has ended its turn', async (
   await stopping;
   assert.deepEqual([store.getChat(chat.id)!.column, store.getChat(chat.id)!.needsReason], ['needs_you', 'stopped']);
   assert.ok(adapter.calls.includes('stop:s1'));
+});
+
+test('effort: new chats run at Normal; a change applies from the next message and non-Normal replies note it', async () => {
+  const { store, adapter, svc } = setup();
+  const chat = await startOf(svc, { provider: 'codex', cwd: '/w', prompt: 'p' });
+  assert.equal(chat.effort, 'normal');
+  assert.equal((adapter.opts[0] as { effort: string }).effort, 'normal');
+  adapter.emit({ type: 'message.completed', sessionRef: 's1', messageId: 'a', role: 'assistant', text: 'one' });
+  assert.equal(svc.patch(chat.id, { effort: 'thorough' }).effort, 'thorough');
+  await svc.send(chat.id, 'more');
+  assert.equal((adapter.opts[1] as { effort: string }).effort, 'thorough');
+  adapter.emit({ type: 'message.delta', sessionRef: 's1', messageId: 'b', text: 'tw' });
+  adapter.emit({ type: 'message.completed', sessionRef: 's1', messageId: 'b', role: 'assistant', text: 'two' });
+  const replies = store.listMessages(chat.id).filter((m) => m.role === 'assistant');
+  assert.deepEqual(replies.map((m) => m.effort), [undefined, 'thorough']);
+});
+
+test('effort: a provider without the capability gets no effort', async () => {
+  const { adapter, svc } = setup('antigravity');
+  adapter.capabilities = { effort: false };
+  await startOf(svc, { provider: 'antigravity', cwd: '/w', prompt: 'p', effort: 'quick' });
+  assert.equal((adapter.opts[0] as { effort?: string }).effort, undefined);
+});
+
+test('next steps: trailing Next: lines are stripped and stored as suggestions (max 3, 120 chars)', async () => {
+  const { store, adapter, svc } = setup();
+  const chat = await startOf(svc, { provider: 'codex', cwd: '/w', prompt: 'p' });
+  assert.ok((adapter.opts[0] as { instructions: string }).instructions.includes('Next:'));
+  const long = 'x'.repeat(200);
+  adapter.emit({ type: 'message.completed', sessionRef: 's1', messageId: 'a', role: 'assistant', text: `Done.\n\nNext: Run the tests\n- Next: Open a PR\n**Next:** ${long}\nNext: Fourth\n` });
+  adapter.emit({ type: 'turn.completed', sessionRef: 's1' });
+  const reply = store.listMessages(chat.id).at(-1)!;
+  assert.equal(reply.text, 'Done.');
+  assert.equal(reply.suggestions!.length, 3);
+  assert.deepEqual(reply.suggestions!.slice(0, 2), ['Run the tests', 'Open a PR']);
+  assert.equal(reply.suggestions![2]!.length, 120);
+});
+
+test('next steps: with the setting off nothing is asked for or parsed', async () => {
+  const store = new Store(':memory:');
+  const adapter = new FakeAdapter('codex');
+  const svc = new ChatService({ store, adapters: { codex: adapter }, usage: { refresh: async () => [] } as any, broadcast: () => {}, claudeHome: '/nowhere', suggestNextSteps: () => false });
+  const chat = await startOf(svc, { provider: 'codex', cwd: '/w', prompt: 'p' });
+  assert.equal((adapter.opts[0] as { instructions: string }).instructions, '');
+  adapter.emit({ type: 'message.completed', sessionRef: 's1', messageId: 'a', role: 'assistant', text: 'Done.\nNext: More' });
+  adapter.emit({ type: 'turn.completed', sessionRef: 's1' });
+  const reply = store.listMessages(chat.id).at(-1)!;
+  assert.equal(reply.text, 'Done.\nNext: More');
+  assert.equal(reply.suggestions, undefined);
 });

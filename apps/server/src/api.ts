@@ -7,7 +7,7 @@ import { existsSync, realpathSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { timingSafeEqual } from 'node:crypto';
 import { WebSocketServer, WebSocket } from 'ws';
-import type { ConnectionHealth, HistoryChat, SkillsReport, ModelOption, ProviderId, ServerEvent } from '@agent-kanban/shared';
+import type { ConnectionHealth, Effort, HistoryChat, ModelOption, ProviderId, ServerEvent, SkillsReport } from '@agent-kanban/shared';
 import { ActiveElsewhereError, CantContinueError } from './chats.ts';
 import { ConnectBusyError, ConnectStateError } from './connect/service.ts';
 import { PickerBusyError } from './folder-picker.ts';
@@ -15,11 +15,16 @@ import type { Transcript } from './history/transcript.ts';
 import type { ConnectService } from './connect/service.ts';
 import { SettingsError } from './settings.ts';
 import { disableNotes, enableNotes, readNotes, writeNotes } from './notes.ts';
+import { RoutineError, RoutineNotFoundError } from './routines.ts';
+import type { RoutineService } from './routines.ts';
+import { ACCOUNT_PROVIDERS, AccountBusyError, AccountError, type AccountService } from './accounts.ts';
+import type { AccountProvider } from '@agent-kanban/shared';
+import { parseHookPayload, type HookPayload } from './outside/sessions.ts';
 import type { SettingsStore } from './settings.ts';
 import type { ChatService } from './chats.ts';
 import type { UsageService } from './usage/service.ts';
 // suggest() lives in shared so the web app can recompute "Most room" from usage.updated events.
-import { folderKey, suggest } from '@agent-kanban/shared';
+import { EFFORTS, folderKey, suggest } from '@agent-kanban/shared';
 
 const PROVIDERS: ProviderId[] = ['claude', 'codex', 'antigravity'];
 const MAX_BODY = 1_000_000;
@@ -83,6 +88,10 @@ function provider(body: Record<string, unknown>): ProviderId {
   return v as ProviderId;
 }
 
+function effort(v: unknown): Effort {
+  if (typeof v !== 'string' || !EFFORTS.includes(v as Effort)) throw new HttpError(400, 'Effort must be quick, normal or thorough.');
+  return v as Effort;
+}
 
 function existingFolder(cwd: string): string {
   let ok = false;
@@ -101,12 +110,23 @@ export function createApi(opts: {
   settings?: SettingsStore;
   /** Skill sync (#40): the last report, Sync now and the home provider's skill names. */
   skills?: { report(): SkillsReport; sync(): SkillsReport; names(): string[] };
+  /** Routines and their scheduler (#45). */
+  routines?: RoutineService;
   /** Past messages of a chat that is only in the provider's history (#16). */
   transcript?: (provider: ProviderId, sessionRef: string) => Promise<Transcript>;
   /** New chat's "Browse…": shows the native folder picker (#24). */
   folderPicker?: { pick(): Promise<string | null> };
   /** A chat's "Open folder": shows a project folder in the file manager (#15). */
   folderOpener?: { open(path: string): Promise<void> };
+  /** Codex's banked free resets (#31). */
+  codexResets?: { read(): Promise<number>; use(): Promise<string> };
+  /** Several accounts per provider (#39). */
+  accounts?: AccountService;
+  /** Claude Code hooks that put outside chats on the board (#37). */
+  hooks?: { installed(): boolean; install(): void; remove(): void };
+  /** Receives Claude Code hook events; `hookSecret` is the value the hook script sends with them. */
+  outside?: { handle(p: HookPayload): void };
+  hookSecret?: string;
   /** Folder holding the built web app (default apps/web/dist). */
   webDist?: string;
   token: string;
@@ -182,12 +202,45 @@ export function createApi(opts: {
     };
     let m: string[] | null;
     if (match('GET', '/api/chats')) return { status: 200, body: chats.listChats() };
+    if (opts.codexResets && match('GET', '/api/usage/codex/resets')) return { status: 200, body: { available: await opts.codexResets.read() } };
+    if (opts.codexResets && match('POST', '/api/usage/codex/resets/use')) return { status: 200, body: { outcome: await opts.codexResets.use() } };
+    if (url.pathname.startsWith('/api/accounts') && opts.accounts) {
+      const accounts = opts.accounts;
+      const who = (v: unknown): AccountProvider => {
+        if (typeof v !== 'string' || !ACCOUNT_PROVIDERS.includes(v as AccountProvider)) throw new HttpError(400, 'Accounts are for claude or codex.');
+        return v as AccountProvider;
+      };
+      if (match('GET', '/api/accounts')) return { status: 200, body: accounts.all() };
+      if (match('POST', '/api/accounts')) {
+        const b = await readJson(req);
+        return { status: 201, body: accounts.add(who(b.provider), str(b, 'name')) };
+      }
+      if ((m = match('PATCH', '/api/accounts/:provider/:id'))) {
+        const b = await readJson(req);
+        return { status: 200, body: accounts.rename(who(m[0]), m[1]!, str(b, 'name')) };
+      }
+      if ((m = match('POST', '/api/accounts/:provider/:id/activate'))) return { status: 200, body: accounts.activate(who(m[0]), m[1]!) };
+      if ((m = match('DELETE', '/api/accounts/:provider/:id'))) return { status: 200, body: accounts.remove(who(m[0]), m[1]!) };
+    }
+    if (url.pathname.startsWith('/api/hooks/claude') && opts.hooks) {
+      const hooks = opts.hooks;
+      if (match('GET', '/api/hooks/claude')) return { status: 200, body: { installed: hooks.installed() } };
+      const act = match('POST', '/api/hooks/claude/:action');
+      if (act && (act[0] === 'install' || act[0] === 'remove')) {
+        try { if (act[0] === 'install') hooks.install(); else hooks.remove(); } catch {
+          throw new HttpError(409, "Couldn't change Claude Code's settings file. Check that it isn't open in another program and is valid.");
+        }
+        const installed = hooks.installed();
+        broadcast({ type: 'hooks.updated', installed });
+        return { status: 200, body: { installed } };
+      }
+    }
     if ((m = match('GET', '/api/chats/:id/messages'))) return { status: 200, body: chats.listMessages(m[0]!) };
     if ((m = match('GET', '/api/chats/:id/requests'))) return { status: 200, body: chats.listOpenRequests(m[0]!) };
     if ((m = match('GET', '/api/chats/:id/tool-calls'))) return { status: 200, body: chats.listToolCalls(m[0]!) };
     if ((m = match('PATCH', '/api/chats/:id'))) {
       const b = await readJson(req);
-      const patch: { title?: string; pinned?: boolean; snoozedUntil?: string | null; projectLabel?: string | null } = {};
+      const patch: { title?: string; pinned?: boolean; snoozedUntil?: string | null; effort?: Effort; autoResume?: boolean; projectLabel?: string | null } = {};
       for (const [k, v] of Object.entries(b)) {
         if (k === 'title') {
           const t = typeof v === 'string' ? v.trim() : '';
@@ -196,6 +249,9 @@ export function createApi(opts: {
         } else if (k === 'pinned') {
           if (typeof v !== 'boolean') throw new HttpError(400, 'Pinned must be true or false.');
           patch.pinned = v;
+        } else if (k === 'autoResume') {
+          if (typeof v !== 'boolean') throw new HttpError(400, 'Auto-resume must be true or false.');
+          patch.autoResume = v;
         } else if (k === 'snoozedUntil') {
           if (v === null) patch.snoozedUntil = null;
           else {
@@ -206,7 +262,8 @@ export function createApi(opts: {
           // A label only: the chat shows under that project and still runs in its own folder (decision 9).
           if (v !== null && (typeof v !== 'string' || v.trim() === '')) throw new HttpError(400, 'Project must be a folder or null.');
           patch.projectLabel = v === null ? null : v;
-        } else throw new HttpError(400, `You can't change "${k}".`);
+        } else if (k === 'effort') patch.effort = effort(v);
+        else throw new HttpError(400, `You can't change "${k}".`);
       }
       return { status: 200, body: chats.patch(m[0]!, patch) };
     }
@@ -243,9 +300,10 @@ export function createApi(opts: {
     if (match('GET', '/api/models')) return { status: 200, body: await models() };
     if (match('POST', '/api/chats')) {
       const b = await readJson(req);
-      const input: { provider: ProviderId; cwd: string; prompt: string; model?: string } = {
+      const input: { provider: ProviderId; cwd: string; prompt: string; model?: string; effort?: Effort } = {
         provider: provider(b), cwd: str(b, 'cwd'), prompt: str(b, 'prompt'),
       };
+      if (b.effort !== undefined) input.effort = effort(b.effort);
       if (b.model !== undefined) {
         if (typeof b.model !== 'string' || b.model.trim() === '') throw new HttpError(400, 'Model must be a non-empty string.');
         input.model = b.model;
@@ -268,6 +326,13 @@ export function createApi(opts: {
       await chats.answer(m[0]!, m[1]!, decision);
       return { status: 204 };
     }
+    if ((m = match('PATCH', '/api/chats/:id/queue/:queued'))) {
+      const b = await readJson(req);
+      return { status: 200, body: chats.editQueued(m[0]!, m[1]!, str(b, 'text')) };
+    }
+    if ((m = match('DELETE', '/api/chats/:id/queue/:queued'))) return { status: 200, body: chats.removeQueued(m[0]!, m[1]!) };
+    if ((m = match('POST', '/api/chats/:id/resume-now'))) { await chats.resumeNow(m[0]!); return { status: 204 }; }
+    if ((m = match('POST', '/api/chats/:id/queue/:queued/send-now'))) { await chats.sendQueuedNow(m[0]!, m[1]!); return { status: 204 }; }
     if ((m = match('POST', '/api/chats/:id/stop'))) { await chats.stop(m[0]!); return { status: 200, body: chats.getChat(m[0]!) }; }
     if ((m = match('POST', '/api/chats/:id/done'))) return { status: 200, body: chats.markDone(m[0]!) };
     if ((m = match('POST', '/api/chats/:id/undone'))) return { status: 200, body: chats.dragOutOfDone(m[0]!) };
@@ -337,6 +402,16 @@ export function createApi(opts: {
       if (!opts.skills) throw new HttpError(404, 'Not found.');
       return { status: 200, body: { ...opts.skills.sync(), available: opts.skills.names() } };
     }
+    if (url.pathname === '/api/routines' || url.pathname.startsWith('/api/routines/')) {
+      const r = opts.routines;
+      if (!r) throw new HttpError(404, 'Not found.');
+      if (match('GET', '/api/routines')) return { status: 200, body: r.list() };
+      if (match('POST', '/api/routines')) return { status: 201, body: r.create(await readJson(req)) };
+      if ((m = match('PATCH', '/api/routines/:id'))) return { status: 200, body: r.update(m[0]!, await readJson(req)) };
+      if ((m = match('DELETE', '/api/routines/:id'))) { r.remove(m[0]!); return { status: 204 }; }
+      if ((m = match('POST', '/api/routines/:id/run'))) return { status: 200, body: await r.runNow(m[0]!) };
+      throw new HttpError(404, 'Not found.');
+    }
     if (match('GET', '/api/settings')) {
       if (!settings) throw new HttpError(404, 'Not found.');
       return { status: 200, body: settings.get() };
@@ -364,7 +439,7 @@ export function createApi(opts: {
       res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Vary', 'Origin');
       res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
-      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, PUT, OPTIONS');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, PUT, DELETE, OPTIONS');
     }
     const send = (status: number, body?: unknown) => {
       if (body === undefined) { res.writeHead(status); res.end(); return; }
@@ -408,6 +483,21 @@ export function createApi(opts: {
       if (file) return sendFile(file, url.pathname.startsWith('/assets/') ? 'public, max-age=31536000, immutable' : 'no-cache');
       if (shell && wantsHtml) return sendFile(shell, 'no-store');
     }
+    // Claude Code's hook script posts events with its own secret instead of the page token. A browser page
+    // can't read that secret, and anything with an Origin header (a web page) is refused outright.
+    if (req.method === 'POST' && url.pathname === '/api/hooks/claude/event') {
+      if (!opts.outside || !opts.hookSecret || req.headers.origin !== undefined || !tokenOk(req.headers['x-agent-kanban-hook'] as string | undefined, opts.hookSecret)) {
+        req.resume();
+        return send(401);
+      }
+      readJson(req).then((body) => {
+        const p = parseHookPayload(body);
+        if (!p) return send(400);
+        try { opts.outside!.handle(p); } catch (e) { console.error('[agent-kanban] outside chat', e); }
+        send(204);
+      }, () => send(400));
+      return;
+    }
     const auth = req.headers.authorization;
     let given = auth?.startsWith('Bearer ') ? auth.slice(7) : null;
     // ?token= is accepted only for the landing pages the server prints (and the WebSocket upgrade).
@@ -424,13 +514,17 @@ export function createApi(opts: {
       (r) => send(r.status, r.body),
       (err: unknown) => {
         if (err instanceof URIError) return send(404, { error: 'Not found.' });
+        if (err instanceof AccountError) return send(400, { error: err.message });
+        if (err instanceof AccountBusyError) return send(409, { error: err.message });
         if (err instanceof HttpError) {
           if (err.status === 413) return reject413(err.message);
           return send(err.status, { error: err.message });
         }
         const msg = err instanceof Error ? err.message : '';
+        if (err instanceof RoutineError) return send(400, { error: msg });
+        if (err instanceof RoutineNotFoundError) return send(404, { error: msg });
         if (err instanceof ActiveElsewhereError || err instanceof CantContinueError || err instanceof ConnectBusyError || err instanceof ConnectStateError || err instanceof PickerBusyError) return send(409, { error: msg });
-        if (msg === 'That request is no longer open.') return send(409, { error: msg });
+        if (msg === 'That request is no longer open.' || msg === 'That message is no longer queued.') return send(409, { error: msg });
         if (msg === 'Chat not found.') return send(404, { error: msg });
         console.error(err);
         send(500, { error: 'Something went wrong.' });

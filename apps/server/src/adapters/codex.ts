@@ -1,8 +1,9 @@
+import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import type { AdapterEvent, ModelOption, UsageReading } from '@agent-kanban/shared';
-import type { PingResult, ProviderAdapter } from './adapter.ts';
+import type { AdapterEvent, Effort, ModelOption, UsageReading } from '@agent-kanban/shared';
+import type { PingResult, ProviderAdapter, TurnOptions } from './adapter.ts';
 import { JsonRpcProcess } from './jsonrpc.ts';
 import { codexLimitsToReading } from '../usage/parse.ts';
 
@@ -24,8 +25,14 @@ const STOP_WAIT_MS = 10_000;
  *   (or, if turn/start was already sent, both the rejection and the error event may occur).
  *   Task 8 should treat a startChat/sendMessage rejection as the failure signal for that call.
  */
+/** app-server turn/start `effort` (a ReasoningEffort) for Quick, Normal and Thorough. */
+export const CODEX_EFFORT: Record<Effort, 'low' | 'medium' | 'high'> = { quick: 'low', normal: 'medium', thorough: 'high' };
+
 export class CodexAdapter implements ProviderAdapter {
   id = 'codex' as const;
+  capabilities = { effort: true };
+  /** Developer instructions per thread, sent when a thread is started or resumed. */
+  private instructions = new Map<string, string>();
   private listeners = new Set<Listener>();
   private proc: JsonRpcProcess | null = null;
   private starting: Promise<JsonRpcProcess> | null = null;
@@ -39,7 +46,7 @@ export class CodexAdapter implements ProviderAdapter {
   private makeProcess: () => JsonRpcProcess;
   /** How long initialize (and model/list) may take; public so a caller can change it between process starts. */
   initializeTimeoutMs: number;
-  private codexHome: string;
+  private homeOf: () => string;
   private fallbackModel = new WeakMap<JsonRpcProcess, string | null>();
   private _modelNote: string | null = null;
   // Keep-alive state for automatic (ping-driven) respawns; user actions bypass it.
@@ -53,12 +60,19 @@ export class CodexAdapter implements ProviderAdapter {
   private lastSignedIn: boolean | null = null;
   private claims = new Set<string>(); // threads a startChat/sendMessage is still setting up: they survive a deliberate recycle
 
-  constructor(opts: { codexPath: string; spawn?: (cmd: string, args: string[]) => JsonRpcProcess; initializeTimeoutMs?: number; pingTimeoutMs?: number; codexHome?: string }) {
+  constructor(opts: { codexPath: string; spawn?: (cmd: string, args: string[]) => JsonRpcProcess; initializeTimeoutMs?: number; pingTimeoutMs?: number; codexHome?: string; env?: () => Record<string, string> }) {
     this.pingTimeoutMs = opts.pingTimeoutMs ?? 15_000;
     const args = ['app-server'];
-    this.codexHome = opts.codexHome ?? join(homedir(), '.codex');
+    const fixedHome = opts.codexHome ?? join(homedir(), '.codex');
+    const accountEnv: () => Record<string, string> = opts.env ?? (() => ({}));
+    // The active account (#39) is read when the app-server starts: its CODEX_HOME holds that sign-in.
+    this.homeOf = () => accountEnv().CODEX_HOME ?? fixedHome;
     this.initializeTimeoutMs = opts.initializeTimeoutMs ?? 15_000;
-    this.makeProcess = () => (opts.spawn ? opts.spawn(opts.codexPath, args) : new JsonRpcProcess(opts.codexPath, args));
+    this.makeProcess = () => {
+      const env = accountEnv();
+      if (opts.spawn) return opts.spawn(opts.codexPath, args);
+      return new JsonRpcProcess(opts.codexPath, args, Object.keys(env).length > 0 ? { env: { ...process.env, ...env } } : {});
+    };
   }
 
   /** Set when the configured Codex model isn't usable with this account and new chats use the default instead. */
@@ -82,6 +96,9 @@ export class CodexAdapter implements ProviderAdapter {
     this.starting = s;
     return s;
   }
+
+  /** Another account is active: the next app-server starts signed in to it (callers switch only while no Codex chat runs). */
+  accountChanged(): void { this.markForRecycle(); }
 
   /** Replace the app-server at the next ping or action (used when it is stale and nothing is running on it). */
   markForRecycle(): void { if (this.proc) this.recycleMarked.add(this.proc); }
@@ -127,7 +144,7 @@ export class CodexAdapter implements ProviderAdapter {
       let configured: string | null = null;
       try {
         // Only the top-level keys, i.e. the text before the first [table] header.
-        const text = readFileSync(join(this.codexHome, 'config.toml'), 'utf8');
+        const text = readFileSync(join(this.homeOf(), 'config.toml'), 'utf8');
         const top = text.split(/^\s*\[/m)[0] ?? '';
         configured = /^model\s*=\s*"([^"]+)"/m.exec(top)?.[1] ?? null;
       } catch { /* no config file */ }
@@ -250,19 +267,25 @@ export class CodexAdapter implements ProviderAdapter {
     });
   }
 
-  async startChat(input: { cwd: string; prompt: string; model?: string }): Promise<{ sessionRef: string }> {
+  async startChat(input: { cwd: string; prompt: string; model?: string } & TurnOptions): Promise<{ sessionRef: string }> {
     const p = await this.ensureProcess();
-    const r = await p.request<{ thread: { id: string } }>('thread/start', { cwd: input.cwd, model: input.model ?? this.fallbackModel.get(p) ?? null, ...AUTO_MODE });
+    const r = await p.request<{ thread: { id: string } }>('thread/start', {
+      cwd: input.cwd, model: input.model ?? this.fallbackModel.get(p) ?? null, ...AUTO_MODE,
+      ...(input.instructions ? { developerInstructions: input.instructions } : {}),
+    });
     const sessionRef = r.thread.id;
+    if (input.instructions) this.instructions.set(sessionRef, input.instructions);
     this.threadCwd.set(sessionRef, input.cwd);
     this.loaded.get(p)?.add(sessionRef);
     this.emit({ type: 'session.started', sessionRef });
     this.claims.add(sessionRef);
-    try { await this.startTurn(p, sessionRef, input.prompt); } finally { this.claims.delete(sessionRef); }
+    try { await this.startTurn(p, sessionRef, input.prompt, undefined, input.effort); } finally { this.claims.delete(sessionRef); }
     return { sessionRef };
   }
 
-  async sendMessage(sessionRef: string, text: string): Promise<void> {
+  async sendMessage(sessionRef: string, text: string, opts: TurnOptions = {}): Promise<void> {
+    if (opts.instructions) this.instructions.set(sessionRef, opts.instructions);
+    else if (opts.instructions === '') this.instructions.delete(sessionRef);
     // Claim the turn before respawning/re-attaching, so a stop() that arrives meanwhile is queued, not dropped.
     const owned = !this.activeTurns.has(sessionRef);
     if (owned) this.activeTurns.set(sessionRef, null);
@@ -270,7 +293,7 @@ export class CodexAdapter implements ProviderAdapter {
     try {
       const p = await this.ensureProcess();
       await this.attach(p, sessionRef);
-      await this.startTurn(p, sessionRef, text, owned);
+      await this.startTurn(p, sessionRef, text, owned, opts.effort);
     } catch (e) {
       if (owned) { this.activeTurns.delete(sessionRef); this.pendingStops.delete(sessionRef); }
       throw e;
@@ -284,14 +307,21 @@ export class CodexAdapter implements ProviderAdapter {
     const known = this.loaded.get(p);
     if (known?.has(sessionRef)) return;
     const cwd = this.threadCwd.get(sessionRef);
-    await p.request('thread/resume', { threadId: sessionRef, ...(cwd ? { cwd } : {}), ...this.modelParam(p), ...AUTO_MODE });
+    await p.request('thread/resume', { threadId: sessionRef, ...(cwd ? { cwd } : {}), ...this.modelParam(p), ...AUTO_MODE, ...this.instructionsParam(sessionRef) });
     known?.add(sessionRef);
   }
 
-  private async startTurn(p: JsonRpcProcess, sessionRef: string, text: string, owned = !this.activeTurns.has(sessionRef)): Promise<void> {
+  private instructionsParam(sessionRef: string): { developerInstructions?: string } {
+    const i = this.instructions.get(sessionRef);
+    return i ? { developerInstructions: i } : {};
+  }
+
+  private async startTurn(p: JsonRpcProcess, sessionRef: string, text: string, owned = !this.activeTurns.has(sessionRef), effort?: Effort): Promise<void> {
     if (owned) this.activeTurns.set(sessionRef, null);
     try {
-      const r = await p.request<{ turn: { id: string } }>('turn/start', { threadId: sessionRef, input: [{ type: 'text', text }] });
+      const r = await p.request<{ turn: { id: string } }>('turn/start', {
+        threadId: sessionRef, input: [{ type: 'text', text }], ...(effort ? { effort: CODEX_EFFORT[effort] } : {}),
+      });
       this.setTurnId(p, sessionRef, r.turn.id);
     } catch (e) {
       if (owned) { this.activeTurns.delete(sessionRef); this.pendingStops.delete(sessionRef); }
@@ -335,7 +365,7 @@ export class CodexAdapter implements ProviderAdapter {
   async resume(sessionRef: string, cwd: string): Promise<void> {
     const p = await this.ensureProcess();
     this.threadCwd.set(sessionRef, cwd);
-    await p.request('thread/resume', { threadId: sessionRef, cwd, ...this.modelParam(p), ...AUTO_MODE });
+    await p.request('thread/resume', { threadId: sessionRef, cwd, ...this.modelParam(p), ...AUTO_MODE, ...this.instructionsParam(sessionRef) });
     this.loaded.get(p)?.add(sessionRef);
   }
 
@@ -366,6 +396,27 @@ export class CodexAdapter implements ProviderAdapter {
     } catch {
       return failed;
     }
+  }
+
+  /** Free resets the account has banked (#31): 0 when Codex reports none or can't be asked. */
+  async readResetCredits(): Promise<number> {
+    if (this.inBackoff()) return 0;
+    try {
+      const p = await this.ensureProcess();
+      const r = await p.request<{ rateLimitResetCredits?: { availableCount?: number } | null }>('account/rateLimits/read', undefined);
+      const n = r?.rateLimitResetCredits?.availableCount;
+      return typeof n === 'number' && n > 0 ? n : 0;
+    } catch { return 0; }
+  }
+
+  /** Redeems one free reset; one idempotency key per attempt so a retry never spends two. */
+  async useResetCredit(): Promise<'reset' | 'nothingToReset' | 'noCredit' | 'alreadyRedeemed' | 'failed'> {
+    try {
+      const p = await this.ensureProcess();
+      const r = await p.request<{ outcome?: string }>('account/rateLimitResetCredit/consume', { idempotencyKey: randomUUID() });
+      const o = r?.outcome;
+      return o === 'reset' || o === 'nothingToReset' || o === 'noCredit' || o === 'alreadyRedeemed' ? o : 'failed';
+    } catch { return 'failed'; }
   }
 
   /** No app-server is running or starting, and the ping backoff (or giving up) says not to spawn one for background reads. */

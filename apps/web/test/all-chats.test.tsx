@@ -99,19 +99,21 @@ describe('All chats', () => {
 describe('Getting to All chats', () => {
   beforeEach(() => { location.hash = '#/board'; });
 
-  it('the nav item and the link under Recent chats go to All chats', () => {
+  it('the nav item goes to All chats', () => {
     mount(seeded());
     fireEvent.click(screen.getByRole('button', { name: /^All chats$/ }));
     expect(location.hash).toBe('#/chats');
-    act(() => { location.hash = '#/board'; });
-    fireEvent.click(screen.getByRole('button', { name: 'See all chats' }));
-    expect(location.hash).toBe('#/chats');
   });
 
-  it("the sidebar's search icon opens All chats with the search box focused", async () => {
-    mount(seeded());
-    fireEvent.click(screen.getByRole('button', { name: 'Search chats' }));
-    expect(location.hash).toBe('#/chats');
-    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('searchbox', { name: 'Search chats' })));
+  it('"See all results" in global search opens All chats with the query in its focused search box', async () => {
+    const store = seeded();
+    mount(store);
+    act(() => {
+      store.setState((s) => ({ ...s, ui: { ...s.ui, chatsSearchText: 'login', chatsSearchFocus: s.ui.chatsSearchFocus + 1 } }));
+      location.hash = '#/chats';
+    });
+    const box = await screen.findByRole('searchbox', { name: 'Search chats' }) as HTMLInputElement;
+    await waitFor(() => expect(document.activeElement).toBe(box));
+    expect(box.value).toBe('login');
   });
 });

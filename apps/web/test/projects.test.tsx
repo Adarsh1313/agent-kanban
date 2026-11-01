@@ -326,7 +326,7 @@ describe('Project detail', () => {
 
 describe('Projects: hidden and folder missing', () => {
   const ON = { claude: true, codex: true, antigravity: true };
-  const settings = (over: Partial<Settings> = {}): Settings => ({ onboarded: true, showChats: ON, suggest: ON, hiddenProjects: [], unhiddenProjects: [], ...over });
+  const settings = (over: Partial<Settings> = {}): Settings => ({ onboarded: true, showChats: ON, suggest: ON, hiddenProjects: [], unhiddenProjects: [], suggestNextSteps: true, myProjects: null, ...over });
   const TEMP = { ...project('/tmp/ak-claude-1', ['claude'], ago(10)), hidden: 'auto' as const, tempFolder: true };
   const OLD = { ...project('/work/old', ['codex'], ago(20)), hidden: 'manual' as const };
   const withSettings = (store: Store, st: Settings) => { store.setState((s) => ({ ...s, settings: st })); return store; };
@@ -427,7 +427,7 @@ describe('Projects: hidden and folder missing', () => {
 
 describe('Projects: project notes (#40)', () => {
   const ON = { claude: true, codex: true, antigravity: true };
-  const st = (notesProjects: string[]): Settings => ({ onboarded: true, showChats: ON, suggest: ON, hiddenProjects: [], unhiddenProjects: [], notesProjects });
+  const st = (notesProjects: string[]): Settings => ({ onboarded: true, showChats: ON, suggest: ON, hiddenProjects: [], unhiddenProjects: [], suggestNextSteps: true, myProjects: null, notesProjects });
   it('the switch says it adds a file; on shows Open notes, which loads and saves the notes', async () => {
     mocked.projectInfo.mockResolvedValue(INFO);
     mocked.setNotes.mockResolvedValue(st(['/work/alpha']));
