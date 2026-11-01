@@ -192,7 +192,8 @@ export class RoutineService {
       if (!due || now.getTime() - due.getTime() > CATCH_UP_MS) continue;
       const since = Math.max(Date.parse(r.armedAt), r.lastRunAt ? Date.parse(r.lastRunAt) : 0);
       if (due.getTime() <= since) continue;
-      await this.run(r, due, now.getTime() - due.getTime() > LATE_MS);
+      // One routine failing to start never stops the others, nor the timer.
+      try { await this.run(r, due, now.getTime() - due.getTime() > LATE_MS); } catch (e) { console.error(`Routine "${r.name}" failed to run:`, e); }
       ran = true;
     }
     if (ran) this.changed();
