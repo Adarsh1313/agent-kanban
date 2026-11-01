@@ -232,6 +232,10 @@ body:has(> .onb[data-state="open"]) > .toasts { z-index: 91; }
 .all-chats-page .chat-lifecycle .trash-empty { margin-left: auto; color: var(--color-danger); }
 .all-chats-page .chat-lifecycle .btn[aria-selected="true"] { background: var(--color-ink); color: var(--color-ink-contrast); border-color: var(--color-ink); }
 .all-chats-page .crow .row-more { flex: none; opacity: 0; }
+.all-chats-page .chat-day + .chat-day { margin-top: var(--space-5); }
+.all-chats-page .chat-day > h3 { margin: 0 0 var(--space-2); color: var(--color-text-muted); font-size: var(--text-caption); font-weight: var(--weight-semibold); }
+.all-chats-page .chat-day .crow { min-height: calc(var(--space-8) + var(--space-6)); padding-block: var(--space-2); }
+.all-chats-page .crow .chat-status { flex: none; width: var(--column-when); color: var(--color-text-muted); font-size: var(--text-caption); }
 .all-chats-page .trash-row .trash-days { color: var(--color-text-muted); font-size: var(--text-caption); white-space: nowrap; }
 .all-chats-page .crow:hover .row-more, .all-chats-page .crow:focus-within .row-more { opacity: 1; }
 .all-chats-page .crow .proj { flex: none; display: inline-flex; align-items: center; gap: calc(var(--space-1) * 1.5); width: var(--column-project); min-width: 0; color: var(--color-text-muted); font-size: var(--text-caption); white-space: nowrap; overflow: hidden; }

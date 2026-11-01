@@ -42,6 +42,22 @@ describe('All chats', () => {
     const row = page().querySelectorAll('.crow')[1]! as HTMLElement;
     expect(within(row).getByText('site')).toBeTruthy();
     expect(within(row).getByText('1h')).toBeTruthy();
+    expect(within(page()).getAllByText('On board')).toHaveLength(2);
+    expect(within(page()).getByText('In history')).toBeTruthy();
+  });
+
+  it('groups rows under the five local date buckets in order', () => {
+    const dates = [
+      ['Today chat', new Date(2026, 9, 23, 10)],
+      ['Yesterday chat', new Date(2026, 9, 22, 10)],
+      ['Week chat', new Date(2026, 9, 20, 10)],
+      ['Month chat', new Date(2026, 9, 10, 10)],
+      ['Older chat', new Date(2026, 8, 30, 10)],
+    ] as const;
+    const history = dates.map(([title, at], i) => hist({ sessionRef: `g${i}`, title, updatedAt: at.toISOString() }));
+    const s = applySnapshot(initialState(), { chats: [], usage: [], suggested: null, connections: [], history, projects: [] });
+    render(<StoreProvider store={createStore({ ...s, now: NOW })}><AllChatsPage /></StoreProvider>);
+    expect(screen.getAllByRole('heading', { level: 3 }).map((h) => h.textContent)).toEqual(['Today', 'Yesterday', 'This week', 'This month', 'Older']);
   });
 
   it('switches to Archived and offers the same row menu for board and history chats', () => {

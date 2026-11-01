@@ -126,6 +126,27 @@ export interface ListedChat extends SidebarChat {
   projectName: string;
 }
 
+export type ChatDayLabel = 'Today' | 'Yesterday' | 'This week' | 'This month' | 'Older';
+export interface ChatDayGroup { label: ChatDayLabel; chats: ListedChat[] }
+
+/** Groups an already newest-first chat list by local calendar boundaries, in the fixed product order. */
+export function groupByDay(chats: ListedChat[], now: number): ChatDayGroup[] {
+  const today = new Date(now);
+  const dayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+  const yesterday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1).getTime();
+  const mondayOffset = (today.getDay() + 6) % 7;
+  const weekStart = new Date(today.getFullYear(), today.getMonth(), today.getDate() - mondayOffset).getTime();
+  const monthStart = new Date(today.getFullYear(), today.getMonth(), 1).getTime();
+  const labels: ChatDayLabel[] = ['Today', 'Yesterday', 'This week', 'This month', 'Older'];
+  const by = new Map<ChatDayLabel, ListedChat[]>(labels.map((label) => [label, []]));
+  for (const chat of chats) {
+    const at = Date.parse(chat.updatedAt);
+    const label: ChatDayLabel = at >= dayStart ? 'Today' : at >= yesterday ? 'Yesterday' : at >= weekStart ? 'This week' : at >= monthStart ? 'This month' : 'Older';
+    by.get(label)!.push(chat);
+  }
+  return labels.map((label) => ({ label, chats: by.get(label)! })).filter((group) => group.chats.length > 0);
+}
+
 /** The chats the sidebar's project cards draw from: not pinned, archived or snoozed, after the Filter, newest first. */
 export function sidebarChats(s: AppState, now: number = Date.now()): ListedChat[] {
   return listedChats(s, now).sort(byRecent).map((c) => withProject(s, c));

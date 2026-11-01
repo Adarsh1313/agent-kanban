@@ -1,14 +1,14 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
 import { openChatIn, type AppState } from '../../state/reducer.ts';
 import { api } from '../../api/client.ts';
-import { allChats, memoState, type ListedChat } from '../../state/selectors.ts';
+import { allChats, groupByDay, memoState, type ListedChat } from '../../state/selectors.ts';
 import { refreshHistory, useStore, useStoreInstance } from '../../state/store.ts';
 import { openHistoryChat, openRowMenu } from '../actions.ts';
 import { relativeTime, dateTime } from '../board/format.ts';
 import { FilterBar } from '../filters/FilterBar.tsx';
 import { FilterButton } from '../filters/FilterMenu.tsx';
 import { NO_FILTERS } from '../filters/model.ts';
-import { Icon, ProviderLogo, providerName, StatusIcon, toast } from '../primitives/index.ts';
+import { Icon, ProviderLogo, providerName, toast } from '../primitives/index.ts';
 import { Dialog } from '../primitives/Dialog.tsx';
 import { errorText } from '../board/Card.tsx';
 
@@ -47,13 +47,13 @@ function Row({ c, q, now }: { c: ListedChat; q: string; now: number }) {
     openRowMenu({ chatId: c.chatId, history: c.sessionRef ? { provider: c.provider, sessionRef: c.sessionRef, cwd: c.cwd, title: c.title } : null }, e.currentTarget);
   };
   return (
-    <li>
+    <li role="listitem">
       <div className="crow" role="button" tabIndex={0} title={`${c.title}\n${c.projectName} · ${providerName(c.provider)} · ${dateTime(c.updatedAt, now)}`}
         onClick={open} onKeyDown={onActivate(open)}>
-        {c.column ? <StatusIcon state={c.column} /> : <span className="nostate" title={`In ${providerName(c.provider)} history`} />}
         <ProviderLogo id={c.provider} size="sm" alt={providerName(c.provider)} />
         <span className="t">{highlight(c.title, q)}</span>
         <span className="proj"><span className="folder-glyph proj-glyph" aria-hidden="true">{(c.projectName || '?')[0]!.toUpperCase()}</span><span>{highlight(c.projectName, q)}</span></span>
+        <span className="chat-status">{c.column ? 'On board' : 'In history'}</span>
         <span className="when">{relativeTime(c.updatedAt, now)}</span>
         <button className="btn icon-only ghost row-more" type="button" aria-label="More actions" onClick={more}><Icon name="more" size="sm" /></button>
       </div>
@@ -118,6 +118,7 @@ export function AllChatsPage() {
     finally { setBusy(false); }
   };
   const count = mode === 'trash' ? trashRows.length : rows.length;
+  const groups = useMemo(() => groupByDay(rows.slice(0, shown), now), [rows, shown, now]);
 
   return (
     <div className="page all-chats-page">
@@ -159,8 +160,8 @@ export function AllChatsPage() {
           </div>
         ) : (
           <>
-            <ul className="chat-list chat-rows" aria-label={mode === 'trash' ? 'Trash' : 'All chats'}>
-              {mode === 'trash' ? trashRows.slice(0, shown).map((entry) => (
+            {mode === 'trash' ? <ul className="chat-list chat-rows" aria-label="Trash">
+              {trashRows.slice(0, shown).map((entry) => (
                 <li key={entry.id}><div className="crow trash-row">
                   <span className="nostate" aria-hidden="true" />
                   <ProviderLogo id={entry.provider} size="sm" alt={providerName(entry.provider)} />
@@ -168,8 +169,18 @@ export function AllChatsPage() {
                   <span className="trash-days">{entry.daysLeft} {entry.daysLeft === 1 ? 'day' : 'days'} left</span>
                   <button className="btn" type="button" onClick={() => void restore(entry.id)}>Restore</button>
                 </div></li>
-              )) : rows.slice(0, shown).map((c) => <Row key={c.key} c={c} q={q} now={now} />)}
-            </ul>
+              ))}
+            </ul> : <div className="chat-groups" role="list" aria-label="All chats">
+              {groups.map((group) => {
+                const id = `chat-group-${group.label.toLowerCase().replace(' ', '-')}`;
+                return <section className="chat-day" key={group.label} aria-labelledby={id}>
+                  <h3 id={id}>{group.label}</h3>
+                  <ul className="chat-list chat-rows" role="presentation">
+                    {group.chats.map((c) => <Row key={c.key} c={c} q={q} now={now} />)}
+                  </ul>
+                </section>;
+              })}
+            </div>}
             {count > shown && (
               <button className="show-more-row" type="button" onClick={() => setShown((n) => n + PAGE)}>Show {Math.min(PAGE, count - shown)} more</button>
             )}
