@@ -12,6 +12,7 @@ import { pushLayer } from '../primitives/layers.ts';
 import { ChatActionsMenu, runAction, type ChatActionsTarget } from './ChatActionsMenu.tsx';
 import { Composer } from './Composer.tsx';
 import { Thread } from './Thread.tsx';
+import { addAfterStart } from '../myprojects/model.ts';
 import { HistoryThread } from './HistoryThread.tsx';
 
 const STATE_TEXT: Record<Column, string> = { running: 'Running', needs_you: 'Needs you', review: 'Ready for review', done: 'Done' };
@@ -203,6 +204,7 @@ export function ChatPanel() {
       // The history list and projects still count it as history-only until they are asked again.
       void refreshHistory(store, api).catch(() => {});
       noteChatFolder(store, api, created);
+      addAfterStart(store, created.cwd);
       return true;
     } catch (err) {
       toast(errorText(err));

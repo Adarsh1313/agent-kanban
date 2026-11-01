@@ -1,6 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import type { ProviderId } from '@agent-kanban/shared';
+import { folderKey } from '@agent-kanban/shared';
 import { api } from '../../api/client.ts';
 import { applySettings, type AppState } from '../../state/reducer.ts';
 import { providerCounts, visibleProjects } from '../../state/selectors.ts';
@@ -14,10 +15,14 @@ import { pushLayer } from '../primitives/layers.ts';
 import { cssMs, cssValue, reducedMotion } from '../primitives/motion.ts';
 import { Icon, PROVIDER_IDS, ProviderLogo, providerName, StatusIcon, Switch, toast, Tooltip, type StatusState } from '../primitives/index.ts';
 import { navigate } from '../shell/route.ts';
+import { defaultPicks, saveMyProjects } from '../myprojects/model.ts';
+import { PICK_TITLE, ProjectPicker, pickedPaths } from '../myprojects/PickProjects.tsx';
 
 /* First-run onboarding (design/onboarding.js): Welcome → Connect → Bring in your chats → Notifications → Ready. */
 
-const STEP_COUNT = 4;
+const STEP_COUNT = 5;
+/** The "Your projects" step (#38): which projects the sidebar shows. */
+const PROJECTS_STEP = 3;
 const TABBABLE = 'input, textarea, select, button:not([disabled]), [href], [tabindex]:not([tabindex="-1"])'; // Welcome isn't counted
 /** The most recent projects shown as chips; the rest are counted (a real computer can have dozens). */
 const MAX_CHIPS = 12;
@@ -288,6 +293,8 @@ export function Onboarding() {
   const deskNote = useId();
   const toggles = { claude: useProviderToggle('claude'), codex: useProviderToggle('codex'), antigravity: useProviderToggle('antigravity') };
   const stepId = useId();
+  // The "Your projects" step's ticks (folder keys), set when the step is first reached.
+  const [picks, setPicks] = useState<Set<string> | null>(null);
 
   // Once open, it stays open until finished (a resync that still says onboarded: true does not cut a replay short).
   // A layout effect: the re-render with the layer happens before the first paint, so the board never flashes.
@@ -344,8 +351,18 @@ export function Onboarding() {
   if (phase === 'hidden') return null;
 
   const go = (to: number) => {
+    if (to === PROJECTS_STEP && picks === null) {
+      const s = store.getState();
+      const mine = s.settings?.myProjects ?? null;
+      setPicks(new Set((mine ?? defaultPicks(projects, s.now)).map(folderKey)));
+    }
     setBack(to < step);
     setStep(to);
+  };
+  // Continue and Skip both save My projects and move on at once; a failed save says so in a toast.
+  const savePicks = (paths: string[]) => {
+    void saveMyProjects(store, () => paths);
+    go(PROJECTS_STEP + 1);
   };
   const finish = async (then?: () => void) => {
     if (finishing) return;
@@ -446,7 +463,29 @@ export function Onboarding() {
         </>
       );
       break;
-    case 3: {
+    case PROJECTS_STEP: {
+      const ticked = picks ?? new Set<string>();
+      pane = (
+        <>
+          {h1(PICK_TITLE)}
+          <p className="lead">Pick the ones you’re working on now; the sidebar shows just these. Everything else stays in All chats and Projects.</p>
+          <ProjectPicker picked={ticked} onChange={setPicks} />
+          <div className="onb-foot">
+            {backBtn}
+            <span className="grow">{ticked.size} picked · change any time in the sidebar</span>
+            <button className="btn ghost" type="button" onClick={() => {
+              // Skip keeps what is saved (a replay); the first time it keeps the pre-ticked projects.
+              const s = store.getState();
+              if (s.settings?.myProjects) go(PROJECTS_STEP + 1);
+              else savePicks(defaultPicks(projects, s.now));
+            }}>Skip</button>
+            <button className="btn primary" type="button" data-primary onClick={() => savePicks(pickedPaths(projects, ticked))}>Continue</button>
+          </div>
+        </>
+      );
+      break;
+    }
+    case 4: {
       const deskOn = prefs.desktop && support === 'granted';
       const reason = support === 'unsupported' ? UNSUPPORTED : support === 'denied' ? BLOCKED : null;
       const changeDesktop = async (on: boolean) => {
@@ -481,10 +520,11 @@ export function Onboarding() {
       break;
     }
     default: {
+      const mineN = projects.filter((p) => (picks ?? new Set()).has(folderKey(p.id))).length;
       const chatsN = ids.reduce((n, id) => n + (showChats?.[id] !== false ? live[id] : 0), 0);
       const lines = [
         `${ids.length} agent${ids.length === 1 ? '' : 's'} connected: ${ids.map(providerName).join(', ')}`,
-        `${chatsN} chats from ${shownProjects.length} projects in the sidebar`,
+        `${chatsN} chats from ${shownProjects.length} projects; ${mineN} in your sidebar`,
         notificationsLine(prefs, support),
       ];
       pane = (
