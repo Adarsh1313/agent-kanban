@@ -16,6 +16,7 @@ const NAV = [
   ['board', 'board', 'Board'],
   ['chats', 'inbox', 'All chats'],
   ['projects', 'projects', 'Projects'],
+  ['routines', 'clock', 'Routines'],
   ['connections', 'plug', 'Connections'],
 ] as const;
 
@@ -142,7 +143,7 @@ const counts = (s: AppState) => {
   ).length;
   const connected = Object.values(s.connections).filter((c) => c?.status === 'connected' || c?.status === 'update_available').length;
   const hidden = hiddenFolders(s);
-  return { board, projects: uniqueProjects(s).filter((p) => !hidden.has(folderKey(p.id))).length, connections: connected };
+  return { board, projects: uniqueProjects(s).filter((p) => !hidden.has(folderKey(p.id))).length, routines: s.routines.length, connections: connected };
 };
 
 export function Sidebar() {

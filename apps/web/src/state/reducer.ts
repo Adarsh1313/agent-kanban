@@ -10,6 +10,7 @@ import type {
   Project,
   ProviderId,
   RequestAction,
+  Routine,
   ServerEvent,
   Settings,
   ToolCall,
@@ -49,7 +50,7 @@ export interface Filters {
 export interface HistoryRef { provider: ProviderId; sessionRef: string; cwd: string; title: string }
 
 export interface UiState {
-  view: 'board' | 'chats' | 'projects' | 'connections';
+  view: 'board' | 'chats' | 'projects' | 'routines' | 'connections';
   projectId: string | null;
   /** The chat shown in the side panel; mutually exclusive with `openHistory`. */
   openChatId: string | null;
@@ -90,6 +91,7 @@ export interface AppState {
   settings: Settings | null;
   history: HistoryChat[];
   projects: Project[];
+  routines: Routine[];
   notifications: AppNotification[];
   /** Chats whose thread was fetched with loadChat (see isChatLoaded). */
   loadedChats: Record<string, true>;
@@ -119,6 +121,7 @@ export interface Snapshot {
   projects: Project[];
   connect?: ConnectState[];
   settings?: Settings | null;
+  routines?: Routine[];
 }
 
 const MAX_NOTIFICATIONS = 100;
@@ -137,6 +140,7 @@ export function initialState(): AppState {
     settings: null,
     history: [],
     projects: [],
+    routines: [],
     notifications: [],
     loadedChats: {},
     pendingDeltas: {},
@@ -337,6 +341,8 @@ export function applyEvent(s: AppState, e: ServerEvent, now: Date = new Date()):
     case 'settings.updated':
       // Saved in another tab (or onboarding): every open page follows.
       return { ...applySettings(s, e.settings), sync: bump(s, []) };
+    case 'routines.updated':
+      return mk([], { routines: e.routines });
     case 'notification': {
       const item: AppNotification = { id: `n${s.sync.seq + 1}`, chatId: e.chatId, kind: e.kind, ...(e.action ? { action: e.action } : {}), at: now.toISOString(), unread: true };
       return mk([chatKey(e.chatId)], { notifications: [item, ...s.notifications].slice(0, MAX_NOTIFICATIONS) });
@@ -407,6 +413,7 @@ export function applySnapshot(s: AppState, snap: Snapshot, since: number = s.syn
     suggested: snap.suggested,
     history: snap.history,
     projects: snap.projects,
+    routines: snap.routines ?? s.routines,
   };
 }
 

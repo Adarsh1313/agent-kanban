@@ -9,6 +9,7 @@ import type {
   Project,
   ProjectInfo,
   ProviderId,
+  Routine,
   Settings,
   ToolCall,
   UsageReading,
@@ -107,6 +108,9 @@ export interface SettingsPatch {
   unhiddenProjects?: string[];
 }
 
+/** What the routine editor sends: every field on create, any of them on change (#45). */
+export type RoutineBody = Partial<Pick<Routine, 'name' | 'cwd' | 'provider' | 'effort' | 'kind' | 'text' | 'schedule' | 'chime' | 'paused'>>;
+
 export interface Transcript {
   messages: { role: 'user' | 'assistant'; text: string; at: string | null }[];
   truncated: boolean;
@@ -147,6 +151,11 @@ export const api = {
   patchSettings: (patch: SettingsPatch) => request<Settings>('PATCH', '/api/settings', patch),
   projects: () => get<Project[]>('/api/projects'),
   projectInfo: (path: string) => get<ProjectInfo>(`/api/projects/info?path=${enc(path)}`),
+  routines: () => get<Routine[]>('/api/routines'),
+  createRoutine: (body: RoutineBody) => post<Routine>('/api/routines', body),
+  patchRoutine: (id: string, body: RoutineBody) => request<Routine>('PATCH', `/api/routines/${enc(id)}`, body),
+  deleteRoutine: (id: string) => request<void>('DELETE', `/api/routines/${enc(id)}`),
+  runRoutine: (id: string) => post<Routine>(`/api/routines/${enc(id)}/run`),
   /** Every provider's models (an empty list when a provider's CLI could not be asked). */
   models: () => get<Record<ProviderId, ModelOption[]>>('/api/models'),
 };
