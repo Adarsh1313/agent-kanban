@@ -288,7 +288,9 @@ export function startNotifier(store: Store): () => void {
     if (now - lastRing < RING_GAP_MS) return;
     lastRing = now;
     const newest = fresh[0]!;
-    if (getPrefs().sound) chime(newest.kind === 'finished');
+    // A routine with "Chime when it finishes" chimes even when Sound is off (#45).
+    const routineChime = newest.kind === 'finished' && s.routines.some((r) => r.chime && r.id === s.chats[newest.chatId]?.routineId);
+    if (getPrefs().sound || routineChime) chime(newest.kind === 'finished');
     if (!reducedMotion()) for (const l of [...ringListeners]) l(newest.id);
   });
 

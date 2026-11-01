@@ -3,6 +3,7 @@ import type { Project, ProjectInfo, ProviderId } from '@agent-kanban/shared';
 import { openChatIn, type AppState } from '../../state/reducer.ts';
 import { baseName } from '../../state/selectors.ts';
 import { useStore, useStoreInstance } from '../../state/store.ts';
+import { RoutineList, openRoutineEditor } from '../routines/RoutinesPage.tsx';
 import { openHistoryChat, openNewChat } from '../actions.ts';
 import { ReasonBadge, errorText } from '../board/Card.tsx';
 import { copyText } from '../chat/ChatActionsMenu.tsx';
@@ -238,6 +239,23 @@ const detailState = (id: string) => (s: AppState) => {
   return { project, chats, now: s.now, loaded: s.loaded, hidden: project ? isProjectHidden(s, project) : false };
 };
 
+/** The project's routines, and New routine here (#45). */
+function ProjectRoutines({ path }: { path: string }) {
+  const all = useStore((s) => s.routines);
+  const mine = all.filter((r) => folderKey(r.cwd) === folderKey(path));
+  return (
+    <section className="project-routines" aria-label="Project routines">
+      <div className="head">
+        <h3 className="section-title">Routines</h3>
+        <button className="btn ghost" type="button" onClick={() => openRoutineEditor(null, path)}><Icon name="plus" size="sm" />New routine</button>
+      </div>
+      {mine.length === 0
+        ? <div className="page-empty chats-empty">No routines in this project yet.</div>
+        : <RoutineList routines={mine} showProject={false} label="Project routines" />}
+    </section>
+  );
+}
+
 export function ProjectDetail({ projectId }: { projectId: string }) {
   const store = useStoreInstance();
   const { project, chats, now, loaded, hidden } = useStore(detailState(projectId));
@@ -314,6 +332,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
               <button className="chats-more" type="button" onClick={() => { focusRevealed.current = true; setShowAll(true); }}>Show {list.length - visible.length} more</button>
             )}
           </div>
+          <ProjectRoutines path={project.path} />
         </div>
         <About project={project} now={now} />
       </div>

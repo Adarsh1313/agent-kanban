@@ -5,12 +5,13 @@ import { api } from '../src/api/client.ts';
 import { applyEvent, applySnapshot, initialState } from '../src/state/reducer.ts';
 import { createStore, StoreProvider, type Store } from '../src/state/store.ts';
 import { Toasts } from '../src/ui/primitives/toast.tsx';
+import { ProjectsPage } from '../src/ui/projects/ProjectsPage.tsx';
 import { RoutineEditor, RoutinesPage } from '../src/ui/routines/RoutinesPage.tsx';
 import { nextRunText, scheduleText } from '../src/ui/routines/model.ts';
 
 vi.mock('../src/api/client.ts', async (orig) => {
   const m = await orig<typeof import('../src/api/client.ts')>();
-  return { ...m, api: { ...m.api, createRoutine: vi.fn(), patchRoutine: vi.fn(), deleteRoutine: vi.fn(), runRoutine: vi.fn() } };
+  return { ...m, api: { ...m.api, createRoutine: vi.fn(), patchRoutine: vi.fn(), deleteRoutine: vi.fn(), runRoutine: vi.fn(), projectInfo: vi.fn(() => new Promise(() => {})) } };
 });
 const mocked = api as unknown as Record<'createRoutine' | 'patchRoutine' | 'deleteRoutine' | 'runRoutine', ReturnType<typeof vi.fn>>;
 
@@ -110,5 +111,18 @@ describe('Routines page', () => {
     expect(mocked.deleteRoutine).not.toHaveBeenCalled();
     fireEvent.click(within(dlg).getByRole('button', { name: 'Delete routine' }));
     await waitFor(() => expect(mocked.deleteRoutine).toHaveBeenCalledWith('r1'));
+  });
+});
+
+describe('Project page', () => {
+  it('lists only that project’s routines, and New routine starts in it', async () => {
+    const store = seeded([routine(), routine({ id: 'r2', name: 'Beta tidy', cwd: '/work/beta' })]);
+    act(() => store.setState((s) => ({ ...s, ui: { ...s.ui, view: 'projects', projectId: '/work/alpha' } })));
+    render(<StoreProvider store={store}><ProjectsPage /><RoutineEditor /></StoreProvider>);
+    const list = screen.getByRole('list', { name: 'Project routines' });
+    expect(within(list).getAllByRole('listitem').map((li) => li.querySelector('b')!.textContent)).toEqual(['Morning review']);
+    fireEvent.click(within(screen.getByRole('region', { name: 'Project routines' })).getByRole('button', { name: /New routine/ }));
+    const dlg = await screen.findByRole('dialog', { name: 'New routine' });
+    expect((within(dlg).getByLabelText('Project') as HTMLSelectElement).value).toBe('/work/alpha');
   });
 });

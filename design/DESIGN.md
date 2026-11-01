@@ -61,6 +61,12 @@ one running-blue card halfway between two ink columns.
   Ready), 4-segment progress bar.
 - **Empty board:** dimmed columns with dashed placeholders, a card explaining what happens, Start a
   chat / Browse projects, and the 3 most recent chats to pick up.
+- **Routines:** Projects-style rows: name, project and provider, schedule in words ("Weekdays at
+  8:00 am"), Next and Last captions, then Pause/Resume, Run now, Edit, Delete (asks first, keeps the
+  chats). Paused rows dim. "Skipped, still running" and "Folder missing" use the needs text colour.
+  The editor is a dialog: two-column labelled fields, Repeat as a segmented radio group (Daily,
+  Weekdays, Chosen days), days as round toggles in a labelled group, a time input, a chime switch,
+  and a note that routines run only while the app is open. A project's page lists its routines.
 
 ## Desktop app
 
