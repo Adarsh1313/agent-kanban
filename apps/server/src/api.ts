@@ -132,6 +132,8 @@ export function createApi(opts: {
   trash?: TrashService;
   /** The user's own API keys (#43); desktop app only, so browser mode answers 404 on every key route. */
   keys?: KeyService;
+  /** Each key's own provider process (#43): ended when its key is deleted. */
+  keyAdapters?: { release(keyId: string): Promise<void> };
   /** Folder holding the built web app (default apps/web/dist). */
   webDist?: string;
   token: string;
@@ -243,7 +245,12 @@ export function createApi(opts: {
         const b = await readJson(req);
         return { status: 200, body: await keys.update(m[0]!, { name: b.name, capUsd: b.capUsd }) };
       }
-      if ((m = match('DELETE', '/api/keys/:id'))) { await keys.remove(m[0]!); return { status: 204 }; }
+      if ((m = match('DELETE', '/api/keys/:id'))) {
+        await keys.remove(m[0]!);
+        chats.forgetKey(m[0]!);
+        await opts.keyAdapters?.release(m[0]!);
+        return { status: 204 };
+      }
       throw new HttpError(404, 'Not found.');
     }
     if (url.pathname.startsWith('/api/hooks/claude') && opts.hooks) {
@@ -355,6 +362,19 @@ export function createApi(opts: {
       return { status: 200, body: chats.editQueued(m[0]!, m[1]!, str(b, 'text')) };
     }
     if ((m = match('DELETE', '/api/chats/:id/queue/:queued'))) return { status: 200, body: chats.removeQueued(m[0]!, m[1]!) };
+    if ((m = match('POST', '/api/chats/:id/use-key'))) {
+      // Continue on the user's own API key (#43). The key's value never enters the chat, its events or errors.
+      if (!opts.keys) throw new HttpError(404, 'Not found.');
+      const b = await readJson(req);
+      const key = await opts.keys.get(str(b, 'keyId'));
+      const chat = chats.getChat(m[0]!);
+      if (key.provider !== chat.provider) throw new HttpError(409, 'That API key is for another provider.');
+      return { status: 200, body: await chats.useKey(chat.id, key.id) };
+    }
+    if ((m = match('DELETE', '/api/chats/:id/use-key'))) {
+      if (!opts.keys) throw new HttpError(404, 'Not found.');
+      return { status: 200, body: await chats.useKey(m[0]!, null) };
+    }
     if ((m = match('POST', '/api/chats/:id/resume-now'))) { await chats.resumeNow(m[0]!); return { status: 204 }; }
     if ((m = match('POST', '/api/chats/:id/queue/:queued/send-now'))) { await chats.sendQueuedNow(m[0]!, m[1]!); return { status: 204 }; }
     if ((m = match('POST', '/api/chats/:id/stop'))) { await chats.stop(m[0]!); return { status: 200, body: chats.getChat(m[0]!) }; }

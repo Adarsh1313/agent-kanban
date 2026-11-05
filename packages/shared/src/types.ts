@@ -79,6 +79,8 @@ export interface Chat {
   providerRefs?: Partial<Record<ProviderId, string>>;
   /** "Move to project": the project the chat shows under; it still runs in `cwd`. */
   projectLabel?: string | null;
+  /** The user's own API key the chat runs on (#43); left out when it runs on the provider's sign-in. Never the key itself. */
+  keyId?: string | null;
 }
 
 /** Days are 0 (Sunday) to 6; time is 'HH:MM' in the machine's local time. Daily is all 7 days, Weekdays 1 to 5. */

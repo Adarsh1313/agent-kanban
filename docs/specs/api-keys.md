@@ -85,7 +85,7 @@ This follows how password managers and the providers' own consoles treat keys: w
 ## Progress
 
 - [x] Slice 1: desktop key store (safeStorage, IPC bridge) + metadata API, browser-mode 404, redaction tests
-- [ ] Slice 2: use-key: env passed to the provider spawn only; "Using API key" on the chat
+- [x] Slice 2: use-key: env passed to the provider spawn only; "Using API key" on the chat
 - [ ] Slice 3: spend tracking, monthly cap, Spend cap reached reason
 - [ ] Slice 4: web: Connections API keys section (add, masked, rename, delete, cap, spend), nudge + confirm
 - [ ] Slice 5: DESIGN.md, glossary check, close #43

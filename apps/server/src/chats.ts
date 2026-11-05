@@ -10,11 +10,16 @@ import type { Store } from './store.ts';
 import type { ProviderAdapter, TurnOptions } from './adapters/adapter.ts';
 import { AdapterRegistry } from './adapters/registry.ts';
 import type { AdapterSource } from './adapters/registry.ts';
+import type { KeyedAdapterSource } from './adapters/keyed.ts';
+import { KeyError } from './keys.ts';
 import type { UsageService } from './usage/service.ts';
 import { ANTIGRAVITY_SIGNED_OUT } from './adapters/antigravity.ts';
 import { buildPreface } from './handoff.ts';
 
 const NAMES: Record<ProviderId, string> = { claude: 'Claude Code', codex: 'Codex', antigravity: 'Antigravity' };
+/** A chat on the user's own API key (#43) whose key the provider turned down, or that was deleted. */
+export const KEY_FAILED = "This API key didn't work. Check it in Connections.";
+const KEY_GONE ="This API key isn't there any more. Choose another in Connections.";
 const ACTIVE_WINDOW_MS = 15_000;
 const OWN_WRITE_SLACK_MS = 2_000;
 const BUFFER_MAX = 500;
@@ -79,6 +84,8 @@ type LiveRequest = { kind: 'permission' | 'question'; summary: string };
 export class ChatService {
   private store: Store;
   private adapters: AdapterSource;
+  /** Adapters for chats on the user's own API keys (#43); absent in browser mode. */
+  private keyed: KeyedAdapterSource | null;
   private usage: UsageService;
   private emit: (e: ServerEvent) => void;
   private claudeHome: string;
@@ -127,7 +134,11 @@ export class ChatService {
     outgoing?: (provider: ProviderId, text: string) => string;
     /** The project notes to hand over, when notes are on for the folder. */
     notes?: (cwd: string) => string | null;
+    /** Adapters for chats that run on the user's own API keys (#43). */
+    keyed?: KeyedAdapterSource;
   }) {
+    this.keyed = opts.keyed ?? null;
+    this.keyed?.onAdapter((id, adapter) => { adapter.onEvent((e) => this.onAdapterEvent(id, e)); });
     this.suggestNextSteps = opts.suggestNextSteps ?? (() => true);
     this.notes = opts.notes ?? (() => null);
     this.outgoing = opts.outgoing ?? ((_, t) => t);
@@ -167,6 +178,37 @@ export class ChatService {
     while (this.pending.has(chatId)) await this.pending.get(chatId);
   }
 
+  /**
+   * Runs the chat on the user's own API key from now on (#43), or back on the provider's sign-in (null).
+   * A chat waiting on usage continues at once; any other chat uses the key from its next message.
+   * The key itself never touches the chat: only its id is stored.
+   */
+  async useKey(chatId: string, keyId: string | null): Promise<Chat> {
+    const chat = this.mustGet(chatId);
+    if (keyId && !this.keyed) throw new KeyError(404, 'Not found.');
+    if (this.pending.has(chatId) || chat.column === 'running') throw new CantContinueError('Wait for this turn to finish, or stop it first.');
+    if ((chat.keyId ?? null) === keyId) return chat;
+    // The next message resumes the session on the other process (the key's, or the sign-in's).
+    this.live.delete(chatId);
+    const updated = this.store.updateChat(chatId, { keyId }, { touch: false });
+    this.broadcast({ type: 'chat.updated', chat: updated });
+    if (keyId && updated.column === 'needs_you' && updated.needsReason === 'limit') {
+      this.store.updateChat(chatId, { resumeAt: null }, { touch: false });
+      await this.continueOutOfUsage(this.mustGet(chatId));
+      this.armResume();
+    }
+    return this.mustGet(chatId);
+  }
+
+  /** The key was deleted: its chats go back to the provider's sign-in. */
+  forgetKey(keyId: string): void {
+    for (const chat of this.store.listChats()) {
+      if (chat.keyId !== keyId) continue;
+      this.live.delete(chat.id);
+      this.broadcast({ type: 'chat.updated', chat: this.store.updateChat(chat.id, { keyId: null }, { touch: false }) });
+    }
+  }
+
   /** Out of usage: a message waits in the follow-up queue and goes out when the chat can continue (#39). */
   /** `provider` other than the chat's hands the chat over to it on this message (#40), at once even when out of usage. */
   async send(chatId: string, text: string, provider?: ProviderId): Promise<void> {
@@ -201,7 +243,7 @@ export class ChatService {
   /** Continues every out-of-usage chat whose reset time has come, then waits for the next one. */
   resumeDue(): void {
     const now = this.now().getTime();
-    for (const chat of this.store.listChats()) {
+    for (const chat of this.store.listChats(true)) {
       if (!this.waitingOnReset(chat) || Date.parse(chat.resumeAt!) > now) continue;
       void this.continueOutOfUsage(chat).catch((e) => console.error('[agent-kanban] auto-resume', e));
     }
@@ -295,7 +337,8 @@ ${typed}` : typed;
     this.closeRequests(chat.id);
     this.live.delete(chat.id);
     const preface = buildPreface({ to, messages, toolCalls: this.store.listToolCalls(chat.id), since, cwd: chat.cwd, notes: this.notes(chat.cwd) });
-    const next = this.store.updateChat(chat.id, { provider: to, sessionRef: refs[to] ?? null, model: null, providerRefs: refs });
+    // An API key belongs to one provider: the chat goes back to the new provider's sign-in.
+    const next = this.store.updateChat(chat.id, { provider: to, sessionRef: refs[to] ?? null, model: null, providerRefs: refs, keyId: null });
     this.broadcast({ type: 'chat.updated', chat: next });
     return { chat: next, preface };
   }
@@ -306,7 +349,7 @@ ${typed}` : typed;
     const chat = this.mustGet(chatId);
     const open = this.requests.get(chatId);
     if (!open?.has(requestId)) throw new Error('That request is no longer open.');
-    const adapter = this.adapters.get(chat.provider);
+    const adapter = this.adapterNow(chat);
     if (!adapter || !chat.sessionRef) throw new Error('That request is no longer open.');
     try {
       await adapter.respondToRequest(chat.sessionRef, requestId, decision);
@@ -332,7 +375,7 @@ ${typed}` : typed;
       return;
     }
     const chat = this.mustGet(chatId);
-    const adapter = this.adapters.get(chat.provider);
+    const adapter = this.adapterNow(chat);
     // Park the card at once; the agent may take a while to end its turn (Antigravity's stop waits up to 10 s).
     this.closeRequests(chatId);
     this.live.delete(chatId);
@@ -517,10 +560,13 @@ ${typed}` : typed;
     this.broadcast({ type: 'chat.updated', chat: updated });
   }
 
-  private errorCopy(provider: ProviderId, err: unknown | null): string {
+  private errorCopy(provider: ProviderId, err: unknown | null, keyed = false): string {
     const name = NAMES[provider];
     if (err === null) return `${name} isn't installed. Open Connections to install it.`;
     const msg = err instanceof Error ? err.message : String(err);
+    // On the user's own key, a sign-in or authentication failure means the key itself was turned down.
+    if (keyed && err instanceof KeyError) return err.status === 404 ? KEY_GONE : KEY_FAILED;
+    if (keyed && /\b(sign(ed)?[ -]?in|log(ged)?[ -]?in|login|unauthori[sz]ed|authenticat\w*|api[ _-]?key|401|403)\b/i.test(msg)) return KEY_FAILED;
     return /\b(sign(ed)?[ -]?in|log(ged)?[ -]?in|login|unauthori[sz]ed|authenticat\w*|not authenticated|401)\b/i.test(msg)
       ? `${name} isn't signed in. Open Connections to sign in.`
       : msg.startsWith(`${name} stopped unexpectedly`)
@@ -535,7 +581,7 @@ ${typed}` : typed;
     this.closeRequests(chatId);
     this.live.delete(chatId);
     this.touch(chatId);
-    this.addMessage(chatId, 'assistant', this.errorCopy(provider, err));
+    this.addMessage(chatId, 'assistant', this.errorCopy(provider, err, this.isKeyed(chatId)));
     this.transition(chatId, { type: 'error', sessionRef: '', message: '' });
     this.broadcast({ type: 'notification', chatId, kind: 'error' });
     return this.store.getChat(chatId)!;
@@ -546,7 +592,7 @@ ${typed}` : typed;
     this.closeRequests(chatId);
     this.live.delete(chatId);
     this.userStopped.delete(chatId);
-    this.addMessage(chatId, 'assistant', this.errorCopy(provider, err));
+    this.addMessage(chatId, 'assistant', this.errorCopy(provider, err, this.isKeyed(chatId)));
   }
 
   /** Start a provider session for a chat that has none, and claim its sessionRef. Never throws. */
@@ -556,7 +602,7 @@ ${typed}` : typed;
     let release!: () => void;
     this.pending.set(chat.id, new Promise<void>((r) => { release = r; }));
     try {
-      const adapter = await this.adapters.ensure(chat.provider);
+      const adapter = await this.adapterFor(chat);
       if (!adapter) { this.fail(chat.id, chat.provider, null); return; }
       const { sessionRef } = await adapter.startChat({ cwd: chat.cwd, prompt, ...(chat.model ? { model: chat.model } : {}), ...this.turnOptions(chat.id, adapter) });
       this.live.add(chat.id);
@@ -595,9 +641,9 @@ ${typed}` : typed;
   }
 
   private async deliver(chat: Chat, text: string): Promise<void> {
-    const adapter = await this.adapters.ensure(chat.provider);
-    if (!adapter) { this.fail(chat.id, chat.provider, null); return; }
     try {
+      const adapter = await this.adapterFor(chat);
+      if (!adapter) { this.fail(chat.id, chat.provider, null); return; }
       if (!chat.sessionRef) throw new Error('no session');
       if (!this.live.has(chat.id)) {
         let p = this.resuming.get(chat.id);
@@ -620,6 +666,22 @@ ${typed}` : typed;
       }
       this.fail(chat.id, chat.provider, err);
     }
+  }
+
+  /** The adapter a chat's turns go to: its key's own process, or the provider's shared one. */
+  private adapterFor(chat: Chat): Promise<ProviderAdapter | undefined> {
+    // Not async: a chat on the sign-in gets the same promise (and timing) as before keys existed.
+    if (!chat.keyId) return this.adapters.ensure(chat.provider);
+    if (!this.keyed) return Promise.reject(new KeyError(404, KEY_GONE));
+    return this.keyed.ensure(chat.keyId, chat.provider);
+  }
+
+  private adapterNow(chat: Chat): ProviderAdapter | undefined {
+    return chat.keyId ? this.keyed?.get(chat.keyId) : this.adapters.get(chat.provider);
+  }
+
+  private isKeyed(chatId: string): boolean {
+    return !!this.store.getChat(chatId)?.keyId;
   }
 
   /** Reads the chat's effort now (a change applies from the next message) and remembers it for the turn's replies. */
@@ -774,7 +836,7 @@ ${typed}` : typed;
       case 'error': {
         this.live.delete(chatId);
         this.settle(chatId);
-        this.addMessage(chatId, 'assistant', this.errorCopy(provider, new Error(e.message)));
+        this.addMessage(chatId, 'assistant', this.errorCopy(provider, new Error(e.message), this.isKeyed(chatId)));
         this.transition(chatId, e);
         if (this.store.getChat(chatId)?.column !== 'done') this.broadcast({ type: 'notification', chatId, kind: 'error' });
         return;

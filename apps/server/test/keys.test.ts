@@ -5,6 +5,11 @@ import type { AddressInfo } from 'node:net';
 import type { ApiKey, Chat, KeyRequest, ServerEvent } from '@agent-kanban/shared';
 import { createApi } from '../src/api.ts';
 import { KeyService, desktopVault, type KeyVault } from '../src/keys.ts';
+import { Store } from '../src/store.ts';
+import { ChatService, KEY_FAILED } from '../src/chats.ts';
+import { KeyedAdapters } from '../src/adapters/keyed.ts';
+import type { ProviderAdapter } from '../src/adapters/adapter.ts';
+import type { AdapterEvent, ProviderId } from '@agent-kanban/shared';
 
 export const SECRET = 'sk-ant-api03-do-not-leak-this-value-9z9z';
 
@@ -45,7 +50,7 @@ async function setup(withKeys = true, now = () => new Date(2026, 10, 5)) {
   const vault = new FakeVault();
   const events: ServerEvent[] = [];
   const keys = withKeys ? new KeyService({ vault, broadcast: (e) => events.push(e), now }) : undefined;
-  const chats: any = { listChats: () => [] as Chat[] };
+  const chats: any = { listChats: () => [] as Chat[], forgetKey: () => {} };
   const api = createApi({ chats, usage: { latest: () => [] } as any, history: async () => [], token: 'tok', ...(keys ? { keys } : {}) });
   await new Promise<void>((r) => api.server.listen(0, '127.0.0.1', r));
   const base = `http://127.0.0.1:${(api.server.address() as AddressInfo).port}`;
@@ -144,4 +149,123 @@ test('the desktop vault asks over the IPC channel and matches replies by id', as
   listener({ type: 'keys.reply', reqId: ma!.reqId, ok: true, result: [] });
   assert.deepEqual(await a, []);
   await assert.rejects(b, /API key not found/);
+});
+
+/* ───────── Slice 2: a chat on a key ───────── */
+
+
+class Fake implements ProviderAdapter {
+  id: ProviderId;
+  capabilities = { effort: true };
+  calls: string[] = [];
+  listeners = new Set<(e: AdapterEvent) => void>();
+  constructor(id: ProviderId) { this.id = id; }
+  async startChat() { this.calls.push('startChat'); return { sessionRef: 's1' }; }
+  async sendMessage(ref: string, text: string) { this.calls.push(`send:${ref}:${text}`); }
+  async respondToRequest() {}
+  async stop(ref: string) { this.calls.push(`stop:${ref}`); }
+  async resume(ref: string) { this.calls.push(`resume:${ref}`); }
+  onEvent(l: (e: AdapterEvent) => void) { this.listeners.add(l); return () => { this.listeners.delete(l); }; }
+  async readUsage(): Promise<never> { throw new Error('unused'); }
+  async listModels() { return []; }
+  async ping() { return { ok: true, signedIn: true }; }
+  disposed = false;
+  async dispose() { this.disposed = true; }
+  emit(e: AdapterEvent) { for (const l of this.listeners) l(e); }
+}
+
+async function chatSetup(now = () => new Date(2026, 10, 5)) {
+  const store = new Store(':memory:');
+  const vault = new FakeVault();
+  const events: ServerEvent[] = [];
+  const broadcast = (e: ServerEvent) => events.push(e);
+  const keys = new KeyService({ vault, broadcast, now });
+  const shared = new Fake('claude');
+  const spawned: { provider: string; env: Record<string, string>; adapter: Fake }[] = [];
+  const keyAdapters = new KeyedAdapters({
+    reveal: async (id) => ({ provider: (await keys.get(id)).provider, value: await keys.reveal(id) }),
+    create: async (provider, env) => { const adapter = new Fake(provider); spawned.push({ provider, env, adapter }); return adapter; },
+  });
+  const chats = new ChatService({ store, adapters: { claude: shared }, usage: { refresh: async () => [] } as any, broadcast, claudeHome: '/nowhere', keyed: keyAdapters, suggestNextSteps: () => false });
+  const api = createApi({ chats, keys, keyAdapters, usage: { latest: () => [] } as any, history: async () => [], token: 'tok' });
+  const real = api.broadcast;
+  api.broadcast = (e) => { events.push(e); real(e); };
+  await new Promise<void>((r) => api.server.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${(api.server.address() as AddressInfo).port}`;
+  const f = (path: string, init: RequestInit = {}) => fetch(base + path, { ...init, headers: { Authorization: 'Bearer tok', 'Content-Type': 'application/json' } });
+  const post = (path: string, body: unknown, method = 'POST') => f(path, { method, body: JSON.stringify(body) });
+  const key = await keys.add({ provider: 'claude', name: 'Personal', key: SECRET });
+  return { store, vault, events, keys, shared, spawned, chats, keyAdapters, f, post, key, close: () => { api.close(); api.server.closeAllConnections(); api.server.close(); } };
+}
+
+/** A chat that ran out of usage on the user's plan. */
+async function outOfUsage(s: Awaited<ReturnType<typeof chatSetup>>) {
+  const chat = await s.chats.start({ provider: 'claude', cwd: '/w', prompt: 'hello' });
+  await s.chats.started(chat.id);
+  s.shared.emit({ type: 'limit.reached', sessionRef: 's1', resetsAt: '2026-11-06T00:00:00Z' });
+  return s.chats.getChat(chat.id);
+}
+
+test('use-key resumes on a process spawned with the key in its env, and the key goes nowhere else', async () => {
+  const s = await chatSetup();
+  try {
+    const logged = await consoleDuring(async () => {
+      const chat = await outOfUsage(s);
+      assert.equal(chat.needsReason, 'limit');
+      const r = await s.post(`/api/chats/${chat.id}/use-key`, { keyId: s.key.id });
+      assert.equal(r.status, 200);
+      const body = await r.text();
+      assert.equal((JSON.parse(body) as Chat).keyId, s.key.id);
+      assert.equal(body.includes(SECRET), false);
+      assert.equal(s.spawned.length, 1);
+      assert.deepEqual(s.spawned[0]!.env, { ANTHROPIC_API_KEY: SECRET });
+      // The session resumes on the key's own process; the plan's process is left alone.
+      assert.deepEqual(s.spawned[0]!.adapter.calls, ['resume:s1', 'send:s1:Continue where you left off.']);
+      assert.deepEqual(s.shared.calls, ['startChat']);
+      assert.equal(s.chats.getChat(chat.id).column, 'running');
+      // Events from the key's process land on the chat.
+      s.spawned[0]!.adapter.emit({ type: 'turn.completed', sessionRef: 's1' });
+      assert.equal(s.chats.getChat(chat.id).column, 'review');
+    });
+    assert.equal(logged.includes(SECRET), false);
+    assert.equal(JSON.stringify(s.events).includes(SECRET), false);
+    assert.equal(JSON.stringify(s.store.listChats(true)).includes(SECRET), false);
+  } finally { s.close(); }
+});
+
+test('use-key: a key for another provider, a missing key, a running chat', async () => {
+  const s = await chatSetup();
+  try {
+    const codexKey = await s.keys.add({ provider: 'codex', name: 'Work', key: 'sk-proj-xyz' });
+    const chat = await outOfUsage(s);
+    assert.equal((await s.post(`/api/chats/${chat.id}/use-key`, { keyId: codexKey.id })).status, 409);
+    assert.equal((await s.post(`/api/chats/${chat.id}/use-key`, { keyId: 'nope' })).status, 404);
+    await s.post(`/api/chats/${chat.id}/use-key`, { keyId: s.key.id });
+    assert.equal((await s.f(`/api/chats/${chat.id}/use-key`, { method: 'DELETE' })).status, 409);
+  } finally { s.close(); }
+});
+
+test('a key the provider turns down fails with a plain message pointing at Connections', async () => {
+  const s = await chatSetup();
+  try {
+    const chat = await outOfUsage(s);
+    await s.post(`/api/chats/${chat.id}/use-key`, { keyId: s.key.id });
+    s.spawned[0]!.adapter.emit({ type: 'error', sessionRef: 's1', message: 'Invalid API key · Please run /login' });
+    assert.equal(s.store.listMessages(chat.id).at(-1)!.text, KEY_FAILED);
+    assert.equal(s.chats.getChat(chat.id).needsReason, 'error');
+  } finally { s.close(); }
+});
+
+test('deleting a key puts its chats back on the sign-in and ends its process', async () => {
+  const s = await chatSetup();
+  try {
+    const chat = await outOfUsage(s);
+    await s.post(`/api/chats/${chat.id}/use-key`, { keyId: s.key.id });
+    s.spawned[0]!.adapter.emit({ type: 'turn.completed', sessionRef: 's1' });
+    assert.equal((await s.f(`/api/keys/${s.key.id}`, { method: 'DELETE' })).status, 204);
+    assert.equal(s.chats.getChat(chat.id).keyId, undefined);
+    assert.equal(s.spawned[0]!.adapter.disposed, true);
+    await s.chats.send(chat.id, 'next');
+    assert.deepEqual(s.shared.calls.slice(-2), ['resume:s1', 'send:s1:next']);
+  } finally { s.close(); }
 });

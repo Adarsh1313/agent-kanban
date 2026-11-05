@@ -36,6 +36,7 @@ import { readClaudeSession } from './history/claude.ts';
 import { unlinkSync, writeFileSync } from 'node:fs';
 import { TrashService } from './trash.ts';
 import { KeyService, desktopVault } from './keys.ts';
+import { KeyedAdapters } from './adapters/keyed.ts';
 
 // Last resort: a stray rejection is logged, never allowed to take the server (and every chat) down.
 process.on('unhandledRejection', (e) => console.error('[agent-kanban] unhandled', e));
@@ -97,10 +98,27 @@ for (const id of PROVIDERS) {
 const usage = new UsageService({
   readers, store, onUpdate: (reading) => broadcast({ type: 'usage.updated', reading }),
 });
+// The user's own API keys (#43) live in the desktop app's main process; browser mode has none.
+const keys = desktop ? new KeyService({
+  vault: desktopVault({ send: (m) => process.send!(m), onMessage: (fn) => process.on('message', fn) }),
+  broadcast: (e) => broadcast(e),
+}) : undefined;
+// A chat on a key runs in its own provider process, spawned with the key in its environment only.
+const keyAdapters = keys ? new KeyedAdapters({
+  reveal: async (id) => ({ provider: (await keys.get(id)).provider, value: await keys.reveal(id) }),
+  create: async (id, env) => {
+    const path = await findBinary(id);
+    if (!path) return undefined;
+    return id === 'claude'
+      ? new ClaudeAdapter({ claudePath: path, env: () => ({ ...accountStore.env('claude'), ...env }) })
+      : new CodexAdapter({ codexPath: path, env: () => ({ ...accountStore.env('codex'), ...env }) });
+  },
+}) : undefined;
 // Set once skills exists: a `/skill` the user picked is sent in each provider's own form.
 let skillNames: () => string[] = () => [];
 const chats = new ChatService({
   store, adapters, usage, broadcast: (e) => broadcast(e), claudeHome: join(home, '.claude'),
+  ...(keyAdapters ? { keyed: keyAdapters } : {}),
   suggestNextSteps: () => settings.get().suggestNextSteps,
   outgoing: (provider, text) => skillForm(provider, text, skillNames()),
   // Notes go with a handoff only when the user turned them on for the project.
@@ -178,14 +196,9 @@ const hookEndpoint = join(dataDir, 'hook-endpoint.json');
 const hookSecret = randomBytes(24).toString('hex');
 const claudeHooks = new ClaudeHooks({ settingsPath: join(home, '.claude', 'settings.json'), scriptPath: join(dataDir, 'agent-kanban-hook.mjs'), endpointPath: hookEndpoint, runner: nodeRunner });
 const outside = new OutsideSessions({ store, emit: (e) => broadcast(e), runningHere: (id) => chats.runningHere(id), claudeHome: join(home, '.claude') });
-// The user's own API keys (#43) live in the desktop app's main process; browser mode has none.
-const keys = desktop ? new KeyService({
-  vault: desktopVault({ send: (m) => process.send!(m), onMessage: (fn) => process.on('message', fn) }),
-  broadcast: (e) => broadcast(e),
-}) : undefined;
 const trash = new TrashService({ dataDir, home });
 trash.start();
-const api = createApi({ keys, codexResets, accounts, routines, hooks: claudeHooks, outside, hookSecret, trash, chats, usage, history: () => readAllHistory(home), token, connections, adapters, connect, settings, skills, folderPicker: new FolderPicker(), folderOpener: new FolderOpener(),
+const api = createApi({ keys, keyAdapters, codexResets, accounts, routines, hooks: claudeHooks, outside, hookSecret, trash, chats, usage, history: () => readAllHistory(home), token, connections, adapters, connect, settings, skills, folderPicker: new FolderPicker(), folderOpener: new FolderOpener(),
   transcript: (provider, sessionRef) => readTranscript(home, provider, sessionRef) });
 broadcast = api.broadcast;
 
@@ -246,7 +259,7 @@ async function shutdown(): Promise<void> {
   const connectDone = connect.dispose().catch(() => {});
   api.server.close();
   api.close();
-  const dispose = adapters.dispose();
+  const dispose = Promise.all([adapters.dispose(), keyAdapters?.dispose()]);
   await Promise.race([Promise.all([dispose, connectDone]), new Promise((r) => setTimeout(r, 10_000))]);
   api.server.closeAllConnections();
   console.log('Agent Kanban stopped.');
