@@ -16,9 +16,15 @@ const chatCount = (p: Project) => p.providers.reduce((n, x) => n + x.chats, 0) +
  * The My projects picker: a grid of project tiles to tick, newest first, with older projects (no activity in 30 days)
  * folded behind one row and a search that looks through all of them. Used by onboarding and the sidebar's dialog.
  */
-export function ProjectPicker({ picked, onChange }: { picked: ReadonlySet<string>; onChange: (next: Set<string>) => void }) {
+export function ProjectPicker({ picked, onChange, first }: {
+  picked: ReadonlySet<string>;
+  onChange: (next: Set<string>) => void;
+  /** Folder keys listed before the rest (Compare: My projects first). */
+  first?: ReadonlySet<string>;
+}) {
   const now = useStore((s) => s.now);
-  const projects = pickable(useStore(visibleProjects));
+  const all = pickable(useStore(visibleProjects));
+  const projects = first ? [...all.filter((p) => first.has(folderKey(p.id))), ...all.filter((p) => !first.has(folderKey(p.id)))] : all;
   const [q, setQ] = useState('');
   // Older starts open when one of them is already picked, so nothing ticked is out of sight.
   const [olderOpen, setOlderOpen] = useState(() => projects.some((p) => isOlderProject(p, now) && picked.has(folderKey(p.id))));

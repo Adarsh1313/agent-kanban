@@ -12,6 +12,8 @@ A **Compare** button in the board's top bar lets the user pick up to 3 projects.
 
 It follows the split views of Linear and Trello's multi-board views, and is built from our existing columns, cards and headers.
 
+**Changed 2026-11-06 (user feedback):** panes stack one below another instead of side by side. Compare takes any number of projects; it starts with the first open and the rest minimized to their header, and at most 3 are open at once (opening a fourth minimizes the one opened longest ago). This replaces the 3-project cap, side-by-side layout and collapsed vertical strip below. Storage is `{ on, projects, open }`.
+
 ## User Stories
 
 1. As a user, I want a Compare button on the board, so that I can watch several projects at once.
@@ -54,7 +56,7 @@ It follows the split views of Linear and Trello's multi-board views, and is buil
 
 ## Out of Scope
 
-- More than 3 panes.
+- More than 3 panes open at once.
 - Moving chats between projects by drag.
 - Compare on the Projects page.
 
@@ -65,7 +67,7 @@ It follows the split views of Linear and Trello's multi-board views, and is buil
 
 ## Progress
 
-- [ ] Slice 1: board columns as a reusable compact component (no visible change) with tests passing
-- [ ] Slice 2: Compare mode: button, picker (max 3), panes with headers and counts, Exit compare, persisted
-- [ ] Slice 3: collapse to strip, per-pane menu (swap, remove, New chat), drag snap-back across panes
-- [ ] Slice 4: filters/focus across panes, narrow-window scroll, render budget; DESIGN.md; close #44
+- [x] Slice 1: board columns as a reusable compact component (no visible change) with tests passing
+- [x] Slice 2: Compare mode: button, picker (max 3), panes with headers and counts, Exit compare, persisted
+- [x] Slice 3: collapse to strip, per-pane menu (swap, remove, New chat), drag snap-back across panes
+- [x] Slice 4: filters/focus across panes, narrow-window scroll, render budget; DESIGN.md; close #44

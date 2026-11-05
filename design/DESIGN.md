@@ -124,6 +124,17 @@ one running-blue card halfway between two ink columns.
   Weekdays, Chosen days), days as round toggles in a labelled group, a time input, a chime switch,
   and a note that routines run only while the app is open. A project's page lists its routines.
 
+- **Compare panes (#44):** the board's Compare button picks any number of projects (the My projects
+  picker, My projects first). The board becomes project panes stacked one below another, full width.
+  Each pane has a header: chevron, glyph and name form one wide Open / Minimize button (`aria-expanded`,
+  hover tint), then "2 running · 1 needs you" (needs in the needs text colour, zeros faint), New chat here, and a "…" menu
+  (Swap project, Remove from compare). Compare starts with the first pane open and the rest minimized
+  to just their header. At most 3 are open at once, sharing the height down to `--pane-min-height`.
+  Opening a fourth minimizes the one opened longest ago. Each open pane's compact board scrolls
+  inside it. Compact cards show title, provider and status only; badges wrap in narrow columns. A
+  drop on another pane snaps back with "Chats stay in their project". Filters and focus apply to
+  every pane; hidden projects drop out, folder-missing ones dim. Remembered on this device.
+
 ## Desktop app
 
 The app (Electron, Windows first) mirrors these tokens in its main process; `tokens.css` stays the
@@ -171,6 +182,7 @@ table with values in `design-system.html`. Exits are faster than entrances; cons
 | Chat panel | slides in from the right | `--duration-panel`, `--ease-drawer` |
 | Dialog | scale 0.96 → 1, centred | `--duration-dialog` |
 | Page switch | 8px slide + fade, back reverses | `--duration-pop` |
+| Compare pane opens | its board fades in (opacity only) | `--duration-pop`, `--ease-out` |
 | Onboarding step | 16px shared-axis slide | `--duration-move` |
 | Any exit | faster than its entrance | `--duration-exit` |
 | Desktop window, tray, native dialogs | nothing custom; the OS animates them | n/a |
