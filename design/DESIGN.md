@@ -39,6 +39,17 @@ one running-blue card halfway between two ink columns.
   bordered rows (click to edit, Send now, remove). The composer says "Queue a message. It goes out when it can continue".
 - **Accounts** sit on a provider's Connections card under its switches: plain rows (name, an "Active" badge or "Use this
   account", remove), then "Add another account", which opens a one-line name field. Never switched automatically.
+- **API keys** (#43, desktop app only) sit under Accounts on the Claude Code and Codex cards, below a hairline:
+  an "API keys" caption, a muted note ("Stored encrypted on this computer and never shown again. Billed per use by
+  Anthropic."), then plain rows: name, the masked key in mono ("••••1a2b", never revealed or copyable), and the
+  **spend line** in tabular caption text ("$3.20 of $10 this month", or "$3.20 this month" with no cap; needs text
+  colour once the cap is reached), with Set cap / Rename / remove (a confirm dialog). "Add an API key" opens name,
+  a password field and an optional "$" cap. Browser mode shows only one muted line: keys work in the desktop app.
+  A key is never used automatically: the out-of-usage block adds "Continue with API key 'Personal'" (with a small
+  "billed per use") and the chat menu has the same item; both open a confirm dialog that states the cap and spend.
+  A chat on a key says "Using API key 'Personal' · $3.20 of $10 this month" beside "Same chat as in…", with
+  "Use my plan". **Spend cap reached** is a needs-you reason (amber badge); its panel block names the cap and offers
+  "Continue on your plan".
 - **Outside the app:** a Claude Code chat the user runs in a terminal shows as an ordinary card with a muted
   "Outside the app" label in its meta line (no new colour) while it runs there. It has no Stop, and the panel shows
   one muted line instead of the composer until it stops; then the composer offers "Continue this chat here".

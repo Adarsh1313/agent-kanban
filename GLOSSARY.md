@@ -102,6 +102,10 @@ _Avoid_: Instance, profile, login
 A provider key the user adds, used only when they choose it for a chat, billed per use and capped by an optional spend cap.
 _Avoid_: Token, secret, credential
 
+**Spend cap**:
+An API key's optional monthly limit in dollars; when its spend reaches it, the key's chats stop with "Spend cap reached" (a needs-you reason). Spend starts again at 0 each month.
+_Avoid_: Budget, quota, limit
+
 **Effort**:
 How long the agent should think: Quick, Normal or Thorough.
 _Avoid_: Reasoning effort, thinking budget, Ultrathink
