@@ -11,7 +11,7 @@ const COLS: Record<keyof Chat, string> = {
   deletedAt: 'deleted_at',
   resumeAt: 'resume_at', autoResume: 'auto_resume', queue: 'queue',
   origin: 'origin', outsideLive: 'outside_live',
-  providerRefs: 'provider_refs', projectLabel: 'project_label',
+  providerRefs: 'provider_refs', projectLabel: 'project_label', keyId: 'key_id',
 };
 
 function json<T>(raw: unknown, fallback: T): T {
@@ -33,6 +33,7 @@ function toChat(r: Row): Chat {
     ...(r.queue && r.queue !== '[]' ? { queue: JSON.parse(r.queue) } : {}),
     ...(r.origin === 'outside' ? { origin: 'outside' as const, outsideLive: r.outside_live === 1 } : {}),
     providerRefs: json(r.provider_refs, {}), projectLabel: r.project_label ?? null,
+    ...(r.key_id ? { keyId: r.key_id } : {}),
   };
 }
 
@@ -141,6 +142,8 @@ export class Store {
     if (!chatCols.includes('handoff_seen')) this.db.exec('ALTER TABLE chats ADD COLUMN handoff_seen TEXT');
     if (!chatCols.includes('project_label')) this.db.exec('ALTER TABLE chats ADD COLUMN project_label TEXT');
     if (!chatCols.includes('deleted_at')) this.db.exec('ALTER TABLE chats ADD COLUMN deleted_at TEXT');
+    // Added for #43: the user's own API key a chat runs on (its id; the key stays in the desktop app).
+    if (!chatCols.includes('key_id')) this.db.exec('ALTER TABLE chats ADD COLUMN key_id TEXT');
     if (!messageCols.includes('provider')) this.db.exec('ALTER TABLE messages ADD COLUMN provider TEXT');
   }
 

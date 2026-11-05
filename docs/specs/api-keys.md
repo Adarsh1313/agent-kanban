@@ -81,11 +81,13 @@ This follows how password managers and the providers' own consoles treat keys: w
 
 - Depends on the out-of-usage nudge in `limits.md` (slice 1) for the main entry point. A key can also be picked from the chat menu as "Continue with API key".
 - DESIGN.md gains key rows and the spend line.
+- Built for Claude Code and Codex only. Antigravity signs in with Google and its adapter takes no environment, so it has no API keys section (and no `GEMINI_API_KEY`) in v1.
+- Each key's chats run in their own provider process (`apps/server/src/adapters/keyed.ts`), so the key is in that process's environment and no other.
 
 ## Progress
 
-- [ ] Slice 1: desktop key store (safeStorage, IPC bridge) + metadata API, browser-mode 404, redaction tests
-- [ ] Slice 2: use-key: env passed to the provider spawn only; "Using API key" on the chat
-- [ ] Slice 3: spend tracking, monthly cap, Spend cap reached reason
-- [ ] Slice 4: web: Connections API keys section (add, masked, rename, delete, cap, spend), nudge + confirm
-- [ ] Slice 5: DESIGN.md, glossary check, close #43
+- [x] Slice 1: desktop key store (safeStorage, IPC bridge) + metadata API, browser-mode 404, redaction tests
+- [x] Slice 2: use-key: env passed to the provider spawn only; "Using API key" on the chat
+- [x] Slice 3: spend tracking, monthly cap, Spend cap reached reason
+- [x] Slice 4: web: Connections API keys section (add, masked, rename, delete, cap, spend), nudge + confirm
+- [x] Slice 5: DESIGN.md, glossary check, close #43

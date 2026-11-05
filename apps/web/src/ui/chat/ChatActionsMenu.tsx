@@ -1,4 +1,4 @@
-import type { Chat, ProviderId, TrashEntry } from '@agent-kanban/shared';
+import type { ApiKey, Chat, ProviderId, TrashEntry } from '@agent-kanban/shared';
 import { useState } from 'react';
 import { folderKey } from '@agent-kanban/shared';
 import { chatFolder, visibleProjects } from '../../state/selectors.ts';
@@ -9,6 +9,7 @@ import { errorText } from '../board/Card.tsx';
 import { clockTime } from '../board/format.ts';
 import { dismissToast, Icon, Menu, MenuItem, MenuLabel, MenuSep, Tooltip, toast, type MenuNav } from '../primitives/index.ts';
 import { Dialog } from '../primitives/Dialog.tsx';
+import { capReached, UseKeyDialog, useKeys } from '../connections/ApiKeys.tsx';
 
 const HOUR = 3_600_000;
 const EVENING_HOUR = 18;
@@ -207,6 +208,9 @@ export function ChatActionsMenu({ anchor, open: wanted, target, onClose, onRenam
   const historyArchived = useStore((s) => history !== null && Boolean(s.history.find((h) => h.provider === history.provider && h.sessionRef === history.sessionRef)?.archived));
   const historyOpen = useStore((s) => history !== null && s.ui.openHistory?.provider === history.provider && s.ui.openHistory.sessionRef === history.sessionRef);
   const [deleting, setDeleting] = useState<ChatActionsTarget | null>(null);
+  // "Continue with API key" (#43): the chat's provider's keys, picked here or from the out-of-usage nudge.
+  const keys = useKeys();
+  const [usingKey, setUsingKey] = useState<{ chat: Chat; key: ApiKey } | null>(null);
   const [deletingBusy, setDeletingBusy] = useState(false);
 
   const pick = (fn: () => void) => () => {
@@ -251,6 +255,12 @@ export function ChatActionsMenu({ anchor, open: wanted, target, onClose, onRenam
             <MenuItem icon="snooze" right={<Icon name="chevron-right" size="sm" />} onSelect={() => nav.go('snooze')}>Snooze</MenuItem>
           )}
           <MenuItem icon="rename" onSelect={pick(() => onRename(chat.id))}>Rename</MenuItem>
+          {onBoard && chat.column !== 'running' && (keys ?? []).filter((k) => k.provider === chat.provider && k.id !== chat.keyId && !capReached(k)).map((k) => (
+            <MenuItem key={k.id} icon="resume" onSelect={pick(() => setUsingKey({ chat, key: k }))}>Continue with API key '{k.name}'</MenuItem>
+          ))}
+          {onBoard && chat.keyId && chat.column !== 'running' && (
+            <MenuItem icon="resume" onSelect={pick(() => void runAction(store, () => api.useKey(chat.id, null)))}>Use my plan again</MenuItem>
+          )}
           <MenuItem icon="folder" right={<Icon name="chevron-right" size="sm" />} onSelect={() => nav.go('move')}>Move to project</MenuItem>
           <MenuItem icon="folder" onSelect={pick(() => void openFolder(chat.cwd))}>Open folder</MenuItem>
           <MenuItem icon="copy" onSelect={pick(() => void copyText(chat.cwd))}>Copy project path</MenuItem>
@@ -332,6 +342,7 @@ export function ChatActionsMenu({ anchor, open: wanted, target, onClose, onRenam
         <button className="btn danger" type="button" disabled={deletingBusy} onClick={() => void confirmDelete()}>Delete chat</button></>}>
       <p>It goes to Trash for 30 days, then it’s gone for good.</p>
     </Dialog>
+    {usingKey && <UseKeyDialog chat={usingKey.chat} k={usingKey.key} onClose={() => setUsingKey(null)} />}
     </>
   );
 }

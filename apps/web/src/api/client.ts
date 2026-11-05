@@ -1,4 +1,6 @@
 import type {
+  ApiKey,
+  KeyProvider,
   Effort,
   Chat,
   ConnectionHealth,
@@ -188,6 +190,15 @@ export const api = {
   codexResets: () => get<{ available: number }>('/api/usage/codex/resets'),
   useCodexReset: () => post<{ outcome: string }>('/api/usage/codex/resets/use'),
   resumeNow: (id: string) => post<void>(`/api/chats/${enc(id)}/resume-now`),
+  /** The user's own API keys (#43): metadata only; the key is sent once, on add, and never comes back. Desktop app only. */
+  keys: () => get<ApiKey[]>('/api/keys'),
+  addKey: (provider: KeyProvider, name: string, key: string) => post<ApiKey>('/api/keys', { provider, name, key }),
+  patchKey: (id: string, patch: { name?: string; capUsd?: number | null }) => request<ApiKey>('PATCH', `/api/keys/${enc(id)}`, patch),
+  removeKey: (id: string) => request<void>('DELETE', `/api/keys/${enc(id)}`),
+  /** Continue the chat on a key (null: back on the provider's sign-in). */
+  useKey: (chatId: string, keyId: string | null) => keyId
+    ? post<Chat>(`/api/chats/${enc(chatId)}/use-key`, { keyId })
+    : request<Chat>('DELETE', `/api/chats/${enc(chatId)}/use-key`),
   /** Whether Claude Code tells the app about chats run outside it (#37). */
   claudeHooks: () => get<{ installed: boolean }>('/api/hooks/claude'),
   setClaudeHooks: (on: boolean) => post<{ installed: boolean }>(`/api/hooks/claude/${on ? 'install' : 'remove'}`),

@@ -11,7 +11,8 @@ export const PROVIDER_CAPABILITIES: Record<ProviderId, { effort: boolean }> = {
 
 export type Column = 'running' | 'needs_you' | 'review' | 'done';
 
-export type NeedsReason = 'permission' | 'question' | 'limit' | 'error' | 'interrupted' | 'stopped' | 'waiting';
+/** `spend-cap`: the chat ran on the user's own API key (#43) and the key reached its monthly spend cap. */
+export type NeedsReason = 'permission' | 'question' | 'limit' | 'error' | 'interrupted' | 'stopped' | 'waiting' | 'spend-cap';
 
 export interface ChatState {
   column: Column;
@@ -34,7 +35,14 @@ export type AdapterEvent =
   | { type: 'request.opened'; sessionRef: string; requestId: string; kind: 'permission' | 'question'; summary: string; action?: RequestAction }
   | { type: 'turn.completed'; sessionRef: string }
   | { type: 'limit.reached'; sessionRef: string; resetsAt?: string }
-  | { type: 'error'; sessionRef: string; message: string };
+  | { type: 'error'; sessionRef: string; message: string }
+  /**
+   * What the provider spent since the last cost event (#43): Claude reports dollars, Codex reports tokens
+   * (priced with a small table in apps/server/src/spend.ts). Counts only for chats on the user's own key.
+   */
+  | { type: 'cost'; sessionRef: string; usd?: number; tokens?: TokenCount };
+
+export interface TokenCount { input: number; cachedInput: number; output: number; model?: string | null }
 
 export type UserAction =
   | { type: 'user.message' }
@@ -42,7 +50,9 @@ export type UserAction =
   | { type: 'user.stop' }
   | { type: 'user.markDone' }
   | { type: 'user.dragOut' }
-  | { type: 'app.restarted' };
+  | { type: 'app.restarted' }
+  /** The chat's API key reached its spend cap (#43). */
+  | { type: 'spend.capped' };
 
 export interface Chat {
   id: string;
@@ -79,6 +89,8 @@ export interface Chat {
   providerRefs?: Partial<Record<ProviderId, string>>;
   /** "Move to project": the project the chat shows under; it still runs in `cwd`. */
   projectLabel?: string | null;
+  /** The user's own API key the chat runs on (#43); left out when it runs on the provider's sign-in. Never the key itself. */
+  keyId?: string | null;
 }
 
 /** Days are 0 (Sunday) to 6; time is 'HH:MM' in the machine's local time. Daily is all 7 days, Weekdays 1 to 5. */
@@ -110,6 +122,30 @@ export interface QueuedMessage { id: string; text: string }
 export type AccountProvider = 'claude' | 'codex';
 /** One sign-in to a provider; "default" is the one the provider's own folder holds. */
 export interface Account { id: string; provider: AccountProvider; name: string; active: boolean }
+
+/** Providers that can run a chat on the user's own API key (#43). Antigravity signs in with Google only. */
+export type KeyProvider = 'claude' | 'codex';
+export const KEY_PROVIDERS: KeyProvider[] = ['claude', 'codex'];
+/** The environment variable each provider reads its API key from (set in that provider's spawn only). */
+export const KEY_ENV: Record<KeyProvider, string> = { claude: 'ANTHROPIC_API_KEY', codex: 'OPENAI_API_KEY' };
+
+/**
+ * One of the user's own API keys (#43): metadata only. The key itself lives encrypted in the desktop app's
+ * main process and is never sent to the page, broadcast or stored with a chat.
+ */
+export interface ApiKey {
+  id: string;
+  provider: KeyProvider;
+  name: string;
+  /** The key's last 4 characters, shown as ••••1a2b. */
+  last4: string;
+  /** Monthly spend cap in US dollars; null for no cap. */
+  capUsd: number | null;
+  /** Spent in `month` (US dollars, as the provider reports or we estimate it). */
+  spentUsd: number;
+  /** The month `spentUsd` is for, 'YYYY-MM' in local time; a new month starts again at 0. */
+  month: string;
+}
 
 export interface Message {
   id: string; chatId: string; role: 'user' | 'assistant'; text: string; createdAt: string;
@@ -177,6 +213,7 @@ export type ServerEvent =
   | { type: 'settings.updated'; settings: Settings }
   | { type: 'routines.updated'; routines: Routine[] }
   | { type: 'accounts.updated'; provider: AccountProvider; accounts: Account[] }
+  | { type: 'keys.updated'; keys: ApiKey[] }
   | { type: 'hooks.updated'; installed: boolean }
   | { type: 'notification'; chatId: string; kind: 'permission' | 'question' | 'finished' | 'limit' | 'error'; action?: RequestAction };
 
@@ -262,4 +299,4 @@ export interface ModelOption { id: string; label: string; isDefault: boolean }
 
 export { suggest } from './usage.ts';
 export { folderKey, claudeScratchRoot, isClaudeScratch, projectFolder, CLAUDE_SCRATCH_NAME } from './paths.ts';
-export type { ServerToDesktop, DesktopToServer, DesktopStatus, DesktopBridge } from './desktop.ts';
+export type { ServerToDesktop, DesktopToServer, DesktopStatus, DesktopBridge, KeyRequest, KeyReply } from './desktop.ts';

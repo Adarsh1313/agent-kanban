@@ -129,6 +129,28 @@
 .account-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .account-add { display: flex; gap: var(--space-1); width: 100%; }
 .account-add input { flex: 1; min-width: 0; }
+/* Your own API keys (#43): write-only rows (name, ••••last4, this month's spend), then the add form. */
+.api-keys { display: grid; gap: var(--space-2); border-top: 1px solid var(--color-border); padding-top: var(--space-3); }
+.api-keys-head { margin: 0; font-size: var(--text-caption); font-weight: var(--weight-semibold); color: var(--color-text); }
+.api-key-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-1); }
+.api-key-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); min-height: var(--control-height-sm); }
+.api-key-main { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: var(--space-2); }
+.api-key-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.api-key-mask { color: var(--color-text-muted); }
+.api-key-spend { font-size: var(--text-caption); color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
+.api-key-spend.needs-text { color: var(--color-needs-text); }
+.api-key-edit { flex: 1; display: flex; align-items: center; gap: var(--space-1); }
+.api-key-edit input { flex: 1; min-width: 0; }
+.api-key-unit, .api-key-cap > span { color: var(--color-text-muted); }
+.api-key-add { display: grid; gap: var(--space-2); }
+.api-key-field { display: grid; gap: var(--space-1); }
+.api-key-add label { display: grid; gap: var(--space-1); font-size: var(--text-caption); color: var(--color-text-muted); }
+.api-key-cap { display: flex; align-items: center; gap: var(--space-1); }
+.api-key-cap input { flex: 1; min-width: 0; }
+.api-key-actions { display: flex; gap: var(--space-1); }
+.api-key-billed { margin-left: var(--space-1); color: var(--color-text-muted); font-size: var(--text-micro); }
+.using-key { display: inline-flex; align-items: center; gap: var(--space-2); font-size: var(--text-caption); color: var(--color-text-muted); }
+.spend-cap-text { margin: 0; color: var(--color-needs-text); font-size: var(--text-caption); }
 .conn-note { font-size: var(--text-micro); color: var(--color-text-faint); display: flex; gap: 6px; align-items: flex-start; line-height: 1.4; }
 .conn-note .icon { width: 12px; height: 12px; flex: none; margin-top: 1px; }
 .later { border-style: dashed; background: transparent; }

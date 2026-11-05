@@ -17,6 +17,7 @@ import { EffortPicker } from './EffortPicker.tsx';
 import { Thread } from './Thread.tsx';
 import { addAfterStart } from '../myprojects/model.ts';
 import { HistoryThread } from './HistoryThread.tsx';
+import { SpendCapNote, UseKeyButtons, UsingKey } from '../connections/ApiKeys.tsx';
 
 const STATE_TEXT: Record<Column, string> = { running: 'Running', needs_you: 'Needs you', review: 'Ready for review', done: 'Done' };
 const HINT = 'Enter to send · Shift+Enter for a new line';
@@ -97,6 +98,7 @@ export function OutOfUsage({ chat }: { chat: Chat }) {
           <button className="btn" type="button" onClick={() => void redeemReset()}>Use reset</button>
         </div>
       )}
+      <UseKeyButtons chat={chat} />
       {others.length > 0 && (
         <div className="switch-accounts">
           {others.map((a) => (
@@ -317,12 +319,14 @@ export function ChatPanel() {
         </div>
         <div className="panel-source">
           <span className="source"><span className="live-dot" />Same chat as in {app}</span>
+          {s.kind === 'chat' && <UsingKey chat={s.chat} />}
           {s.kind === 'chat' && s.chat.projectLabel && <span className="moved-note">Shown under this project. It still runs in {s.chat.cwd}</span>}
         </div>
         {s.kind === 'chat' ? (
           <>
             <Thread chat={s.chat} key={`t:${s.chat.id}`} onSuggest={(text) => setFill((f) => ({ chatId: s.chat.id, text, n: (f?.n ?? 0) + 1 }))} />
             {s.chat.column === 'needs_you' && s.chat.needsReason === 'limit' && <OutOfUsage chat={s.chat} />}
+            {s.chat.column === 'needs_you' && s.chat.needsReason === 'spend-cap' && <SpendCapNote chat={s.chat} />}
             <ContinueWith chat={s.chat} />
             {s.chat.outsideLive
               ? <p className="panel-outside" role="status">{OUTSIDE_NOTE}</p>

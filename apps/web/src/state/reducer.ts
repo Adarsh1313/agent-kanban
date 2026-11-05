@@ -15,7 +15,7 @@ import type {
   Settings,
   ToolCall,
   TrashEntry,
-  UsageReading, Account, AccountProvider,
+  UsageReading, Account, AccountProvider, ApiKey,
 } from '@agent-kanban/shared';
 import { suggest } from '@agent-kanban/shared';
 
@@ -102,6 +102,8 @@ export interface AppState {
   accounts: Partial<Record<AccountProvider, Account[]>>;
   /** Claude Code's outside-chat hooks are installed; null until asked (#37). */
   claudeHooks: boolean | null;
+  /** The user's own API keys (metadata only, #43); null until asked. Desktop app only. */
+  keys: ApiKey[] | null;
   history: HistoryChat[];
   trash: TrashEntry[];
   projects: Project[];
@@ -155,6 +157,7 @@ export function initialState(): AppState {
     settings: null,
     accounts: {},
     claudeHooks: null,
+    keys: null,
     history: [],
     trash: [],
     projects: [],
@@ -364,6 +367,8 @@ export function applyEvent(s: AppState, e: ServerEvent, now: Date = new Date()):
       return mk([], { accounts: { ...s.accounts, [e.provider]: e.accounts } });
     case 'hooks.updated':
       return mk([], { claudeHooks: e.installed });
+    case 'keys.updated':
+      return mk([], { keys: e.keys });
     case 'settings.updated':
       // Saved in another tab (or onboarding): every open page follows.
       return { ...applySettings(s, e.settings), sync: bump(s, []) };

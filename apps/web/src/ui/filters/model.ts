@@ -53,6 +53,7 @@ const REASONS: [string, string][] = [
   ['limit', 'Out of usage'],
   ['error', 'Something went wrong'],
   ['interrupted', 'Interrupted'],
+  ['spend-cap', 'Spend cap reached'],
 ];
 const ACTIVITY: [string, string][] = [['hour', 'In the last hour'], ['today', 'Today'], ['week', 'This week']];
 const SOURCE: [string, string][] = [['here', 'Agent Kanban'], ['native', 'The provider’s own app']];
