@@ -62,6 +62,7 @@ export function ReasonBadge({ chat }: { chat: Chat }) {
     }
     case 'error': return <span className="badge danger">Something went wrong</span>;
     case 'interrupted': return <span className="badge quiet">Interrupted</span>;
+    case 'spend-cap': return <span className="badge needs">Spend cap reached</span>;
     default: return null;
   }
 }

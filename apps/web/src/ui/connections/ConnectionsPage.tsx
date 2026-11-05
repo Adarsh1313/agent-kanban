@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from 'react';
 import { SkillSyncSection } from '../skills/SkillSync.tsx';
+import { ApiKeysSection } from './ApiKeys.tsx';
 import type { ConnectionHealth, ConnectState, ProviderId } from '@agent-kanban/shared';
 import { api, type ConnectAction } from '../../api/client.ts';
 import { applyEvent, applySettings, mergeConnect, type AppState } from '../../state/reducer.ts';
@@ -426,6 +427,7 @@ function ConnectionCard({ id }: { id: ProviderId }) {
           </div>
           {NOTE[id] && <div className="conn-note"><Icon name="help" />{NOTE[id]}</div>}
           {(id === 'claude' || id === 'codex') && <AccountsSection provider={id} />}
+          {(id === 'claude' || id === 'codex') && <ApiKeysSection provider={id} />}
         </>
       );
       foot = (
@@ -465,6 +467,7 @@ function ConnectionCard({ id }: { id: ProviderId }) {
           <span className="step-text"><span className="done-mark"><Icon name="check" /></span>Installed. Sign in to finish setting up.</span>
           <span>You’ll sign in on {SIGN_IN_ON[id]} in your browser, then come back here.</span>
           {(id === 'claude' || id === 'codex') && <AccountsSection provider={id} />}
+          {(id === 'claude' || id === 'codex') && <ApiKeysSection provider={id} />}
         </>
       );
       foot = <>{checkedText}<span className="grow" />{checkNow}<button className="btn primary" type="button" {...busyProps('signin')}>Sign in{' '}<span className="sr-only">to {name}</span></button></>;
