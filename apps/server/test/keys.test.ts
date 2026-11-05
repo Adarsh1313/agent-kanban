@@ -4,7 +4,8 @@ import assert from 'node:assert/strict';
 import type { AddressInfo } from 'node:net';
 import type { ApiKey, Chat, KeyRequest, ServerEvent } from '@agent-kanban/shared';
 import { createApi } from '../src/api.ts';
-import { KeyService, desktopVault, type KeyVault } from '../src/keys.ts';
+import { KeyService, desktopVault, overCap, type KeyVault } from '../src/keys.ts';
+import { priceTokens } from '../src/spend.ts';
 import { Store } from '../src/store.ts';
 import { ChatService, KEY_FAILED } from '../src/chats.ts';
 import { KeyedAdapters } from '../src/adapters/keyed.ts';
@@ -186,7 +187,13 @@ async function chatSetup(now = () => new Date(2026, 10, 5)) {
     reveal: async (id) => ({ provider: (await keys.get(id)).provider, value: await keys.reveal(id) }),
     create: async (provider, env) => { const adapter = new Fake(provider); spawned.push({ provider, env, adapter }); return adapter; },
   });
-  const chats = new ChatService({ store, adapters: { claude: shared }, usage: { refresh: async () => [] } as any, broadcast, claudeHome: '/nowhere', keyed: keyAdapters, suggestNextSteps: () => false });
+  // Wired as main.ts wires it: each cost goes on the key; at the cap, the key's chats stop.
+  let spent: Promise<unknown> = Promise.resolve();
+  const chats: ChatService = new ChatService({
+    store, adapters: { claude: shared }, usage: { refresh: async () => [] } as any, broadcast, claudeHome: '/nowhere', keyed: keyAdapters, suggestNextSteps: () => false,
+    spend: (keyId, usd, chatId) => { spent = keys.addSpend(keyId, usd).then((k) => { if (k && overCap(k)) return chats.capReached(keyId, chatId); }); },
+    capped: async (keyId) => overCap(await keys.get(keyId)),
+  });
   const api = createApi({ chats, keys, keyAdapters, usage: { latest: () => [] } as any, history: async () => [], token: 'tok' });
   const real = api.broadcast;
   api.broadcast = (e) => { events.push(e); real(e); };
@@ -195,7 +202,7 @@ async function chatSetup(now = () => new Date(2026, 10, 5)) {
   const f = (path: string, init: RequestInit = {}) => fetch(base + path, { ...init, headers: { Authorization: 'Bearer tok', 'Content-Type': 'application/json' } });
   const post = (path: string, body: unknown, method = 'POST') => f(path, { method, body: JSON.stringify(body) });
   const key = await keys.add({ provider: 'claude', name: 'Personal', key: SECRET });
-  return { store, vault, events, keys, shared, spawned, chats, keyAdapters, f, post, key, close: () => { api.close(); api.server.closeAllConnections(); api.server.close(); } };
+  return { store, vault, events, keys, shared, spawned, chats, keyAdapters, f, post, key, settled: () => spent, close: () => { api.close(); api.server.closeAllConnections(); api.server.close(); } };
 }
 
 /** A chat that ran out of usage on the user's plan. */
@@ -268,4 +275,93 @@ test('deleting a key puts its chats back on the sign-in and ends its process', a
     await s.chats.send(chat.id, 'next');
     assert.deepEqual(s.shared.calls.slice(-2), ['resume:s1', 'send:s1:next']);
   } finally { s.close(); }
+});
+
+/* ───────── Slice 3: spend and the cap ───────── */
+
+test("each turn's cost adds up on the key: Claude dollars and Codex tokens", async () => {
+  const s = await chatSetup();
+  try {
+    const chat = await outOfUsage(s);
+    await s.post(`/api/chats/${chat.id}/use-key`, { keyId: s.key.id });
+    const keyed = s.spawned[0]!.adapter;
+    keyed.emit({ type: 'cost', sessionRef: 's1', usd: 0.5 });
+    await s.settled();
+    keyed.emit({ type: 'cost', sessionRef: 's1', tokens: { input: 1_000_000, cachedInput: 0, output: 100_000 } });
+    await s.settled();
+    const [k] = await (await s.f('/api/keys')).json() as ApiKey[];
+    assert.equal(k!.spentUsd, 0.5 + 1.25 + 1);
+    assert.ok(s.events.some((e) => e.type === 'keys.updated' && e.keys[0]!.spentUsd === 2.75));
+  } finally { s.close(); }
+});
+
+test('cost on the plan (no key) is not counted anywhere', async () => {
+  const s = await chatSetup();
+  try {
+    await s.chats.start({ provider: 'claude', cwd: '/w', prompt: 'hello' });
+    s.shared.emit({ type: 'cost', sessionRef: 's1', usd: 3 });
+    await s.settled();
+    assert.equal(s.vault.keys[0]!.spentUsd, 0);
+  } finally { s.close(); }
+});
+
+test('at the cap the running chat stops with Spend cap reached, and no new turn starts on the key', async () => {
+  const s = await chatSetup();
+  try {
+    await s.post(`/api/keys/${s.key.id}`, { capUsd: 1 }, 'PATCH');
+    const chat = await outOfUsage(s);
+    await s.post(`/api/chats/${chat.id}/use-key`, { keyId: s.key.id });
+    const keyed = s.spawned[0]!.adapter;
+    keyed.emit({ type: 'turn.started', sessionRef: 's1' });
+    keyed.emit({ type: 'cost', sessionRef: 's1', usd: 1.2 });
+    await s.settled();
+    const after = s.chats.getChat(chat.id);
+    assert.deepEqual({ column: after.column, needsReason: after.needsReason }, { column: 'needs_you', needsReason: 'spend-cap' });
+    assert.ok(keyed.calls.includes('stop:s1'));
+    // The stopped turn's last event doesn't reopen the card.
+    keyed.emit({ type: 'turn.completed', sessionRef: 's1' });
+    assert.equal(s.chats.getChat(chat.id).needsReason, 'spend-cap');
+    const send = await s.post(`/api/chats/${chat.id}/messages`, { text: 'more' });
+    assert.equal(send.status, 409);
+    assert.match(((await send.json()) as { error: string }).error, /spend cap/);
+    // Raising the cap lets it continue.
+    await s.post(`/api/keys/${s.key.id}`, { capUsd: 5 }, 'PATCH');
+    await s.chats.send(chat.id, 'more');
+    assert.equal(s.chats.getChat(chat.id).column, 'running');
+  } finally { s.close(); }
+});
+
+test('a turn that ends exactly at the cap still lands in Needs you with the reason', async () => {
+  const s = await chatSetup();
+  try {
+    await s.post(`/api/keys/${s.key.id}`, { capUsd: 1 }, 'PATCH');
+    const chat = await outOfUsage(s);
+    await s.post(`/api/chats/${chat.id}/use-key`, { keyId: s.key.id });
+    const keyed = s.spawned[0]!.adapter;
+    keyed.emit({ type: 'cost', sessionRef: 's1', usd: 1 });
+    keyed.emit({ type: 'turn.completed', sessionRef: 's1' });
+    await s.settled();
+    assert.equal(s.chats.getChat(chat.id).needsReason, 'spend-cap');
+    assert.equal((await s.post(`/api/chats/${chat.id}/use-key`, { keyId: s.key.id })).status, 409); // capped
+  } finally { s.close(); }
+});
+
+test("the month rolls over: last month's spend shows as 0 and this month counts from 0", async () => {
+  let now = new Date(2026, 9, 31, 23, 0);
+  const s = await chatSetup(() => now);
+  try {
+    await s.keys.addSpend(s.key.id, 4);
+    assert.equal((await s.keys.get(s.key.id)).spentUsd, 4);
+    now = new Date(2026, 10, 1, 0, 5);
+    const k = await s.keys.get(s.key.id);
+    assert.deepEqual({ spentUsd: k.spentUsd, month: k.month }, { spentUsd: 0, month: '2026-11' });
+    await s.keys.addSpend(s.key.id, 0.25);
+    assert.deepEqual({ spentUsd: s.vault.keys[0]!.spentUsd, month: s.vault.keys[0]!.month }, { spentUsd: 0.25, month: '2026-11' });
+  } finally { s.close(); }
+});
+
+test('Codex tokens are priced per million, cached input at the cached rate', () => {
+  assert.equal(priceTokens({ input: 1_000_000, cachedInput: 0, output: 0 }), 1.25);
+  assert.equal(priceTokens({ input: 1_000_000, cachedInput: 1_000_000, output: 0 }), 0.125);
+  assert.equal(priceTokens({ input: 0, cachedInput: 0, output: 1_000_000, model: 'gpt-5-mini' }), 2);
 });

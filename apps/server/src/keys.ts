@@ -48,6 +48,9 @@ export function desktopVault(channel: {
   };
 }
 
+/** The key has a cap and this month's spend has reached it. */
+export const overCap = (k: ApiKey) => k.capUsd !== null && k.spentUsd >= k.capUsd;
+
 export const monthOf = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 const MAX_NAME = 60;
 const MAX_KEY = 1_000;
@@ -57,6 +60,7 @@ export class KeyService {
   private vault: KeyVault;
   private emit: (e: ServerEvent) => void;
   private now: () => Date;
+  private spending: Promise<unknown> = Promise.resolve();
 
   constructor(opts: { vault: KeyVault; broadcast?: (e: ServerEvent) => void; now?: () => Date }) {
     this.vault = opts.vault;
@@ -101,6 +105,24 @@ export class KeyService {
     const removed = (await this.vault.request({ op: 'remove', id })) as boolean;
     if (!removed) throw new KeyError(404, 'API key not found.');
     await this.announce();
+  }
+
+  /**
+   * Adds a turn's cost to the key's spend this month (a new month starts again at 0). Calls run one at a
+   * time, so two turns ending together both count.
+   */
+  addSpend(id: string, usd: number): Promise<ApiKey | null> {
+    const run = this.spending.then(async () => {
+      if (!(usd > 0)) return null;
+      const k = (await this.list()).find((x) => x.id === id);
+      if (!k) return null;
+      const spentUsd = Math.round((k.spentUsd + usd) * 1e6) / 1e6;
+      const updated = (await this.vault.request({ op: 'update', id, patch: { spentUsd, month: k.month } })) as ApiKey | null;
+      await this.announce();
+      return updated ? this.current(updated) : null;
+    });
+    this.spending = run.catch(() => null);
+    return run;
   }
 
   /** The key's value, for a provider's spawn environment only. Never log, store or send it anywhere else. */

@@ -11,7 +11,8 @@ export const PROVIDER_CAPABILITIES: Record<ProviderId, { effort: boolean }> = {
 
 export type Column = 'running' | 'needs_you' | 'review' | 'done';
 
-export type NeedsReason = 'permission' | 'question' | 'limit' | 'error' | 'interrupted' | 'stopped' | 'waiting';
+/** `spend-cap`: the chat ran on the user's own API key (#43) and the key reached its monthly spend cap. */
+export type NeedsReason = 'permission' | 'question' | 'limit' | 'error' | 'interrupted' | 'stopped' | 'waiting' | 'spend-cap';
 
 export interface ChatState {
   column: Column;
@@ -34,7 +35,14 @@ export type AdapterEvent =
   | { type: 'request.opened'; sessionRef: string; requestId: string; kind: 'permission' | 'question'; summary: string; action?: RequestAction }
   | { type: 'turn.completed'; sessionRef: string }
   | { type: 'limit.reached'; sessionRef: string; resetsAt?: string }
-  | { type: 'error'; sessionRef: string; message: string };
+  | { type: 'error'; sessionRef: string; message: string }
+  /**
+   * What the provider spent since the last cost event (#43): Claude reports dollars, Codex reports tokens
+   * (priced with a small table in apps/server/src/spend.ts). Counts only for chats on the user's own key.
+   */
+  | { type: 'cost'; sessionRef: string; usd?: number; tokens?: TokenCount };
+
+export interface TokenCount { input: number; cachedInput: number; output: number; model?: string | null }
 
 export type UserAction =
   | { type: 'user.message' }
@@ -42,7 +50,9 @@ export type UserAction =
   | { type: 'user.stop' }
   | { type: 'user.markDone' }
   | { type: 'user.dragOut' }
-  | { type: 'app.restarted' };
+  | { type: 'app.restarted' }
+  /** The chat's API key reached its spend cap (#43). */
+  | { type: 'spend.capped' };
 
 export interface Chat {
   id: string;

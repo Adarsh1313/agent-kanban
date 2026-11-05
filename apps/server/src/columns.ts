@@ -35,6 +35,8 @@ export function nextState(current: ChatState, event: AdapterEvent | UserAction):
       return current.column === 'needs_you' ? current : REVIEW;
     case 'user.markDone':
       return DONE;
+    case 'spend.capped':
+      return { column: 'needs_you', needsReason: 'spend-cap' };
     case 'app.restarted':
       // A running turn, and a permission or question the old process was waiting on, can't continue after a restart.
       return current.column === 'running'

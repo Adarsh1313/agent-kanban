@@ -12,6 +12,7 @@ import { AdapterRegistry } from './adapters/registry.ts';
 import type { AdapterSource } from './adapters/registry.ts';
 import type { KeyedAdapterSource } from './adapters/keyed.ts';
 import { KeyError } from './keys.ts';
+import { costUsd } from './spend.ts';
 import type { UsageService } from './usage/service.ts';
 import { ANTIGRAVITY_SIGNED_OUT } from './adapters/antigravity.ts';
 import { buildPreface } from './handoff.ts';
@@ -19,7 +20,8 @@ import { buildPreface } from './handoff.ts';
 const NAMES: Record<ProviderId, string> = { claude: 'Claude Code', codex: 'Codex', antigravity: 'Antigravity' };
 /** A chat on the user's own API key (#43) whose key the provider turned down, or that was deleted. */
 export const KEY_FAILED = "This API key didn't work. Check it in Connections.";
-const KEY_GONE ="This API key isn't there any more. Choose another in Connections.";
+export const CAP_REACHED = 'This API key reached its spend cap. Raise the cap in Connections, or continue on your plan.';
+const KEY_GONE = "This API key isn't there any more. Choose another in Connections.";
 const ACTIVE_WINDOW_MS = 15_000;
 const OWN_WRITE_SLACK_MS = 2_000;
 const BUFFER_MAX = 500;
@@ -86,6 +88,8 @@ export class ChatService {
   private adapters: AdapterSource;
   /** Adapters for chats on the user's own API keys (#43); absent in browser mode. */
   private keyed: KeyedAdapterSource | null;
+  private spend: ((keyId: string, usd: number, chatId: string) => void) | null;
+  private capped: ((keyId: string) => Promise<boolean>) | null;
   private usage: UsageService;
   private emit: (e: ServerEvent) => void;
   private claudeHome: string;
@@ -136,8 +140,14 @@ export class ChatService {
     notes?: (cwd: string) => string | null;
     /** Adapters for chats that run on the user's own API keys (#43). */
     keyed?: KeyedAdapterSource;
+    /** Adds a turn's cost to a key (#43); the caller stops the key's chats when it reaches its cap. */
+    spend?: (keyId: string, usd: number, chatId: string) => void;
+    /** True when the key has reached its spend cap: no new turn starts on it. */
+    capped?: (keyId: string) => Promise<boolean>;
   }) {
     this.keyed = opts.keyed ?? null;
+    this.spend = opts.spend ?? null;
+    this.capped = opts.capped ?? null;
     this.keyed?.onAdapter((id, adapter) => { adapter.onEvent((e) => this.onAdapterEvent(id, e)); });
     this.suggestNextSteps = opts.suggestNextSteps ?? (() => true);
     this.notes = opts.notes ?? (() => null);
@@ -186,6 +196,7 @@ export class ChatService {
   async useKey(chatId: string, keyId: string | null): Promise<Chat> {
     const chat = this.mustGet(chatId);
     if (keyId && !this.keyed) throw new KeyError(404, 'Not found.');
+    if (keyId && this.capped && await this.capped(keyId)) throw new CantContinueError(CAP_REACHED);
     if (this.pending.has(chatId) || chat.column === 'running') throw new CantContinueError('Wait for this turn to finish, or stop it first.');
     if ((chat.keyId ?? null) === keyId) return chat;
     // The next message resumes the session on the other process (the key's, or the sign-in's).
@@ -198,6 +209,29 @@ export class ChatService {
       this.armResume();
     }
     return this.mustGet(chatId);
+  }
+
+  /**
+   * The key reached its spend cap: every chat running on it stops, and they and the chat whose turn reached
+   * it (`chatId`, even if that turn just ended) wait in Needs you with "Spend cap reached".
+   */
+  async capReached(keyId: string, chatId?: string): Promise<void> {
+    for (const chat of this.store.listChats()) {
+      if (chat.keyId !== keyId || chat.column === 'done') continue;
+      const busy = chat.column === 'running' || this.pending.has(chat.id)
+        || (chat.column === 'needs_you' && (chat.needsReason === 'permission' || chat.needsReason === 'question'));
+      if (!busy && chat.id !== chatId) continue;
+      if (chat.needsReason === 'spend-cap') continue;
+      const adapter = busy ? this.adapterNow(chat) : undefined;
+      this.closeRequests(chat.id);
+      this.live.delete(chat.id);
+      if (busy) this.userStopped.add(chat.id); // the turn's last events must not reopen the card
+      this.transition(chat.id, { type: 'spend.capped' });
+      this.broadcast({ type: 'notification', chatId: chat.id, kind: 'limit' });
+      if (adapter && chat.sessionRef) {
+        try { await adapter.stop(chat.sessionRef); } catch { /* the card is already parked */ }
+      }
+    }
   }
 
   /** The key was deleted: its chats go back to the provider's sign-in. */
@@ -309,6 +343,7 @@ export class ChatService {
     if (chat.sessionRef && !this.live.has(chat.id) && chat.provider === 'claude' && this.isActiveElsewhere(chat.sessionRef, chat.id)) {
       throw new ActiveElsewhereError();
     }
+    if (chat.keyId && this.capped && await this.capped(chat.keyId)) throw new CantContinueError(CAP_REACHED);
     this.touch(chatId);
     if (chat.resumeAt) this.store.updateChat(chatId, { resumeAt: null }, { touch: false });
     this.userStopped.delete(chatId); // the user moved on: the new turn's events count
@@ -750,6 +785,13 @@ ${typed}` : typed;
   }
 
   private handle(chatId: string, provider: ProviderId, e: AdapterEvent): void {
+    if (e.type === 'cost') {
+      // Spend counts only on the user's own key; the plan's usage is read from the provider instead.
+      const keyId = this.store.getChat(chatId)?.keyId;
+      const usd = costUsd(e);
+      if (keyId && usd > 0) this.spend?.(keyId, usd, chatId);
+      return;
+    }
     this.touch(chatId);
     if (this.userStopped.has(chatId)) {
       // The turn the user stopped while it was starting: it must not reopen the card or ask anything.

@@ -35,7 +35,7 @@ import { OutsideSessions } from './outside/sessions.ts';
 import { readClaudeSession } from './history/claude.ts';
 import { unlinkSync, writeFileSync } from 'node:fs';
 import { TrashService } from './trash.ts';
-import { KeyService, desktopVault } from './keys.ts';
+import { KeyService, desktopVault, overCap } from './keys.ts';
 import { KeyedAdapters } from './adapters/keyed.ts';
 
 // Last resort: a stray rejection is logged, never allowed to take the server (and every chat) down.
@@ -118,7 +118,15 @@ const keyAdapters = keys ? new KeyedAdapters({
 let skillNames: () => string[] = () => [];
 const chats = new ChatService({
   store, adapters, usage, broadcast: (e) => broadcast(e), claudeHome: join(home, '.claude'),
-  ...(keyAdapters ? { keyed: keyAdapters } : {}),
+  ...(keys && keyAdapters ? {
+    keyed: keyAdapters,
+    // Each turn's cost goes on its key; at the cap, the key's chats stop with "Spend cap reached".
+    spend: (keyId: string, usd: number, chatId: string) => {
+      keys.addSpend(keyId, usd).then((k) => { if (k && overCap(k)) return chats.capReached(keyId, chatId); })
+        .catch((e) => console.error('[agent-kanban] spend', e instanceof Error ? e.message : 'failed'));
+    },
+    capped: async (keyId: string) => overCap(await keys.get(keyId)),
+  } : {}),
   suggestNextSteps: () => settings.get().suggestNextSteps,
   outgoing: (provider, text) => skillForm(provider, text, skillNames()),
   // Notes go with a handoff only when the user turned them on for the project.

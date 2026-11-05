@@ -730,3 +730,21 @@ test("chats run in the active account's config folder; Default passes no env (#3
   assert.equal(f.calls[1]!.options.env[pathKey(f.calls[1]!.options.env)!], process.env[pathKey(process.env)!]);
   await a.dispose();
 });
+
+test("reports each turn's own cost from the query's running total_cost_usd (#43)", async () => {
+  const f = fake(async function* (_o, input) {
+    await input.next();
+    yield init();
+    yield result({ total_cost_usd: 0.25 });
+    await input.next();
+    yield result({ total_cost_usd: 0.75 });
+    await never();
+  });
+  const a = new ClaudeAdapter({ claudePath: 'c', query: f.query });
+  const ev = collect(a);
+  const { sessionRef } = await a.startChat({ cwd: '.', prompt: 'go' });
+  await tick();
+  await a.sendMessage(sessionRef, 'more');
+  await tick();
+  assert.deepEqual(ev.filter((e) => e.type === 'cost').map((e) => e.usd), [0.25, 0.5]);
+});

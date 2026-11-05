@@ -59,6 +59,8 @@ type Chat = {
   turnAnnounced: boolean;
   /** Set by a rejected rate_limit_event during this turn: its reset time, or '' when not given. */
   limitResetsAt?: string;
+  /** total_cost_usd at the last result of the current query (it counts up over a query's life). */
+  costSeen?: number;
   stopping: boolean;
   pending: Map<string, Pending>;
   onStarted?: { resolve: () => void; reject: (e: Error) => void };
@@ -183,6 +185,7 @@ export class ClaudeAdapter implements ProviderAdapter {
     if (Object.keys(env).length > 0) options.env = { ...process.env, ...env };
     const q = this.query({ prompt: chat.queue, options: options as never });
     chat.query = q;
+    chat.costSeen = 0;
     this.live.add(chat);
     void this.consume(chat, q);
   }
@@ -245,6 +248,13 @@ export class ClaudeAdapter implements ProviderAdapter {
       const info = m.rate_limit_info;
       if (info?.status === 'rejected') chat.limitResetsAt = typeof info.resetsAt === 'number' ? new Date(info.resetsAt * 1000).toISOString() : '';
     } else if (m.type === 'result') {
+      // total_cost_usd counts up over a query's life: report what this turn added (#43 spend caps).
+      if (typeof m.total_cost_usd === 'number' && Number.isFinite(m.total_cost_usd)) {
+        const total = m.total_cost_usd;
+        const usd = total >= (chat.costSeen ?? 0) ? total - (chat.costSeen ?? 0) : total;
+        chat.costSeen = total;
+        if (usd > 0) this.emit({ type: 'cost', sessionRef, usd });
+      }
       const swallow = chat.stopping;
       const limit = chat.limitResetsAt;
       chat.limitResetsAt = undefined;

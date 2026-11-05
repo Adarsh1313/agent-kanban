@@ -243,6 +243,15 @@ export class CodexAdapter implements ProviderAdapter {
         else if (status === 'failed') this.emit({ type: 'error', sessionRef, message: params.turn?.error?.message ?? 'Codex ran into a problem.' });
         return;
       }
+      case 'thread/tokenUsage/updated': {
+        // The tokens of the model call that just finished (#43 spend caps); priced by the server.
+        const last = params?.tokenUsage?.last;
+        if (!sessionRef || !last) return;
+        const n = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : 0);
+        const tokens = { input: n(last.inputTokens), cachedInput: n(last.cachedInputTokens), output: n(last.outputTokens) + n(last.reasoningOutputTokens) };
+        if (tokens.input + tokens.output > 0) this.emit({ type: 'cost', sessionRef, tokens });
+        return;
+      }
       case 'account/rateLimits/updated': {
         const snap = params?.rateLimits;
         if (!snap?.rateLimitReachedType) return;
