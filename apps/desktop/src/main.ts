@@ -1,11 +1,12 @@
 // Agent Kanban desktop app: Electron's main process. It owns the window, the tray and the server child
 // process; it holds no chat logic. Spec: docs/specs/desktop-app.md; look: design/DESIGN.md (Desktop app).
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, Notification, screen, shell, Tray, type IpcMainEvent, type MenuItemConstructorOptions } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, Notification, safeStorage, screen, shell, Tray, type IpcMainEvent, type MenuItemConstructorOptions } from 'electron';
 import { mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { DesktopStatus } from '@agent-kanban/shared';
+import { KeyFile } from './keys.ts';
 import { restorePlacement, type Placement } from './placement.ts';
 import { startServer, type ServerProcess, type StartResult } from './server-process.ts';
 import { loadState, noteFirstClose, saveState } from './state.ts';
@@ -19,6 +20,15 @@ const dataDir = join(akHome, '.agent-kanban');
 mkdirSync(dataDir, { recursive: true });
 const statePath = join(dataDir, 'desktop.json');
 const state = loadState(statePath);
+// The user's own API keys (#43), encrypted with the operating system's key store. Only this process reads them.
+const keyFile = new KeyFile({
+  path: join(dataDir, 'keys.json'),
+  cipher: {
+    available: () => safeStorage.isEncryptionAvailable(),
+    encrypt: (plain) => safeStorage.encryptString(plain),
+    decrypt: (cipher) => safeStorage.decryptString(cipher),
+  },
+});
 // Started by Windows at sign-in: stay in the tray until the user opens the window.
 const startHidden = process.argv.includes('--hidden');
 
@@ -166,7 +176,7 @@ function showStartFailed(reason: Extract<StartResult, { type: 'failed' }>['reaso
 
 /** Starts the server and loads the board, or the start-failure page if it can't start. */
 async function launch(): Promise<void> {
-  server = startServer({ mainPath: join(here, '..', '..', 'server', 'src', 'main.ts'), logPath: join(dataDir, 'desktop.log') });
+  server = startServer({ mainPath: join(here, '..', '..', 'server', 'src', 'main.ts'), logPath: join(dataDir, 'desktop.log'), keys: (r) => keyFile.handle(r) });
   const result = await server.started;
   if (result.type !== 'ready') {
     server = null;

@@ -24,6 +24,7 @@ import type { SettingsStore } from './settings.ts';
 import type { ChatService } from './chats.ts';
 import type { UsageService } from './usage/service.ts';
 import { TrashError, type TrashService } from './trash.ts';
+import { KeyError, type KeyService } from './keys.ts';
 // suggest() lives in shared so the web app can recompute "Most room" from usage.updated events.
 import { EFFORTS, folderKey, suggest } from '@agent-kanban/shared';
 
@@ -129,6 +130,8 @@ export function createApi(opts: {
   outside?: { handle(p: HookPayload): void };
   hookSecret?: string;
   trash?: TrashService;
+  /** The user's own API keys (#43); desktop app only, so browser mode answers 404 on every key route. */
+  keys?: KeyService;
   /** Folder holding the built web app (default apps/web/dist). */
   webDist?: string;
   token: string;
@@ -226,6 +229,22 @@ export function createApi(opts: {
       }
       if ((m = match('POST', '/api/accounts/:provider/:id/activate'))) return { status: 200, body: accounts.activate(who(m[0]), m[1]!) };
       if ((m = match('DELETE', '/api/accounts/:provider/:id'))) return { status: 200, body: accounts.remove(who(m[0]), m[1]!) };
+    }
+    if (url.pathname === '/api/keys' || url.pathname.startsWith('/api/keys/')) {
+      // Request bodies here carry a key: they are never logged, and errors never echo them.
+      const keys = opts.keys;
+      if (!keys) throw new HttpError(404, 'Not found.');
+      if (match('GET', '/api/keys')) return { status: 200, body: await keys.list() };
+      if (match('POST', '/api/keys')) {
+        const b = await readJson(req);
+        return { status: 201, body: await keys.add({ provider: b.provider, name: b.name, key: b.key }) };
+      }
+      if ((m = match('PATCH', '/api/keys/:id'))) {
+        const b = await readJson(req);
+        return { status: 200, body: await keys.update(m[0]!, { name: b.name, capUsd: b.capUsd }) };
+      }
+      if ((m = match('DELETE', '/api/keys/:id'))) { await keys.remove(m[0]!); return { status: 204 }; }
+      throw new HttpError(404, 'Not found.');
     }
     if (url.pathname.startsWith('/api/hooks/claude') && opts.hooks) {
       const hooks = opts.hooks;
@@ -600,7 +619,7 @@ export function createApi(opts: {
         if (err instanceof URIError) return send(404, { error: 'Not found.' });
         if (err instanceof AccountError) return send(400, { error: err.message });
         if (err instanceof AccountBusyError) return send(409, { error: err.message });
-        if (err instanceof HttpError || err instanceof TrashError) {
+        if (err instanceof HttpError || err instanceof TrashError || err instanceof KeyError) {
           if (err.status === 413) return reject413(err.message);
           return send(err.status, { error: err.message });
         }

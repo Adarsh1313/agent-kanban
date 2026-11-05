@@ -111,6 +111,30 @@ export type AccountProvider = 'claude' | 'codex';
 /** One sign-in to a provider; "default" is the one the provider's own folder holds. */
 export interface Account { id: string; provider: AccountProvider; name: string; active: boolean }
 
+/** Providers that can run a chat on the user's own API key (#43). Antigravity signs in with Google only. */
+export type KeyProvider = 'claude' | 'codex';
+export const KEY_PROVIDERS: KeyProvider[] = ['claude', 'codex'];
+/** The environment variable each provider reads its API key from (set in that provider's spawn only). */
+export const KEY_ENV: Record<KeyProvider, string> = { claude: 'ANTHROPIC_API_KEY', codex: 'OPENAI_API_KEY' };
+
+/**
+ * One of the user's own API keys (#43): metadata only. The key itself lives encrypted in the desktop app's
+ * main process and is never sent to the page, broadcast or stored with a chat.
+ */
+export interface ApiKey {
+  id: string;
+  provider: KeyProvider;
+  name: string;
+  /** The key's last 4 characters, shown as ••••1a2b. */
+  last4: string;
+  /** Monthly spend cap in US dollars; null for no cap. */
+  capUsd: number | null;
+  /** Spent in `month` (US dollars, as the provider reports or we estimate it). */
+  spentUsd: number;
+  /** The month `spentUsd` is for, 'YYYY-MM' in local time; a new month starts again at 0. */
+  month: string;
+}
+
 export interface Message {
   id: string; chatId: string; role: 'user' | 'assistant'; text: string; createdAt: string;
   /** The effort the reply ran at, when it wasn't Normal. */
@@ -177,6 +201,7 @@ export type ServerEvent =
   | { type: 'settings.updated'; settings: Settings }
   | { type: 'routines.updated'; routines: Routine[] }
   | { type: 'accounts.updated'; provider: AccountProvider; accounts: Account[] }
+  | { type: 'keys.updated'; keys: ApiKey[] }
   | { type: 'hooks.updated'; installed: boolean }
   | { type: 'notification'; chatId: string; kind: 'permission' | 'question' | 'finished' | 'limit' | 'error'; action?: RequestAction };
 
@@ -262,4 +287,4 @@ export interface ModelOption { id: string; label: string; isDefault: boolean }
 
 export { suggest } from './usage.ts';
 export { folderKey, claudeScratchRoot, isClaudeScratch, projectFolder, CLAUDE_SCRATCH_NAME } from './paths.ts';
-export type { ServerToDesktop, DesktopToServer, DesktopStatus, DesktopBridge } from './desktop.ts';
+export type { ServerToDesktop, DesktopToServer, DesktopStatus, DesktopBridge, KeyRequest, KeyReply } from './desktop.ts';
