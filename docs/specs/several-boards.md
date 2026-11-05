@@ -67,5 +67,5 @@ It follows the split views of Linear and Trello's multi-board views, and is buil
 
 - [x] Slice 1: board columns as a reusable compact component (no visible change) with tests passing
 - [x] Slice 2: Compare mode: button, picker (max 3), panes with headers and counts, Exit compare, persisted
-- [ ] Slice 3: collapse to strip, per-pane menu (swap, remove, New chat), drag snap-back across panes
+- [x] Slice 3: collapse to strip, per-pane menu (swap, remove, New chat), drag snap-back across panes
 - [ ] Slice 4: filters/focus across panes, narrow-window scroll, render budget; DESIGN.md; close #44

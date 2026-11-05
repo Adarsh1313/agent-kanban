@@ -1,12 +1,14 @@
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import type { Chat, Project } from '@agent-kanban/shared';
 import { folderKey } from '@agent-kanban/shared';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { applySnapshot, initialState, type AppState } from '../src/state/reducer.ts';
 import { createStore, StoreProvider, type Store } from '../src/state/store.ts';
 import { reloadCompare } from '../src/ui/compare/model.ts';
 import { COMPARE_TITLE } from '../src/ui/compare/Compare.tsx';
 import { Shell } from '../src/ui/shell/Shell.tsx';
+import { setNewChatHandler } from '../src/ui/actions.ts';
+import { HINT_OTHER_PROJECT } from '../src/ui/board/Card.tsx';
 import { chat } from './helpers.ts';
 
 const NOW = Date.parse('2026-10-23T12:00:00.000Z');
@@ -114,5 +116,65 @@ describe('Compare (#44)', () => {
     } finally {
       Storage.prototype.getItem = get;
     }
+  });
+});
+
+describe('Compare: collapse, pane menu, drag (#44 slice 3)', () => {
+  const realFromPoint = document.elementFromPoint;
+  afterEach(() => { document.elementFromPoint = realFromPoint; setNewChatHandler(null); });
+
+  it('collapse shrinks a pane to a strip with its counts, and stays collapsed after a reload', () => {
+    const store = seeded();
+    mount(store);
+    compare('alpha', 'beta');
+    const btn = within(pane('alpha')).getByRole('button', { name: 'Collapse alpha' });
+    expect(btn.getAttribute('aria-expanded')).toBe('true');
+    fireEvent.click(btn);
+    expect(within(pane('alpha')).queryByRole('article')).toBeNull();
+    expect(within(pane('alpha')).getByLabelText('1 running')).toBeTruthy();
+    expect(within(pane('alpha')).getByLabelText('1 needs you')).toBeTruthy();
+    expect(within(pane('alpha')).getByRole('button', { name: 'Expand alpha' }).getAttribute('aria-expanded')).toBe('false');
+    expect((screen.getByRole('region', { name: 'Compare' }) as HTMLElement).style.gridTemplateColumns).toContain('var(--pane-strip-width)');
+    cleanup();
+    reloadCompare();
+    mount(store);
+    expect(within(pane('alpha')).queryByRole('article')).toBeNull();
+    fireEvent.click(within(pane('alpha')).getByRole('button', { name: 'Expand alpha' }));
+    expect(within(pane('alpha')).getByRole('article', { name: 'Alpha running' })).toBeTruthy();
+  });
+
+  it('the pane menu swaps a project (open ones left out) and removes one; New chat starts in the pane’s project', () => {
+    const opened = vi.fn();
+    mount(seeded());
+    compare('alpha', 'beta');
+    setNewChatHandler(opened); // after mount: the shell's New chat dialog registers its own
+    fireEvent.click(within(pane('alpha')).getByRole('button', { name: 'New chat in alpha' }));
+    expect(opened).toHaveBeenCalledWith({ cwd: '/work/alpha' });
+    fireEvent.click(within(pane('alpha')).getByRole('button', { name: 'alpha actions' }));
+    const menu = () => screen.getByRole('menu', { name: 'alpha actions' });
+    fireEvent.click(within(menu()).getByRole('menuitem', { name: /Swap project/ }));
+    expect(within(menu()).queryByRole('menuitem', { name: 'beta' })).toBeNull();
+    fireEvent.click(within(menu()).getByRole('menuitem', { name: 'gamma' }));
+    expect(screen.queryByRole('region', { name: 'alpha' })).toBeNull();
+    expect(within(pane('gamma')).getByRole('article', { name: 'Gamma done' })).toBeTruthy();
+    fireEvent.click(within(pane('beta')).getByRole('button', { name: 'beta actions' }));
+    fireEvent.click(within(screen.getByRole('menu', { name: 'beta actions' })).getByRole('menuitem', { name: 'Remove from compare' }));
+    expect(screen.queryByRole('region', { name: 'beta' })).toBeNull();
+    fireEvent.click(within(pane('gamma')).getByRole('button', { name: 'gamma actions' }));
+    fireEvent.click(within(screen.getByRole('menu', { name: 'gamma actions' })).getByRole('menuitem', { name: 'Remove from compare' }));
+    expect(screen.getByRole('region', { name: 'Board' })).toBeTruthy();
+  });
+
+  it('a card dropped on another pane snaps back with the hint', async () => {
+    mount(seeded());
+    compare('alpha', 'beta');
+    const el = within(pane('beta')).getByRole('article', { name: 'Beta review' });
+    document.elementFromPoint = () => within(pane('alpha')).getByRole('region', { name: 'Done' });
+    fireEvent.pointerDown(el, { button: 0, pointerId: 1, clientX: 10, clientY: 10 });
+    fireEvent.pointerMove(el, { pointerId: 1, clientX: 200, clientY: 40 });
+    fireEvent.pointerUp(el, { pointerId: 1, clientX: 200, clientY: 40 });
+    expect(await screen.findByText(HINT_OTHER_PROJECT)).toBeTruthy();
+    expect(el.style.transform).toBe('');
+    expect(within(within(pane('beta')).getByRole('region', { name: 'Review' })).getByRole('article', { name: 'Beta review' })).toBeTruthy();
   });
 });

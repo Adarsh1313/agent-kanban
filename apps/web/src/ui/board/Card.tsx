@@ -14,6 +14,8 @@ import { clockTime, duration, limitResetsAt, relativeTime } from './format.ts';
 export const RESUME_TEXT = 'Continue where you left off.';
 export const HINT_AGENT_COLUMNS = 'Agents move cards between these columns. Drag to Done when you’re finished.';
 export const HINT_DONE_BACK = 'Done chats can only go back to Review';
+/** A card dropped on another Compare pane snaps back: chats never change project by drag (#44). */
+export const HINT_OTHER_PROJECT = 'Chats stay in their project';
 const DRAG_THRESHOLD = 5;
 /** A little longer than the design's 600ms `arrive` keyframe on `.card.new`. */
 const ARRIVE_MS = 700;
@@ -78,13 +80,16 @@ function ActionButton({ label, icon, onClick, disabled, text, menu }: ActionProp
   return text ? btn : <Tooltip label={label}>{btn}</Tooltip>;
 }
 
-/** The column under the pointer (the dragged card itself is skipped). */
-function columnOf(x: number, y: number, self: HTMLElement): Column | null {
+/** The column under the pointer (the dragged card itself is skipped), and whether it belongs to another board (a Compare pane). */
+function columnOf(x: number, y: number, self: HTMLElement, board: Element | null): { col: Column; foreign: boolean } | null {
   const prev = self.style.pointerEvents;
   self.style.pointerEvents = 'none';
   const under = typeof document.elementFromPoint === 'function' ? document.elementFromPoint(x, y) : null;
   self.style.pointerEvents = prev;
-  return (under?.closest<HTMLElement>('.column')?.dataset.col as Column | undefined) ?? null;
+  const colEl = under?.closest<HTMLElement>('.column');
+  const col = colEl?.dataset.col as Column | undefined;
+  if (!colEl || !col) return null;
+  return { col, foreign: colEl.closest('.board') !== board };
 }
 
 function setDropMarks(board: Element | null, from: Column | null, over: Column | null) {
@@ -137,6 +142,7 @@ export function Card({ id, fresh, onArrived, compact = false }: { id: string; fr
     const board = el.closest('.board');
     let dragging = false;
     let over: Column | null = null;
+    let foreign = false;
     const reduced = reducedMotion();
     dragged.current = false;
     // Capture keeps the gesture on this card; the listeners sit on window so a release anywhere ends it.
@@ -153,7 +159,9 @@ export function Card({ id, fresh, onArrived, compact = false }: { id: string; fr
       }
       // Reduced motion: the card still follows the pointer (direct manipulation) but does not tilt or grow.
       el.style.transform = `translate(${dx}px, ${dy}px)${reduced ? '' : ` ${DRAG_TILT} scale(${cssValue('--lift-scale', '1.02')})`}`;
-      over = columnOf(ev.clientX, ev.clientY, el);
+      const hit = columnOf(ev.clientX, ev.clientY, el, board);
+      foreign = hit?.foreign ?? false;
+      over = hit && !foreign ? hit.col : null;
       setDropMarks(board, from, over);
     };
 
@@ -199,7 +207,8 @@ export function Card({ id, fresh, onArrived, compact = false }: { id: string; fr
       }
       el.classList.remove('dragging');
       snapBack();
-      if (target && target !== from) toast(from === 'done' ? HINT_DONE_BACK : HINT_AGENT_COLUMNS);
+      if (foreign) toast(HINT_OTHER_PROJECT);
+      else if (target && target !== from) toast(from === 'done' ? HINT_DONE_BACK : HINT_AGENT_COLUMNS);
     };
 
     window.addEventListener('pointermove', move);

@@ -434,3 +434,10 @@ body:has(.bulk-bar) > .toasts { bottom: calc(var(--space-5) + var(--space-8)); }
 .board.compact .column { min-width: var(--pane-column-min); }
 .board.compact .card-title { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .compare-empty { grid-column: 1 / -1; text-align: center; }
+.pane-head .btn.icon-only:first-of-type { margin-left: var(--space-1); }
+.pane.swapped { animation: strip-in var(--duration-pop) var(--ease-out); }
+@keyframes strip-in { from { opacity: 0; } }
+.pane-strip { display: flex; flex-direction: column; align-items: center; gap: var(--space-3); padding: var(--space-2) 0 var(--space-3); }
+.strip-count { display: inline-flex; flex-direction: column; align-items: center; gap: var(--space-1); font-size: var(--text-caption); color: var(--color-text-muted); }
+.strip-count.needs { color: var(--color-needs-text); }
+.strip-name { writing-mode: vertical-rl; transform: rotate(180deg); font-size: var(--text-caption); font-weight: var(--weight-medium); color: var(--color-text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-height: calc(var(--space-8) * 6); }
