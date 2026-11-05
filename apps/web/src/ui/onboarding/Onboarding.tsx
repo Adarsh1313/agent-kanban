@@ -403,8 +403,8 @@ export function Onboarding() {
     case 0:
       pane = (
         <>
-          {h1(<>All your coding agents<br />on one board</>)}
-          <p className="lead">Start chats with Claude Code, Codex and Antigravity, watch them work, and always know how much of each plan you have left.</p>
+          {h1(<>All your agent chats<br />on one board</>)}
+          <p className="lead">See what’s running, what needs you and what’s ready to review across Claude Code, Codex and Antigravity, and always know how much of each plan you have left.</p>
           <MiniBoard />
           <div className="onb-foot">
             <span className="grow">Takes about a minute. Nothing in your agent apps changes.</span>

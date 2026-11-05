@@ -79,7 +79,7 @@ describe('onboarding gating', () => {
     const store = seeded([conn('claude')]);
     const { container } = mount(store);
     expect(dialog()).not.toBeNull();
-    expect(screen.getByRole('heading', { name: /All your coding agents/ })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: /All your agent chats/ })).toBeTruthy();
     expect(document.activeElement).toBe(primary('Get started'));
     expect(container.inert).toBe(true);
     expect(hasOpenLayer()).toBe(true);
@@ -183,7 +183,7 @@ describe('connect step', () => {
     expect(screen.getByRole('heading', { name: 'Connect the agents you use' })).toBeTruthy();
     expect(screen.getByText('Step 1 of 6')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Back' }));
-    expect(screen.getByRole('heading', { name: /All your coding agents/ })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: /All your agent chats/ })).toBeTruthy();
   });
 });
 

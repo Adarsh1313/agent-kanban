@@ -1,9 +1,12 @@
 # Agent Kanban
 
-A local app that puts every AI coding chat (Claude Code, Codex, Antigravity) on one Kanban board:
-Running → Needs you → Review → Done. It drives each provider's own official app on your computer,
-shows how much of each plan's 5-hour and weekly limits is left, and keeps checking that every
-connection is healthy and up to date.
+One board for all your AI agent chats. See what's running, what needs you and what's ready to review,
+across Claude Code, Codex and Antigravity, without switching between apps or terminals.
+
+You already pay for Claude, ChatGPT and Gemini plans. Agent Kanban puts every chat from all of them on one
+simple Kanban board (Running → Needs you → Review → Done) so you can run many at once and get the most out of
+every plan. It drives each provider's own official app on your computer, shows how much of each plan's 5-hour
+and weekly limits is left, and keeps checking that every connection is healthy and up to date.
 
 ## Status
 
