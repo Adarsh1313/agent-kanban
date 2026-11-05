@@ -5,6 +5,7 @@ import { Icon, providerName, type IconName } from '../primitives/index.ts';
 import { Bell } from '../notify/Bell.tsx';
 import { FilterButton } from '../filters/FilterMenu.tsx';
 import { UsageChips } from '../usage/UsageChips.tsx';
+import { exitCompare, openComparePicker, useCompare } from '../compare/model.ts';
 
 const VIEW_META: Record<'board' | 'chats' | 'projects' | 'routines' | 'connections', { icon: IconName; title: string }> = {
   board: { icon: 'board', title: 'Board' },
@@ -24,6 +25,7 @@ export function TopBar() {
     // The Projects page has its own breadcrumb (design/projects.js clears the top bar's).
     return '';
   });
+  const comparing = useCompare().on;
   const meta = VIEW_META[view];
 
   return (
@@ -31,10 +33,17 @@ export function TopBar() {
       <h1 className="title">
         <span><Icon name={meta.icon} /></span>
         <span>{meta.title}</span>
+        {view === 'board' && comparing && <span className="crumb"> › Compare</span>}
         {crumb && <span className="crumb"> › {crumb}</span>}
       </h1>
       {view === 'board' && (
-        <FilterButton />
+        <>
+          <FilterButton />
+          {comparing
+            ? <button className="btn" type="button" onClick={exitCompare}><Icon name="x" size="sm" />Exit compare</button>
+            : <button className="btn" type="button" aria-haspopup="dialog" onClick={openComparePicker}><Icon name="projects" size="sm" />Compare</button>}
+          {comparing && <button className="btn ghost" type="button" aria-haspopup="dialog" onClick={openComparePicker}>Change projects</button>}
+        </>
       )}
       <span className="spacer" />
       <div className="usage-area"><UsageChips /></div>

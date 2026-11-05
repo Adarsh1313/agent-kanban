@@ -4,6 +4,8 @@ import { useStore, useStoreInstance, type Store } from '../../state/store.ts';
 import { closePanelIn } from '../../state/reducer.ts';
 import { openFilter, openNewChat } from '../actions.ts';
 import { Board } from '../board/Board.tsx';
+import { Compare, ComparePicker } from '../compare/Compare.tsx';
+import { useCompare } from '../compare/model.ts';
 import { ConnectionsPage } from '../connections/ConnectionsPage.tsx';
 import { ChatPanel } from '../chat/ChatPanel.tsx';
 import { FilterBar } from '../filters/FilterBar.tsx';
@@ -85,6 +87,7 @@ export function Shell() {
   const store = useStoreInstance();
   const view = useStore((s) => s.ui.view);
   const socket = useStore((s) => s.socket);
+  const comparing = useCompare().on;
   const prevView = useRef(view);
   const entering = prevView.current !== view;
   useEffect(() => { prevView.current = view; });
@@ -107,7 +110,7 @@ export function Shell() {
           <TopBar />
           {banner && <p className="conn-banner" role="status" data-state={socket}>{banner}</p>}
           <main className={`view main-view${entering ? ' entering' : ''}`} key={view} id="main" tabIndex={-1} data-view={view}>
-            {view === 'board' && <><FilterBar /><Board /></>}
+            {view === 'board' && <><FilterBar />{comparing ? <Compare /> : <Board />}</>}
             {view === 'chats' && <AllChatsPage />}
             {view === 'projects' && <ProjectsPage />}
             {view === 'routines' && <RoutinesPage />}
@@ -119,6 +122,7 @@ export function Shell() {
       <NewChatDialog />
       <RoutineEditor />
       <PickProjectsDialog />
+      <ComparePicker />
       <SearchPalette />
       <Toasts />
     </>

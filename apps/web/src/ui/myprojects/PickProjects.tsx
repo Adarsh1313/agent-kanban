@@ -16,9 +16,18 @@ const chatCount = (p: Project) => p.providers.reduce((n, x) => n + x.chats, 0) +
  * The My projects picker: a grid of project tiles to tick, newest first, with older projects (no activity in 30 days)
  * folded behind one row and a search that looks through all of them. Used by onboarding and the sidebar's dialog.
  */
-export function ProjectPicker({ picked, onChange }: { picked: ReadonlySet<string>; onChange: (next: Set<string>) => void }) {
+export function ProjectPicker({ picked, onChange, max, first }: {
+  picked: ReadonlySet<string>;
+  onChange: (next: Set<string>) => void;
+  /** At most this many ticks (Compare: 3); the other tiles are disabled once reached. */
+  max?: number;
+  /** Folder keys listed before the rest (Compare: My projects first). */
+  first?: ReadonlySet<string>;
+}) {
   const now = useStore((s) => s.now);
-  const projects = pickable(useStore(visibleProjects));
+  const all = pickable(useStore(visibleProjects));
+  const projects = first ? [...all.filter((p) => first.has(folderKey(p.id))), ...all.filter((p) => !first.has(folderKey(p.id)))] : all;
+  const full = max !== undefined && picked.size >= max;
   const [q, setQ] = useState('');
   // Older starts open when one of them is already picked, so nothing ticked is out of sight.
   const [olderOpen, setOlderOpen] = useState(() => projects.some((p) => isOlderProject(p, now) && picked.has(folderKey(p.id))));
@@ -35,11 +44,12 @@ export function ProjectPicker({ picked, onChange }: { picked: ReadonlySet<string
   };
   const tile = (p: Project, dim = false) => {
     const on = picked.has(folderKey(p.id));
+    const blocked = full && !on;
     const n = chatCount(p);
     const when = relativeTime(p.lastActivityAt, now);
     return (
       <button key={p.id} className={`pick-tile${dim ? ' dim' : ''}${p.folderMissing ? ' missing' : ''}`} type="button" role="checkbox" aria-checked={on}
-        aria-label={`${p.name}, ${n} chat${n === 1 ? '' : 's'}, active ${when}`} title={p.path} onClick={() => toggle(p)}>
+        aria-label={`${p.name}, ${n} chat${n === 1 ? '' : 's'}, active ${when}`} title={p.path} disabled={blocked} onClick={() => toggle(p)}>
         <span className="cbox" aria-hidden="true"><Icon name="check" size="sm" /></span>
         <span className="folder-glyph proj-glyph" aria-hidden="true">{(p.name || '?')[0]!.toUpperCase()}</span>
         <span className="pt-name">{p.name}</span>

@@ -77,6 +77,9 @@
   --column-when: 72px;         /* a list's "when" column (5m, Yesterday) */
   --glyph-sm: 14px;            /* small project glyph in a list row */
   --control-height-sm: 24px;   /* a button sitting on a row (Unhide) */
+  --pane-min-width: 600px;     /* Compare: a project pane never squashes below this; the panes scroll instead */
+  --pane-column-min: 136px;    /* Compare: a column inside a pane */
+  --pane-strip-width: 56px;    /* Compare: a collapsed pane's strip */
 
   /* Radius by role: small things stay small */
   --radius-badge: 4px;     /* state badges, kbd hints */
