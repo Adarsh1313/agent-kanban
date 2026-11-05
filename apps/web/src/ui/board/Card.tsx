@@ -96,7 +96,7 @@ function setDropMarks(board: Element | null, from: Column | null, over: Column |
 }
 
 /** A chat on the board. Click (or Enter) opens it; drag moves it to Done (or from Done back to Review). */
-export function Card({ id, fresh, onArrived }: { id: string; fresh: boolean; onArrived?: (id: string) => void }) {
+export function Card({ id, fresh, onArrived, compact = false }: { id: string; fresh: boolean; onArrived?: (id: string) => void; compact?: boolean }) {
   const store = useStoreInstance();
   const chat = useStore((s) => s.chats[id]);
   const calls = useStore((s) => s.toolCalls[id]);
@@ -236,18 +236,18 @@ export function Card({ id, fresh, onArrived }: { id: string; fresh: boolean; onA
       <div className="card-meta">
         <ProviderLogo id={chat.provider} size="sm" />
         <span>{chat.model ?? providerName(chat.provider)}</span><span className="sep">·</span>
-        <span className="card-proj"><Icon name="folder" size="sm" />{project}</span><span className="sep">·</span>
+        {!compact && <><span className="card-proj"><Icon name="folder" size="sm" />{project}</span><span className="sep">·</span></>}
         <span className="tnum">{relativeTime(chat.updatedAt, now)}</span>
         {chat.outsideLive && <><span className="sep">·</span><span className="card-outside">Outside the app</span></>}
       </div>
       {column === 'needs_you' && reason && <div className="card-meta"><ReasonBadge chat={chat} />{chat.queue?.length ? <span className="tnum">{chat.queue.length} queued</span> : null}</div>}
-      {finished && (
+      {finished && !compact && (
         <div className="card-meta">
           {steps !== undefined && <><Icon name="check" size="sm" /><span>{steps === 0 ? 'No steps' : `${steps} step${steps === 1 ? '' : 's'}`}</span><span className="sep">·</span></>}
           <Icon name="clock" size="sm" /><span className="tnum">{duration(took)}</span>
         </div>
       )}
-      {column === 'running' && <ActivityLine calls={calls} starting={startingText(chat)} />}
+      {column === 'running' && !compact && <ActivityLine calls={calls} starting={startingText(chat)} />}
       <div className="card-actions">
         {column === 'running' && !chat.outsideLive && <ActionButton label={busy === 'stop' ? 'Stopping…' : 'Stop agent'} icon="stop" disabled={busy === 'stop'} onClick={() => void run('stop')} />}
         {resumable && <ActionButton label="Resume" icon="resume" text="Resume" disabled={busy === 'resume'} onClick={() => void run('resume')} />}

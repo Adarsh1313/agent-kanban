@@ -33,7 +33,7 @@ function useTick(count: number) {
  * One board column. Its cards are not React children here: the board keeps each card in a stable
  * element and places it into `cardsRef`, so a card that changes column is the same DOM node (FLIP).
  */
-export function Column({ id, count, hidden, cardsRef }: { id: ColumnId; count: number; hidden: boolean; cardsRef: (el: HTMLDivElement | null) => void }) {
+export function Column({ id, count, hidden, cardsRef, newChatCwd }: { id: ColumnId; count: number; hidden: boolean; cardsRef: (el: HTMLDivElement | null) => void; newChatCwd?: string }) {
   const tick = useTick(count);
   const name = COLUMN_NAMES[id];
   return (
@@ -42,7 +42,7 @@ export function Column({ id, count, hidden, cardsRef }: { id: ColumnId; count: n
         <StatusIcon state={id} /><span>{name}</span><span className="count" ref={tick}>{count}</span>
         {id === 'running' && (
           <Tooltip label="New chat">
-            <button className="btn icon-only ghost add" type="button" aria-label="New chat" onClick={() => openNewChat()}><Icon name="plus" /></button>
+            <button className="btn icon-only ghost add" type="button" aria-label="New chat" onClick={() => openNewChat(newChatCwd !== undefined ? { cwd: newChatCwd } : undefined)}><Icon name="plus" /></button>
           </Tooltip>
         )}
       </div>

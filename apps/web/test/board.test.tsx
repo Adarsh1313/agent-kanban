@@ -6,7 +6,7 @@ import { ApiError, api } from '../src/api/client.ts';
 import { applyEvent, applySnapshot, initialState, type AppState } from '../src/state/reducer.ts';
 import { createStore, StoreProvider, type Store } from '../src/state/store.ts';
 import { setHistoryHandler, setNewChatHandler, setRowMenuHandler } from '../src/ui/actions.ts';
-import { Board } from '../src/ui/board/Board.tsx';
+import { Board, BoardColumns, type Layout } from '../src/ui/board/Board.tsx';
 import { ANTIGRAVITY_STARTING, HINT_AGENT_COLUMNS, HINT_DONE_BACK, RESUME_TEXT } from '../src/ui/board/Card.tsx';
 import { clockTime } from '../src/ui/board/format.ts';
 import { flip } from '../src/ui/primitives/flip.ts';
@@ -519,5 +519,28 @@ describe('dateTime (#23)', () => {
     expect(dateTime(new Date('2026-10-27T15:01:00').toISOString(), now)).toBe('Oct 27, 3:01 pm');
     expect(dateTime(new Date('2025-12-31T23:59:00').toISOString(), now)).toBe('Dec 31, 2025, 11:59 pm');
     expect(dateTime('not a date', now)).toBe('');
+  });
+});
+
+describe('BoardColumns (#44 slice 1)', () => {
+  it('lays out only the chats its selector picks; compact cards drop the project, activity and steps; New chat starts in its folder', () => {
+    const store = seeded([
+      chat({ id: 'a', title: 'Alpha run', column: 'running', cwd: '/work/alpha' }),
+      chat({ id: 'b', title: 'Beta run', column: 'running', cwd: '/work/beta', sessionRef: 's2' }),
+      chat({ id: 'c', title: 'Alpha done', column: 'review', cwd: '/work/alpha', sessionRef: 's3' }),
+    ], { toolCalls: { a: [tool({ chatId: 'a', status: 'running', summary: 'Busy' })] } });
+    const alpha = (): Layout => ({ running: ['a'], needs_you: [], review: ['c'], done: [] });
+    const opened = vi.fn();
+    setNewChatHandler(opened);
+    render(<StoreProvider store={store}><BoardColumns select={alpha} label="Alpha" compact newChatCwd="/work/alpha" /></StoreProvider>);
+    const board = screen.getByRole('region', { name: 'Alpha' });
+    expect(board.classList.contains('compact')).toBe(true);
+    expect(within(column('Running')).getByRole('article', { name: 'Alpha run' })).toBeTruthy();
+    expect(screen.queryByRole('article', { name: 'Beta run' })).toBeNull();
+    expect(card('Alpha run').querySelector('.card-proj')).toBeNull();
+    expect(card('Alpha run').querySelector('.activity-line')).toBeNull();
+    expect(within(card('Alpha done')).queryByText(/step/)).toBeNull();
+    fireEvent.click(within(column('Running')).getByRole('button', { name: 'New chat' }));
+    expect(opened).toHaveBeenCalledWith({ cwd: '/work/alpha' });
   });
 });

@@ -1,5 +1,5 @@
 import type { Column as ColumnId } from '@agent-kanban/shared';
-import { useCallback, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal, flushSync } from 'react-dom';
 import type { AppState } from '../../state/reducer.ts';
 import { boardColumns, isArchived, isSnoozed, memoState } from '../../state/selectors.ts';
@@ -11,6 +11,8 @@ import { Column } from './Column.tsx';
 import { EmptyBoard } from './EmptyBoard.tsx';
 
 export type Layout = Record<ColumnId, string[]>;
+/** Card ids per column for one set of chats. Must be stable (memoised): `BoardColumns` re-subscribes when it changes. */
+export type LayoutSelector = (s: AppState) => Layout;
 
 export const COLUMNS: ColumnId[] = ['running', 'needs_you', 'review', 'done'];
 /** A card that appears this soon after its chat was created gets the arrival tint. */
@@ -22,7 +24,7 @@ const selectLayout = memoState((s) => [s.chats, s.projects, s.settings, s.ui.fil
   return { running: cols.running.map((c) => c.id), needs_you: cols.needs_you.map((c) => c.id), review: cols.review.map((c) => c.id), done: cols.done.map((c) => c.id) };
 });
 
-const sameLayout = (a: Layout, b: Layout) => COLUMNS.every((c) => a[c].length === b[c].length && a[c].every((id, i) => b[c][i] === id));
+export const sameLayout = (a: Layout, b: Layout) => COLUMNS.every((c) => a[c].length === b[c].length && a[c].every((id, i) => b[c][i] === id));
 
 function positions(l: Layout): Map<string, { col: ColumnId; i: number }> {
   const m = new Map<string, { col: ColumnId; i: number }>();
@@ -36,16 +38,30 @@ const boardStatus = (s: AppState) => ({
   filtering: Object.values(s.ui.filters).some((v) => v !== null),
 });
 
+interface ColumnsProps {
+  select: LayoutSelector;
+  /** The region's accessible name ("Board"; a Compare pane is labelled by its own section). */
+  label?: string;
+  /** Compare panes: smaller cards (title, provider, status). */
+  compact?: boolean;
+  className?: string;
+  /** Where the Running column's New chat starts (a Compare pane's project); the dialog's default otherwise. */
+  newChatCwd?: string;
+  /** Hide the columns when nothing is shown (the board's "no results" state). */
+  hideWhenEmpty?: boolean;
+  /** Extra content after the columns, given how many cards are shown. */
+  children?: (shown: number) => ReactNode;
+}
+
 /**
- * The Kanban board. Every card lives in its own stable element ("slot") that the board places into
- * the right column, so when `chat.updated` moves a chat the same DOM node travels and `flip` can
- * animate it from where it was.
+ * Board columns for a set of chats. Every card lives in its own stable element ("slot") that this places into the
+ * right column, so when `chat.updated` moves a chat the same DOM node travels and `flip` can animate it from where
+ * it was. The board renders one; Compare renders one per project pane.
  */
-export function Board() {
+export function BoardColumns({ select, label, compact = false, className = '', newChatCwd, hideWhenEmpty = false, children }: ColumnsProps) {
   const store = useStoreInstance();
-  const [layout, setLayout] = useState<Layout>(() => selectLayout(store.getState()));
+  const [layout, setLayout] = useState<Layout>(() => select(store.getState()));
   const [fresh, setFresh] = useState<ReadonlySet<string>>(() => new Set());
-  const { loaded, onBoard, filtering } = useStore(boardStatus);
   const boardRef = useRef<HTMLDivElement>(null);
   const bodies = useRef<Partial<Record<ColumnId, HTMLDivElement | null>>>({});
   const slots = useRef(new Map<string, HTMLDivElement>());
@@ -64,7 +80,7 @@ export function Board() {
   useLayoutEffect(() => {
     let cur = layout;
     const update = () => {
-      const next = selectLayout(store.getState());
+      const next = select(store.getState());
       if (sameLayout(cur, next)) return;
       const prev = cur;
       cur = next;
@@ -105,10 +121,10 @@ export function Board() {
     };
     update();
     return store.subscribe(update);
-    // `layout` seeds the subscription once; afterwards `cur` tracks it.
-  }, [store]);
+    // `layout` seeds the subscription; afterwards `cur` tracks it. A new selector (a swapped pane) re-subscribes.
+  }, [store, select]);
 
-  // Put each card's slot into its column, in order; drop slots of cards that left the board.
+  // Put each card's slot into its column, in order; drop slots of cards that left.
   useLayoutEffect(() => {
     // Moving a node blurs whatever is focused inside it: remember it and give focus back after the move.
     const active = document.activeElement instanceof HTMLElement && boardRef.current?.contains(document.activeElement) ? document.activeElement : null;
@@ -144,27 +160,43 @@ export function Board() {
   }), []);
 
   const shown = COLUMNS.reduce((n, c) => n + layout[c].length, 0);
+  const hidden = hideWhenEmpty && shown === 0;
+
+  return (
+    <div className={`board${compact ? ' compact' : ''}${className ? ` ${className}` : ''}`} role={label ? 'region' : undefined} aria-label={label} ref={boardRef}>
+      {COLUMNS.map((col) => (
+        <Column key={col} id={col} count={layout[col].length} hidden={hidden} newChatCwd={newChatCwd} cardsRef={(el) => { bodies.current[col] = el; }} />
+      ))}
+      {COLUMNS.flatMap((col) => layout[col].map((id) => createPortal(<Card id={id} compact={compact} fresh={fresh.has(id)} onArrived={arrived} />, slot(id), id)))}
+      {children?.(shown)}
+    </div>
+  );
+}
+
+/** The Kanban board: every visible chat, with the empty and no-results states. */
+export function Board() {
+  const store = useStoreInstance();
+  const { loaded, onBoard, filtering } = useStore(boardStatus);
   const empty = loaded && !onBoard && !filtering;
-  const noResults = filtering && shown === 0;
   const clearFilters = () => store.setState(clearAllFilters);
 
   return (
-    <div className={`board${empty ? ' is-empty' : ''}`} id="board" role="region" aria-label="Board" ref={boardRef}>
-      {COLUMNS.map((col) => (
-        <Column key={col} id={col} count={layout[col].length} hidden={noResults} cardsRef={(el) => { bodies.current[col] = el; }} />
-      ))}
-      {COLUMNS.flatMap((col) => layout[col].map((id) => createPortal(<Card id={id} fresh={fresh.has(id)} onArrived={arrived} />, slot(id), id)))}
-      {noResults && (
-        <div className="no-results">
-          <div>
-            <Icon name="filter" />
-            <h3>No chats match these filters</h3>
-            <p>Try fewer filters, or clear them all.</p>
-            <button className="btn" type="button" onClick={clearFilters}>Clear filters</button>
-          </div>
-        </div>
+    <BoardColumns select={selectLayout} label="Board" className={empty ? 'is-empty' : ''} hideWhenEmpty={filtering}>
+      {(shown) => (
+        <>
+          {filtering && shown === 0 && (
+            <div className="no-results">
+              <div>
+                <Icon name="filter" />
+                <h3>No chats match these filters</h3>
+                <p>Try fewer filters, or clear them all.</p>
+                <button className="btn" type="button" onClick={clearFilters}>Clear filters</button>
+              </div>
+            </div>
+          )}
+          {empty && <EmptyBoard />}
+        </>
       )}
-      {empty && <EmptyBoard />}
-    </div>
+    </BoardColumns>
   );
 }
