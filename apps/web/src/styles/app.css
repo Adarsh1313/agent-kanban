@@ -429,11 +429,17 @@ body:has(.bulk-bar) > .toasts { bottom: calc(var(--space-5) + var(--space-8)); }
 .pane-head { flex: none; display: flex; align-items: center; gap: var(--space-2); height: var(--topbar-height); padding: 0 var(--space-2); }
 .pane.open .pane-head { border-bottom: 1px solid var(--color-border); }
 .pane-head .folder-glyph { width: var(--space-6); height: var(--space-6); font-size: var(--text-caption); flex: none; }
-.pane-name { margin: 0; min-width: 0; font-size: var(--text-body); font-weight: var(--weight-semibold); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pane-name { flex: 1; margin: 0; min-width: 0; font-size: var(--text-body); font-weight: var(--weight-semibold); }
 .pane.minimized .pane-name { font-weight: var(--weight-medium); }
-.pane-counts { display: inline-flex; gap: var(--space-1); margin-left: auto; margin-right: var(--space-1); color: var(--color-text-muted); font-size: var(--text-caption); white-space: nowrap; }
+.pane-toggle { display: flex; align-items: center; gap: var(--space-2); max-width: 100%; height: calc(var(--topbar-height) - var(--space-3)); padding: 0 var(--space-2) 0 var(--space-1);
+  border-radius: var(--radius-control); color: inherit; font: inherit; text-align: left; transition: background-color var(--duration-hover) var(--ease-colour); }
+.pane-toggle > .icon { color: var(--color-text-muted); flex: none; }
+.pane-title { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (hover: hover) and (pointer: fine) { .pane-toggle:hover { background: var(--color-nav-hover); } }
+.pane-counts { display: inline-flex; gap: var(--space-1); margin-right: var(--space-1); color: var(--color-text-muted); font-size: var(--text-caption); white-space: nowrap; }
 .pane-counts .sep { color: var(--color-text-faint); }
 .pane-counts .needs { color: var(--color-needs-text); }
+.pane-counts .zero { color: var(--color-text-faint); }
 /* The pane's board scrolls inside it, both ways: columns keep --pane-column-min on a narrow window. */
 .board.compact { flex: 1; min-height: 0; padding: var(--space-2); gap: var(--space-2); overflow: auto; animation: pane-open var(--duration-pop) var(--ease-out); }
 @keyframes pane-open { from { opacity: 0; } }

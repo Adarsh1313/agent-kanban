@@ -115,8 +115,8 @@ one running-blue card halfway between two ink columns.
 
 - **Compare panes (#44):** the board's Compare button picks any number of projects (the My projects
   picker, My projects first). The board becomes project panes stacked one below another, full width.
-  Each pane has a header: disclosure chevron (Open / Minimize, `aria-expanded`), project glyph, name,
-  "2 running · 1 needs you" (needs count in the needs text colour), New chat here, and a "…" menu
+  Each pane has a header: chevron, glyph and name form one wide Open / Minimize button (`aria-expanded`,
+  hover tint), then "2 running · 1 needs you" (needs in the needs text colour, zeros faint), New chat here, and a "…" menu
   (Swap project, Remove from compare). Compare starts with the first pane open and the rest minimized
   to just their header. At most 3 are open at once, sharing the height down to `--pane-min-height`.
   Opening a fourth minimizes the one opened longest ago. Each open pane's compact board scrolls

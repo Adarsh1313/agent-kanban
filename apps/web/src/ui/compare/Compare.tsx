@@ -67,16 +67,17 @@ function PaneHeader({ pane, open, inCompare, shown }: { pane: PaneProject; open:
   const { running, needsYou } = usePaneCounts(pane.key);
   return (
     <header className="pane-head">
-      <Tooltip label={open ? 'Minimize' : 'Open'}>
-        <button className="btn icon-only ghost pane-toggle" type="button" aria-label={`${open ? 'Minimize' : 'Open'} ${pane.name}`} aria-expanded={open}
+      {/* The whole title is the disclosure: a wide target, and a minimized pane reads as one row to click. */}
+      <h2 className="pane-name">
+        <button className="pane-toggle" type="button" aria-label={`${open ? 'Minimize' : 'Open'} ${pane.name}`} aria-expanded={open} title={pane.id}
           onClick={() => setOpen(pane.key, !open, shown)}>
           <Icon name={open ? 'chevron-down' : 'chevron-right'} size="sm" />
+          {glyph(pane.name)}
+          <span className="pane-title">{pane.name}</span>
         </button>
-      </Tooltip>
-      {glyph(pane.name)}
-      <h2 className="pane-name" title={pane.id}>{pane.name}</h2>
+      </h2>
       <span className="pane-counts tnum">
-        <span>{running} running</span><span className="sep">·</span><span className={needsYou > 0 ? 'needs' : undefined}>{needsYou} needs you</span>
+        <span className={running === 0 ? 'zero' : undefined}>{running} running</span><span className="sep">·</span><span className={needsYou > 0 ? 'needs' : 'zero'}>{needsYou} needs you</span>
       </span>
       <Tooltip label="New chat here">
         <button className="btn icon-only ghost" type="button" aria-label={`New chat in ${pane.name}`} disabled={pane.missing} onClick={() => openNewChat({ cwd: pane.id })}>
