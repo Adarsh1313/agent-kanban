@@ -1,20 +1,20 @@
 import { folderKey } from '@agent-kanban/shared';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { myProjects as selectMyProjects, visibleProjects } from '../../state/selectors.ts';
 import { useStore } from '../../state/store.ts';
 import { openNewChat } from '../actions.ts';
 import { BoardColumns } from '../board/Board.tsx';
 import { pickable } from '../myprojects/model.ts';
 import { ProjectPicker } from '../myprojects/PickProjects.tsx';
-import { Dialog, Icon, Menu, MenuItem, MenuLabel, MenuSep, StatusIcon, Tooltip } from '../primitives/index.ts';
+import { Dialog, Icon, Menu, MenuItem, MenuLabel, MenuSep, Tooltip } from '../primitives/index.ts';
 import {
-  MAX_PANES, closeComparePicker, comparePanes, getCompare, paneLayout, removePane, setCollapsed, startCompare, swapPane, useCompare, usePicking,
+  MAX_OPEN, closeComparePicker, comparePanes, getCompare, paneLayout, removePane, setOpen, startCompare, swapPane, useCompare, usePicking,
   type PaneProject,
 } from './model.ts';
 
 export const COMPARE_TITLE = 'Compare projects';
 
-/** "2 running · 1 needs you": what a pane's header (and its collapsed strip) counts. */
+/** "2 running · 1 needs you": what a pane's header counts, open or minimized. */
 function usePaneCounts(key: string) {
   const layout = useStore(paneLayout(key));
   return { running: layout.running.length, needsYou: layout.needs_you.length };
@@ -63,10 +63,16 @@ function PaneMenu({ pane, open: openKeys }: { pane: PaneProject; open: string[] 
   );
 }
 
-function PaneHeader({ pane, open }: { pane: PaneProject; open: string[] }) {
+function PaneHeader({ pane, open, inCompare, shown }: { pane: PaneProject; open: boolean; inCompare: string[]; shown: string[] }) {
   const { running, needsYou } = usePaneCounts(pane.key);
   return (
     <header className="pane-head">
+      <Tooltip label={open ? 'Minimize' : 'Open'}>
+        <button className="btn icon-only ghost pane-toggle" type="button" aria-label={`${open ? 'Minimize' : 'Open'} ${pane.name}`} aria-expanded={open}
+          onClick={() => setOpen(pane.key, !open, shown)}>
+          <Icon name={open ? 'chevron-down' : 'chevron-right'} size="sm" />
+        </button>
+      </Tooltip>
       {glyph(pane.name)}
       <h2 className="pane-name" title={pane.id}>{pane.name}</h2>
       <span className="pane-counts tnum">
@@ -77,64 +83,37 @@ function PaneHeader({ pane, open }: { pane: PaneProject; open: string[] }) {
           <Icon name="plus" size="sm" />
         </button>
       </Tooltip>
-      <PaneMenu pane={pane} open={open} />
-      <Tooltip label="Collapse">
-        <button className="btn icon-only ghost" type="button" aria-label={`Collapse ${pane.name}`} aria-expanded="true" onClick={() => setCollapsed(pane.key, true)}>
-          <Icon name="back" size="sm" />
-        </button>
-      </Tooltip>
+      <PaneMenu pane={pane} open={inCompare} />
     </header>
   );
 }
 
-/** A collapsed pane: a narrow strip that still shows its counts. */
-function PaneStrip({ pane }: { pane: PaneProject }) {
-  const { running, needsYou } = usePaneCounts(pane.key);
+function Pane({ pane, open, inCompare, shown }: { pane: PaneProject; open: boolean; inCompare: string[]; shown: string[] }) {
   return (
-    <div className="pane-strip">
-      <Tooltip label="Expand">
-        <button className="btn icon-only ghost" type="button" aria-label={`Expand ${pane.name}`} aria-expanded="false" onClick={() => setCollapsed(pane.key, false)}>
-          <Icon name="chevron-right" size="sm" />
-        </button>
-      </Tooltip>
-      {glyph(pane.name)}
-      <span className="strip-count tnum" aria-label={`${running} running`}><StatusIcon state="running" />{running}</span>
-      <span className={`strip-count tnum${needsYou > 0 ? ' needs' : ''}`} aria-label={`${needsYou} needs you`}><StatusIcon state="needs_you" />{needsYou}</span>
-      <span className="strip-name" aria-hidden="true">{pane.name}</span>
-    </div>
-  );
-}
-
-function Pane({ pane, collapsed, open }: { pane: PaneProject; collapsed: boolean; open: string[] }) {
-  // The strip and the expanded pane fade in when they swap (opacity only, so reduced motion keeps it), not on first paint.
-  const first = useRef(true);
-  const swapped = !first.current;
-  useEffect(() => { first.current = false; }, []);
-  return (
-    <section className={`pane${pane.missing ? ' missing' : ''}${collapsed ? ' collapsed' : ''}${swapped ? ' swapped' : ''}`} aria-label={pane.name} data-key={pane.key} key={String(collapsed)}>
-      {collapsed ? <PaneStrip pane={pane} /> : <>
-        <PaneHeader pane={pane} open={open} />
-        <BoardColumns select={paneLayout(pane.key)} compact newChatCwd={pane.missing ? undefined : pane.id} />
-      </>}
+    <section className={`pane${pane.missing ? ' missing' : ''}${open ? ' open' : ' minimized'}`} aria-label={pane.name} data-key={pane.key}>
+      <PaneHeader pane={pane} open={open} inCompare={inCompare} shown={shown} />
+      {open && <BoardColumns select={paneLayout(pane.key)} compact newChatCwd={pane.missing ? undefined : pane.id} />}
     </section>
   );
 }
 
-/** The board as side-by-side project panes (#44). Filters and provider focus apply to every pane. */
+/**
+ * The board as project panes stacked one below another (#44): at most 3 open, sharing the height; the rest minimized
+ * to their header with its counts. Filters and provider focus apply to every pane.
+ */
 export function Compare() {
-  const { projects, collapsed } = useCompare();
+  const { projects, open } = useCompare();
   const panes = useStore((s) => comparePanes(s, projects));
-  const open = panes.map((p) => p.key);
-  const track = (p: PaneProject) => (collapsed.includes(p.key) ? 'var(--pane-strip-width)' : 'minmax(var(--pane-min-width), 1fr)');
+  const shown = panes.map((p) => p.key);
   return (
-    <div className="compare" role="region" aria-label="Compare" style={{ gridTemplateColumns: panes.map(track).join(' ') }}>
-      {panes.map((p) => <Pane key={p.key} pane={p} collapsed={collapsed.includes(p.key)} open={open} />)}
+    <div className="compare" role="region" aria-label="Compare">
+      {panes.map((p) => <Pane key={p.key} pane={p} open={open.includes(p.key)} inCompare={projects} shown={shown} />)}
       {panes.length === 0 && <p className="empty-note compare-empty">These projects are hidden or gone. Pick others with Compare.</p>}
     </div>
   );
 }
 
-/** Picks up to 3 projects for Compare: My projects first, then the rest. Starts ticked with the last picks. */
+/** Picks the projects for Compare: My projects first, then the rest. Starts ticked with the last picks. */
 export function ComparePicker() {
   const open = usePicking();
   const mine = useStore(selectMyProjects);
@@ -148,11 +127,11 @@ export function ComparePicker() {
   const first = new Set(mine.map((p) => folderKey(p.id)));
   return (
     <Dialog open={open} onClose={closeComparePicker} title={COMPARE_TITLE} footer={<>
-      <span className="grow pick-count">{picked.size} of {MAX_PANES} picked · side by side on the board</span>
+      <span className="grow pick-count">{picked.size} picked · {MAX_OPEN} open at a time</span>
       <button className="btn ghost" type="button" onClick={closeComparePicker}>Cancel</button>
-      <button className="btn primary" type="button" disabled={picked.size === 0} onClick={() => startCompare([...picked])}>Show side by side</button>
+      <button className="btn primary" type="button" disabled={picked.size === 0} onClick={() => startCompare([...picked])}>Show projects</button>
     </>}>
-      {open && seed > 0 && <ProjectPicker key={seed} picked={picked} onChange={setPicked} max={MAX_PANES} first={first} />}
+      {open && seed > 0 && <ProjectPicker key={seed} picked={picked} onChange={setPicked} first={first} />}
     </Dialog>
   );
 }

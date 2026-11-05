@@ -4,31 +4,35 @@ import type { AppState } from '../../state/reducer.ts';
 import { boardColumns, chatFolder, hiddenFolders, memoState } from '../../state/selectors.ts';
 import type { Layout, LayoutSelector } from '../board/Board.tsx';
 
-/** At most this many projects side by side. */
-export const MAX_PANES = 3;
+/** At most this many panes open at once; opening another minimizes the one opened longest ago. */
+export const MAX_OPEN = 3;
 const KEY = 'agent-kanban.compare';
 
 /**
- * Compare (#44): the board as side-by-side project panes. Remembered on this device only (browser storage), so it
- * opens how the user left it. `projects` and `collapsed` hold folder keys; `on` is false after Exit compare (the
- * picks stay, ready for the next Compare).
+ * Compare (#44): the board as project panes stacked one below another. Any number of projects; at most 3 open, the
+ * rest minimized to their header. Remembered on this device only (browser storage), so it opens how the user left
+ * it. `projects` (picker order) and `open` (oldest opened first) hold folder keys; `on` is false after Exit compare
+ * (the picks stay, ready for the next Compare).
  */
 export interface CompareState {
   on: boolean;
   projects: string[];
-  collapsed: string[];
+  open: string[];
 }
 
-const OFF: CompareState = { on: false, projects: [], collapsed: [] };
+const OFF: CompareState = { on: false, projects: [], open: [] };
 const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
+const unique = (keys: string[]) => [...new Set(keys.map(folderKey))];
 
 function load(): CompareState {
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw) return OFF;
-    const v = JSON.parse(raw) as Partial<CompareState>;
-    const projects = [...new Set(strings(v.projects).map(folderKey))].slice(0, MAX_PANES);
-    return { on: v.on === true && projects.length > 0, projects, collapsed: strings(v.collapsed).filter((k) => projects.includes(k)) };
+    const v = JSON.parse(raw) as Partial<CompareState> & { collapsed?: unknown };
+    const projects = unique(strings(v.projects));
+    // Saved before panes stacked (#44 follow-up): everything not collapsed was open.
+    const open = Array.isArray(v.open) ? strings(v.open) : projects.filter((k) => !strings(v.collapsed).includes(k));
+    return { on: v.on === true && projects.length > 0, projects, open: open.filter((k) => projects.includes(k)).slice(-MAX_OPEN) };
   } catch {
     // Blocked storage or a damaged value: start with the normal board.
     return OFF;
@@ -66,35 +70,39 @@ export const usePicking = (): boolean => useSyncExternalStore(subscribe, () => p
 export function openComparePicker(): void { picking = true; emit(); }
 export function closeComparePicker(): void { picking = false; emit(); }
 
-/** Starts Compare with these folders (keys, picker order), keeping the collapsed state of panes that stay. */
+/** Starts Compare with these folders (keys, picker order): the first one open, the rest minimized. */
 export function startCompare(keys: string[]): void {
-  const projects = [...new Set(keys.map(folderKey))].slice(0, MAX_PANES);
-  const cur = getCompare();
+  const projects = unique(keys);
   picking = false;
-  setCompare({ on: projects.length > 0, projects, collapsed: cur.collapsed.filter((k) => projects.includes(k)) });
+  setCompare({ on: projects.length > 0, projects, open: projects.slice(0, 1) });
 }
 
 export function exitCompare(): void { setCompare({ ...getCompare(), on: false }); }
 
-export function setCollapsed(key: string, collapsed: boolean): void {
+/**
+ * Opens or minimizes a pane. Opening a fourth minimizes the one opened longest ago. `shown` is the panes on screen
+ * (hidden projects drop out), so a hidden project never holds one of the 3 open places.
+ */
+export function setOpen(key: string, open: boolean, shown?: string[]): void {
   const cur = getCompare();
-  const rest = cur.collapsed.filter((k) => k !== key);
-  setCompare({ ...cur, collapsed: collapsed ? [...rest, key] : rest });
+  const rest = cur.open.filter((k) => k !== key && (!shown || shown.includes(k)));
+  setCompare({ ...cur, open: open ? [...rest, key].slice(-MAX_OPEN) : rest });
 }
 
-/** Puts another project in this pane (one already open elsewhere is not offered). */
+/** Puts another project in this pane, in its place and open state (one already in Compare is not offered). */
 export function swapPane(key: string, next: string): void {
   const cur = getCompare();
   const k = folderKey(next);
   if (cur.projects.includes(k)) return;
-  setCompare({ ...cur, projects: cur.projects.map((p) => (p === key ? k : p)), collapsed: cur.collapsed.filter((c) => c !== key) });
+  const swap = (p: string) => (p === key ? k : p);
+  setCompare({ ...cur, projects: cur.projects.map(swap), open: cur.open.map(swap) });
 }
 
 /** Closes a pane; closing the last one leaves Compare. */
 export function removePane(key: string): void {
   const cur = getCompare();
   const projects = cur.projects.filter((p) => p !== key);
-  setCompare({ on: cur.on && projects.length > 0, projects, collapsed: cur.collapsed.filter((c) => c !== key) });
+  setCompare({ on: cur.on && projects.length > 0, projects, open: cur.open.filter((c) => c !== key) });
 }
 
 /** The project folder key a chat is grouped under (Claude scratch chats count as their one project). */

@@ -113,16 +113,16 @@ one running-blue card halfway between two ink columns.
   Weekdays, Chosen days), days as round toggles in a labelled group, a time input, a chime switch,
   and a note that routines run only while the app is open. A project's page lists its routines.
 
-- **Compare panes (#44):** the board's Compare button picks up to 3 projects (the My projects picker,
-  My projects first, the rest disabled at 3). The board becomes side-by-side panes on a CSS grid: each
-  a bordered `--color-bg` box with a header (project glyph, name, "2 running · 1 needs you" with the
-  needs count in the needs text colour, New chat here, a "…" menu with Swap project / Remove from
-  compare, and Collapse) over a compact board. Compact cards show title, provider and status only,
-  titles clamp at 2 lines. Panes never go below `--pane-min-width`; narrower windows scroll sideways.
-  A drop on another pane snaps back with "Chats stay in their project". Filters and focus apply to
-  every pane; hidden projects drop out, folder-missing ones dim. Exit compare returns to the board.
-- **Collapsed pane strip:** `--pane-strip-width` wide: expand chevron (`aria-expanded`), glyph, running
-  and needs-you counts with their state icons, and the name set vertically. Remembered on this device.
+- **Compare panes (#44):** the board's Compare button picks any number of projects (the My projects
+  picker, My projects first). The board becomes project panes stacked one below another, full width.
+  Each pane has a header: disclosure chevron (Open / Minimize, `aria-expanded`), project glyph, name,
+  "2 running · 1 needs you" (needs count in the needs text colour), New chat here, and a "…" menu
+  (Swap project, Remove from compare). Compare starts with the first pane open and the rest minimized
+  to just their header. At most 3 are open at once, sharing the height down to `--pane-min-height`.
+  Opening a fourth minimizes the one opened longest ago. Each open pane's compact board scrolls
+  inside it. Compact cards show title, provider and status only; badges wrap in narrow columns. A
+  drop on another pane snaps back with "Chats stay in their project". Filters and focus apply to
+  every pane; hidden projects drop out, folder-missing ones dim. Remembered on this device.
 
 ## Desktop app
 
@@ -171,7 +171,7 @@ table with values in `design-system.html`. Exits are faster than entrances; cons
 | Chat panel | slides in from the right | `--duration-panel`, `--ease-drawer` |
 | Dialog | scale 0.96 → 1, centred | `--duration-dialog` |
 | Page switch | 8px slide + fade, back reverses | `--duration-pop` |
-| Compare pane collapses or expands | strip and pane swap with a fade (opacity only) | `--duration-pop`, `--ease-out` |
+| Compare pane opens | its board fades in (opacity only) | `--duration-pop`, `--ease-out` |
 | Onboarding step | 16px shared-axis slide | `--duration-move` |
 | Any exit | faster than its entrance | `--duration-exit` |
 | Desktop window, tray, native dialogs | nothing custom; the OS animates them | n/a |

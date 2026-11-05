@@ -41,8 +41,11 @@ function compare(...names: string[]) {
   fireEvent.click(screen.getByRole('button', { name: 'Compare' }));
   const dlg = screen.getByRole('dialog', { name: COMPARE_TITLE });
   for (const n of names) fireEvent.click(within(dlg).getByRole('checkbox', { name: new RegExp(`^${n},`) }));
-  fireEvent.click(within(dlg).getByRole('button', { name: 'Show side by side' }));
+  fireEvent.click(within(dlg).getByRole('button', { name: 'Show projects' }));
 }
+const openPane = (name: string) => fireEvent.click(within(pane(name)).getByRole('button', { name: `Open ${name}` }));
+const saved = (projects: string[], open: string[]) =>
+  localStorage.setItem('agent-kanban.compare', JSON.stringify({ on: true, projects: projects.map((p) => folderKey(`/work/${p}`)), open: open.map((p) => folderKey(`/work/${p}`)) }));
 
 beforeEach(() => {
   location.hash = '#/board';
@@ -56,16 +59,14 @@ afterEach(() => {
 });
 
 describe('Compare (#44)', () => {
-  it('the picker lists My projects first and caps the picks at 3', () => {
+  it('the picker lists My projects first and takes any number of projects', () => {
     mount(seeded());
     fireEvent.click(screen.getByRole('button', { name: 'Compare' }));
     const dlg = screen.getByRole('dialog', { name: COMPARE_TITLE });
     expect(within(dlg).getAllByRole('checkbox')[0]!.getAttribute('aria-label')).toMatch(/^gamma,/);
-    for (const n of ['alpha', 'beta', 'gamma']) fireEvent.click(tile(n));
-    expect((tile('delta') as HTMLButtonElement).disabled).toBe(true);
-    expect(within(dlg).getByText(/3 of 3 picked/)).toBeTruthy();
-    fireEvent.click(tile('gamma'));
-    expect((tile('delta') as HTMLButtonElement).disabled).toBe(false);
+    for (const n of ['alpha', 'beta', 'gamma', 'delta']) fireEvent.click(tile(n));
+    expect(tile('delta').getAttribute('aria-checked')).toBe('true');
+    expect(within(dlg).getByText(/4 picked · 3 open at a time/)).toBeTruthy();
   });
 
   it('shows one pane per project with only its chats, in the right columns, and header counts', () => {
@@ -78,6 +79,7 @@ describe('Compare (#44)', () => {
     expect(within(alpha).queryByRole('article', { name: 'Beta running' })).toBeNull();
     expect(within(alpha).getByText('1 running')).toBeTruthy();
     expect(within(alpha).getByText('1 needs you')).toBeTruthy();
+    openPane('beta');
     const beta = pane('beta');
     expect(within(within(beta).getByRole('region', { name: 'Review' })).getByRole('article', { name: 'Beta review' })).toBeTruthy();
     expect(within(beta).getByText('0 needs you')).toBeTruthy();
@@ -100,7 +102,7 @@ describe('Compare (#44)', () => {
   it('a hidden project is dropped; a folder-missing one is dimmed', () => {
     const store = seeded(CHATS, [project('/work/alpha', { hidden: 'auto' }), project('/work/beta', { folderMissing: true }), project('/work/gamma')]);
     mount(store);
-    act(() => { localStorage.setItem('agent-kanban.compare', JSON.stringify({ on: true, projects: ['/work/alpha', '/work/beta', '/work/gamma'].map(folderKey), collapsed: [] })); reloadCompare(); });
+    act(() => { saved(['alpha', 'beta', 'gamma'], ['alpha', 'beta', 'gamma']); reloadCompare(); });
     expect(screen.queryByRole('region', { name: 'alpha' })).toBeNull();
     expect(pane('beta').classList.contains('missing')).toBe(true);
     expect(pane('gamma')).toBeTruthy();
@@ -119,28 +121,47 @@ describe('Compare (#44)', () => {
   });
 });
 
-describe('Compare: collapse, pane menu, drag (#44 slice 3)', () => {
+describe('Compare: open and minimized panes, pane menu, drag (#44)', () => {
   const realFromPoint = document.elementFromPoint;
   afterEach(() => { document.elementFromPoint = realFromPoint; setNewChatHandler(null); });
 
-  it('collapse shrinks a pane to a strip with its counts, and stays collapsed after a reload', () => {
+  it('panes stack with the first open and the rest minimized to their header and counts; at most 3 open, remembered', () => {
     const store = seeded();
     mount(store);
-    compare('alpha', 'beta');
-    const btn = within(pane('alpha')).getByRole('button', { name: 'Collapse alpha' });
-    expect(btn.getAttribute('aria-expanded')).toBe('true');
-    fireEvent.click(btn);
-    expect(within(pane('alpha')).queryByRole('article')).toBeNull();
-    expect(within(pane('alpha')).getByLabelText('1 running')).toBeTruthy();
-    expect(within(pane('alpha')).getByLabelText('1 needs you')).toBeTruthy();
-    expect(within(pane('alpha')).getByRole('button', { name: 'Expand alpha' }).getAttribute('aria-expanded')).toBe('false');
-    expect((screen.getByRole('region', { name: 'Compare' }) as HTMLElement).style.gridTemplateColumns).toContain('var(--pane-strip-width)');
+    compare('alpha', 'beta', 'gamma', 'delta');
+    const isOpen = (n: string) => pane(n).classList.contains('open');
+    expect(['alpha', 'beta', 'gamma', 'delta'].map(isOpen)).toEqual([true, false, false, false]);
+    expect(within(pane('beta')).queryByRole('article')).toBeNull();
+    expect(within(pane('beta')).getByText('1 running')).toBeTruthy();
+    const toggle = within(pane('beta')).getByRole('button', { name: 'Open beta' });
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    openPane('beta');
+    openPane('gamma');
+    expect(['alpha', 'beta', 'gamma', 'delta'].map(isOpen)).toEqual([true, true, true, false]);
+    openPane('delta'); // a fourth minimizes the one opened longest ago
+    expect(['alpha', 'beta', 'gamma', 'delta'].map(isOpen)).toEqual([false, true, true, true]);
+    fireEvent.click(within(pane('gamma')).getByRole('button', { name: 'Minimize gamma' }));
+    expect(isOpen('gamma')).toBe(false);
     cleanup();
     reloadCompare();
     mount(store);
-    expect(within(pane('alpha')).queryByRole('article')).toBeNull();
-    fireEvent.click(within(pane('alpha')).getByRole('button', { name: 'Expand alpha' }));
-    expect(within(pane('alpha')).getByRole('article', { name: 'Alpha running' })).toBeTruthy();
+    expect(['alpha', 'beta', 'gamma', 'delta'].map(isOpen)).toEqual([false, true, false, true]);
+    expect(within(pane('beta')).getByRole('article', { name: 'Beta running' })).toBeTruthy();
+  });
+
+  it('a hidden project never holds one of the 3 open places', () => {
+    const store = seeded(CHATS, [project('/work/alpha', { hidden: 'auto' }), project('/work/beta'), project('/work/gamma'), project('/work/delta')]);
+    saved(['alpha', 'beta', 'gamma', 'delta'], ['alpha', 'beta', 'gamma']);
+    mount(store);
+    openPane('delta');
+    expect(['beta', 'gamma', 'delta'].map((n) => pane(n).classList.contains('open'))).toEqual([true, true, true]);
+  });
+
+  it('reads a layout saved before panes stacked (collapsed list)', () => {
+    localStorage.setItem('agent-kanban.compare', JSON.stringify({ on: true, projects: ['/work/alpha', '/work/beta'].map(folderKey), collapsed: [folderKey('/work/alpha')] }));
+    mount(seeded());
+    expect(pane('alpha').classList.contains('minimized')).toBe(true);
+    expect(pane('beta').classList.contains('open')).toBe(true);
   });
 
   it('the pane menu swaps a project (open ones left out) and removes one; New chat starts in the pane’s project', () => {
@@ -168,6 +189,7 @@ describe('Compare: collapse, pane menu, drag (#44 slice 3)', () => {
   it('a card dropped on another pane snaps back with the hint', async () => {
     mount(seeded());
     compare('alpha', 'beta');
+    openPane('beta');
     const el = within(pane('beta')).getByRole('article', { name: 'Beta review' });
     document.elementFromPoint = () => within(pane('alpha')).getByRole('region', { name: 'Done' });
     fireEvent.pointerDown(el, { button: 0, pointerId: 1, clientX: 10, clientY: 10 });
@@ -179,23 +201,17 @@ describe('Compare: collapse, pane menu, drag (#44 slice 3)', () => {
   });
 });
 
-describe('Compare: filters, narrow windows, budget (#44 slice 4)', () => {
+describe('Compare: filters and budget (#44)', () => {
   it('provider focus and filters apply to every pane, counts included', () => {
     const store = seeded();
     mount(store);
     compare('alpha', 'beta');
+    openPane('beta');
     act(() => store.setState((s) => ({ ...s, ui: { ...s.ui, filters: { ...s.ui.filters, provider: ['codex'] } } })));
     expect(within(pane('alpha')).queryByRole('article')).toBeNull();
     expect(within(pane('alpha')).getByText('0 running')).toBeTruthy();
     expect(within(pane('beta')).getByRole('article', { name: 'Beta running' })).toBeTruthy();
     expect(within(pane('beta')).getByText('1 running')).toBeTruthy();
-  });
-
-  it('panes keep a minimum width and the row scrolls sideways instead of squashing', () => {
-    mount(seeded());
-    compare('alpha', 'beta', 'gamma');
-    const row = screen.getByRole('region', { name: 'Compare' }) as HTMLElement;
-    expect(row.style.gridTemplateColumns.split('minmax(var(--pane-min-width), 1fr)').length - 1).toBe(3);
   });
 
   it('renders 3 panes of 300 chats each within budget', () => {
@@ -213,7 +229,7 @@ describe('Compare: filters, narrow windows, budget (#44 slice 4)', () => {
     expect(screen.getAllByRole('article')).toHaveLength(900);
     const board = performance.now() - t0;
     cleanup();
-    localStorage.setItem('agent-kanban.compare', JSON.stringify({ on: true, projects: ['/work/alpha', '/work/beta', '/work/gamma'].map(folderKey), collapsed: [] }));
+    saved(['alpha', 'beta', 'gamma'], ['alpha', 'beta', 'gamma']);
     reloadCompare();
     t0 = performance.now();
     mount(seeded(many));

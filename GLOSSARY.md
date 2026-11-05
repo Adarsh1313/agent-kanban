@@ -119,7 +119,7 @@ Where deleted chats wait 30 days before they are gone for good; they can be rest
 _Avoid_: Recycle bin, deleted items
 
 **Compare**:
-Showing up to 3 project boards side by side.
+Several project boards stacked one below another, up to 3 open at once; the rest are minimized to their header.
 _Avoid_: Split view, multi-board
 
 **Routine**:
