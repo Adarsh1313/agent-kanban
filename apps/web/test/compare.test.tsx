@@ -178,3 +178,48 @@ describe('Compare: collapse, pane menu, drag (#44 slice 3)', () => {
     expect(within(within(pane('beta')).getByRole('region', { name: 'Review' })).getByRole('article', { name: 'Beta review' })).toBeTruthy();
   });
 });
+
+describe('Compare: filters, narrow windows, budget (#44 slice 4)', () => {
+  it('provider focus and filters apply to every pane, counts included', () => {
+    const store = seeded();
+    mount(store);
+    compare('alpha', 'beta');
+    act(() => store.setState((s) => ({ ...s, ui: { ...s.ui, filters: { ...s.ui.filters, provider: ['codex'] } } })));
+    expect(within(pane('alpha')).queryByRole('article')).toBeNull();
+    expect(within(pane('alpha')).getByText('0 running')).toBeTruthy();
+    expect(within(pane('beta')).getByRole('article', { name: 'Beta running' })).toBeTruthy();
+    expect(within(pane('beta')).getByText('1 running')).toBeTruthy();
+  });
+
+  it('panes keep a minimum width and the row scrolls sideways instead of squashing', () => {
+    mount(seeded());
+    compare('alpha', 'beta', 'gamma');
+    const row = screen.getByRole('region', { name: 'Compare' }) as HTMLElement;
+    expect(row.style.gridTemplateColumns.split('minmax(var(--pane-min-width), 1fr)').length - 1).toBe(3);
+  });
+
+  it('renders 3 panes of 300 chats each within budget', () => {
+    const many: Chat[] = ['alpha', 'beta', 'gamma'].flatMap((p) => Array.from({ length: 300 }, (_, i) => chat({
+      id: `${p}${i}`, sessionRef: `${p}${i}`, title: `${p} ${i}`, cwd: `/work/${p}`,
+      column: (['running', 'needs_you', 'review', 'done'] as const)[i % 4], needsReason: i % 4 === 1 ? 'question' : null,
+      updatedAt: new Date(NOW - i * 60_000).toISOString(),
+    })));
+    // Warm up once (module and JIT start-up). jsdom speed varies with machine load, so the budget is relative: the
+    // same 900 cards on the plain board, and Compare may cost at most twice that (a quadratic regression would not).
+    mount(seeded());
+    cleanup();
+    let t0 = performance.now();
+    mount(seeded(many));
+    expect(screen.getAllByRole('article')).toHaveLength(900);
+    const board = performance.now() - t0;
+    cleanup();
+    localStorage.setItem('agent-kanban.compare', JSON.stringify({ on: true, projects: ['/work/alpha', '/work/beta', '/work/gamma'].map(folderKey), collapsed: [] }));
+    reloadCompare();
+    t0 = performance.now();
+    mount(seeded(many));
+    expect(screen.getAllByRole('article')).toHaveLength(900);
+    const panes = performance.now() - t0;
+    expect(panes).toBeLessThan(board * 2 + 500);
+    expect(within(pane('beta')).getByText('75 running')).toBeTruthy();
+  }, 60_000);
+});
