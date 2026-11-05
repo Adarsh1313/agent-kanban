@@ -176,7 +176,7 @@ describe('Shell: before the first load (#5)', () => {
   it('shows "Loading your chats…" instead of an empty board; N does nothing until loaded', () => {
     const store = createStore({ ...initialState(), now: NOW });
     mount(store, <Shell />);
-    const newChat = () => document.querySelector<HTMLElement>('.dialog')?.dataset.state;
+    const newChat = () => [...document.querySelectorAll<HTMLElement>('.dialog')].find((d) => d.querySelector('.dialog-head')?.textContent?.startsWith('New chat'))?.dataset.state;
     expect(document.querySelector('.app-loading')?.textContent).toBe('Loading your chats…');
     expect(document.querySelector('.app')!.hasAttribute('inert')).toBe(true);
     fireEvent.keyDown(document.body, { key: 'n' });

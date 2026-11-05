@@ -46,7 +46,8 @@ function seeded(over: { connections?: ConnectionHealth[]; projects?: Project[]; 
   return createStore({ ...s, now: NOW, ...extra });
 }
 const mount = (store: Store) => render(<StoreProvider store={store}><NewChatDialog /><Toasts /></StoreProvider>);
-const dialog = () => document.querySelector<HTMLElement>('.dialog')!;
+// Other closed dialogs (e.g. Delete chat) are mounted too, so find this one by its title.
+const dialog = () => [...document.querySelectorAll<HTMLElement>('.dialog')].find((d) => d.querySelector('.dialog-head')?.textContent?.startsWith('New chat'))!;
 const promptBox = () => screen.getByRole('textbox', { name: 'Prompt' }) as HTMLTextAreaElement;
 const chip = (name: RegExp) => within(dialog()).getByRole('button', { name });
 const listbox = (label: string) => document.querySelector<HTMLElement>(`.popover[aria-label="${label}"]`)!;
